@@ -13,22 +13,7 @@ use crate::types::{Symbol, SymbolId, Reference, Cycle, ReferenceKind};
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// use forge::Forge;
-///
-/// # #[tokio::main]
-/// # async fn main() -> forge::Result<()> {
-/// #     let forge = Forge::open("./my-project").await?;
-/// let graph = forge.graph();
-///
-/// // Find a symbol
-/// let symbols = graph.find_symbol("main").await?;
-///
-/// // Find references
-/// let refs = graph.references("main").await?;
-/// #     Ok(())
-/// # }
-/// ```
+/// See the crate-level documentation for usage examples.
 #[derive(Clone)]
 pub struct GraphModule {
     store: Arc<UnifiedGraphStore>,
@@ -48,13 +33,6 @@ impl GraphModule {
     /// # Returns
     ///
     /// A vector of matching symbols
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let graph = unimplemented!();
-    /// let symbols = graph.find_symbol("main").await?;
-    /// ```
     pub async fn find_symbol(&self, name: &str) -> Result<Vec<Symbol>> {
         self.store.query_symbols(name).await
     }

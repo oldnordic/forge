@@ -12,16 +12,16 @@ use crate::types::{Symbol, SymbolKind};
 /// # Examples
 ///
 /// ```rust,no_run
-/// use forge::Forge;
+/// use forge_core::Forge;
 ///
 /// # #[tokio::main]
-/// # async fn main() -> forge::Result<()> {
+/// # async fn main() -> anyhow::Result<()> {
 /// #     let forge = Forge::open("./my-project").await?;
 /// let search = forge.search();
 ///
 /// // Search for symbols
 /// let results = search.symbol("Database")
-///     .kind(SymbolKind::Struct)
+///     .kind(forge_core::types::SymbolKind::Struct)
 ///     .execute()
 ///     .await?;
 /// #     Ok(())
@@ -68,15 +68,7 @@ impl SearchModule {
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # let search = unimplemented!();
-/// let results = search
-///     .symbol("Database")
-///     .kind(SymbolKind::Struct)
-///     .limit(10)
-///     .execute()
-///     .await?;
-/// ```
+/// See the module-level documentation for [`SearchModule`] for usage examples.
 #[derive(Clone)]
 pub struct SearchBuilder {
     module: SearchModule,

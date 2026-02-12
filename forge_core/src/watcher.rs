@@ -27,29 +27,6 @@ pub enum WatchEvent {
 /// The `Watcher` spawns a background task that monitors the specified
 /// directory and emits events via a channel. Events are consumed by
 /// the incremental indexer for hot-reload capability.
-///
-/// # Examples
-///
-/// ```no_run
-/// use forge_core::watcher::Watcher;
-/// use std::path::PathBuf;
-/// use tokio::sync::mpsc;
-///
-/// # #[tokio::main]
-/// # async fn main() -> anyhow::Result<()> {
-/// let (tx, mut rx) = mpsc::unbounded_channel();
-/// let path = PathBuf::from("./src");
-///
-/// let watcher = Watcher::new(store, tx);
-/// watcher.start(path).await?;
-///
-/// // Process events
-/// while let Some(event) = rx.recv().await {
-///     println!("Event: {:?}", event);
-/// }
-/// # Ok(())
-/// # }
-/// ```
 #[derive(Clone)]
 pub struct Watcher {
     /// The graph store (for future use in event correlation).

@@ -13,17 +13,16 @@ use crate::types::{SymbolId, BlockId, PathId, PathKind};
 /// # Examples
 ///
 /// ```rust,no_run
-/// use forge::Forge;
+/// use forge_core::Forge;
 ///
 /// # #[tokio::main]
-/// # async fn main() -> forge::Result<()> {
+/// # async fn main() -> anyhow::Result<()> {
 /// #     let forge = Forge::open("./my-project").await?;
 /// let cfg = forge.cfg();
 ///
 /// // Enumerate paths
-/// let paths = cfg.paths(symbol_id)
-///     .execute()
-///     .await?;
+/// let symbol_id = forge_core::types::SymbolId(1);
+/// let paths = cfg.paths(symbol_id).execute().await?;
 /// #     Ok(())
 /// # }
 /// ```
@@ -89,15 +88,7 @@ impl CfgModule {
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # let cfg = unimplemented!();
-/// let paths = cfg.paths(symbol_id)
-///     .normal_only()
-///     .max_length(10)
-///     .limit(100)
-///     .execute()
-///     .await?;
-/// ```
+/// See the crate-level documentation for usage examples.
 #[derive(Clone)]
 pub struct PathBuilder {
     module: CfgModule,

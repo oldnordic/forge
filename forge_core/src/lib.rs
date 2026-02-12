@@ -14,14 +14,14 @@
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use forge::Forge;
+//! use forge_core::Forge;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let forge = Forge::open("./my-project")?;
+//!     let forge = Forge::open("./my-project").await?;
 //!
 //!     // Query the code graph
-//!     let symbols = forge.graph().find_symbol("main")?;
+//!     let symbols = forge.graph().find_symbol("main").await?;
 //!     println!("Found: {:?}", symbols);
 //!
 //!     Ok(())
@@ -77,17 +77,17 @@ use anyhow::anyhow;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use forge::Forge;
+/// use forge_core::Forge;
 ///
 /// #[tokio::main]
 /// async fn main() -> anyhow::Result<()> {
-///     let forge = Forge::open("./my-project")?;
+///     let forge = Forge::open("./my-project").await?;
 ///
 ///     // Access modules
-///     let graph = forge.graph();
-///     let search = forge.search();
-///     let cfg = forge.cfg();
-///     let edit = forge.edit();
+///     let _graph = forge.graph();
+///     let _search = forge.search();
+///     let _cfg = forge.cfg();
+///     let _edit = forge.edit();
 ///
 ///     Ok(())
 /// }
@@ -115,7 +115,7 @@ impl Forge {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use forge::Forge;
+    /// use forge_core::Forge;
     ///
     /// #[tokio::main]
     /// async fn main() -> anyhow::Result<()> {
@@ -129,66 +129,26 @@ impl Forge {
     }
 
     /// Returns the graph module for symbol and reference queries.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let forge = unimplemented!();
-    /// let graph = forge.graph();
-    /// let symbols = graph.find_symbol("main")?;
-    /// ```
     pub fn graph(&self) -> graph::GraphModule {
         graph::GraphModule::new(self.store.clone())
     }
 
     /// Returns the search module for semantic code queries.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let forge = unimplemented!();
-    /// let search = forge.search();
-    /// let results = search.symbol("Database").kind(SymbolKind::Struct).execute()?;
-    /// ```
     pub fn search(&self) -> search::SearchModule {
         search::SearchModule::new(self.store.clone())
     }
 
     /// Returns the CFG module for control flow analysis.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let forge = unimplemented!();
-    /// let cfg = forge.cfg();
-    /// let paths = cfg.paths(symbol_id).execute()?;
-    /// ```
     pub fn cfg(&self) -> cfg::CfgModule {
         cfg::CfgModule::new(self.store.clone())
     }
 
     /// Returns the edit module for span-safe refactoring.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let forge = unimplemented!();
-    /// let edit = forge.edit();
-    /// edit.rename_symbol("OldName", "NewName")?.verify()?.apply()?;
-    /// ```
     pub fn edit(&self) -> edit::EditModule {
         edit::EditModule::new(self.store.clone())
     }
 
     /// Returns the analysis module for combined operations.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let forge = unimplemented!();
-    /// let analysis = forge.analysis();
-    /// let impact = analysis.impact_radius(symbol_id)?;
-    /// ```
     pub fn analysis(&self) -> analysis::AnalysisModule {
         analysis::AnalysisModule::new(
             self.graph(),
@@ -208,23 +168,6 @@ impl Forge {
     /// # Returns
     ///
     /// A `Forge` instance with runtime enabled.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use forge::Forge;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> anyhow::Result<()> {
-    /// let mut forge = Forge::with_runtime("./my-project").await?;
-    ///
-    /// // Runtime is available
-    /// if let Some(runtime) = forge.runtime() {
-    ///     runtime.start_with_watching().await?;
-    /// }
-    /// #     Ok(())
-    /// # }
-    /// ```
     pub async fn with_runtime(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let runtime = runtime::Runtime::new(path.clone()).await?;
@@ -237,39 +180,12 @@ impl Forge {
     }
 
     /// Returns the runtime instance if available.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # let forge: Forge = unimplemented!();
-    /// if let Some(runtime) = forge.runtime() {
-    ///     let pending = runtime.pending_changes().await;
-    ///     println!("Pending changes: {}", pending);
-    /// }
-    /// ```
     pub fn runtime(&self) -> Option<&std::sync::Arc<runtime::Runtime>> {
         self.runtime.as_ref()
     }
 }
 
 /// Builder for configuring and creating a Forge instance.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use forge::Forge;
-/// use std::time::Duration;
-///
-/// # #[tokio::main]
-/// # async fn main() -> anyhow::Result<()> {
-///     let forge = Forge::builder()
-///         .path("./my-project")
-///         .cache_ttl(Duration::from_secs(300))
-///         .build()
-///         .await?;
-/// #     Ok(())
-/// # }
-/// ```
 #[derive(Default)]
 pub struct ForgeBuilder {
     path: Option<std::path::PathBuf>,

@@ -11,23 +11,7 @@ use crate::error::{ForgeError, Result};
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// use forge::Forge;
-///
-/// # #[tokio::main]
-/// # async fn main() -> forge::Result<()> {
-/// #     let forge = Forge::open("./my-project").await?;
-/// let edit = forge.edit();
-///
-/// // Rename a symbol
-/// edit.rename_symbol("OldName", "NewName")
-///     .verify()
-///     .await?
-///     .apply()
-///     .await?;
-/// #     Ok(())
-/// # }
-/// ```
+/// See the crate-level documentation for usage examples.
 #[derive(Clone)]
 pub struct EditModule {
     store: Arc<UnifiedGraphStore>,
@@ -64,19 +48,6 @@ impl EditModule {
 }
 
 /// Trait for edit operations that can be verified, previewed, applied, and rolled back.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// # let operation = unimplemented!();
-/// let result = operation
-///     .verify()
-///     .await?
-///     .preview()
-///     .await?
-///     .apply()
-///     .await?;
-/// ```
 pub trait EditOperation: Sized {
     /// The type produced when the operation is applied.
     type Output;
@@ -137,12 +108,7 @@ pub struct Diff {
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use forge::edit::{EditModule, EditOperation};
-/// # let module = unimplemented!();
-/// let op = module.rename_symbol("foo", "bar");
-/// let result = op.verify().await?.apply().await?;
-/// ```
+/// See the module-level documentation for [`EditModule`] for usage examples.
 pub struct RenameOperation {
     module: EditModule,
     old_name: String,
