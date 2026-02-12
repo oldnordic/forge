@@ -37,7 +37,7 @@ This roadmap defines the phased development plan for ForgeKit from foundation (v
 | 01 | Project Organization | 1 day | Complete |
 | 02 | Core SDK Stubs | 2 days | Complete |
 | 03 | Test Infrastructure | 1 day | Pending |
-| 04 | Documentation Review | 1 day | Pending |
+| 04 | Documentation Review | Complete    | 2026-02-12 |
 
 ### Phase 01: Project Organization
 
@@ -98,25 +98,33 @@ This roadmap defines the phased development plan for ForgeKit from foundation (v
 
 ### Phase 03: Test Infrastructure
 
-**Status**: Pending
+**Status**: In Progress (3 plans created)
 
-#### Tasks
+**Goal:** Build comprehensive test infrastructure for forge_core with 80%+ coverage targeting ~100 new tests.
+
+#### Plans
+
+- [ ] 03-01-PLAN.md — Core types and common utilities (25 tests, Wave 1)
+- [ ] 03-02-PLAN.md — Forge/ForgeBuilder tests and integration infrastructure (17 tests, Wave 1)
+- [ ] 03-03-PLAN.md — Runtime layer expanded tests and integration (25 tests, Wave 2)
+
+#### Tasks (Legacy - superseded by plans above)
 
 - [ ] 03-01: Test Utilities
-  - [ ] Create `tests/common/mod.rs`
-  - [ ] Implement `TestForge` fixture builder
-  - [ ] Implement temp directory helpers
-  - [ ] Implement assert helpers
+  - [x] Create `tests/common/mod.rs` — Already exists
+  - [ ] Implement `TestForge` fixture builder — Already exists as `test_forge()`
+  - [x] Implement temp directory helpers — Already exists
+  - [ ] Implement assert helpers — Planned for 03-01
 
 - [ ] 03-02: Unit Tests
-  - [ ] Add tests for `types.rs`
-  - [ ] Add tests for `error.rs`
-  - [ ] Add tests for each module stub
+  - [ ] Add tests for `types.rs` — Planned for 03-01
+  - [ ] Add tests for `error.rs` — Already has 3 tests
+  - [ ] Add tests for each module stub — Most modules already tested
 
 - [ ] 03-03: Integration Tests
-  - [ ] Create `tests/integration/` directory
-  - [ ] Write builder tests
-  - [ ] Write module accessor tests
+  - [ ] Create `tests/integration/` directory — Planned for 03-02
+  - [ ] Write builder tests — Planned for 03-02
+  - [ ] Write module accessor tests — Planned for 03-02
 
 ### Phase 04: Documentation Review
 
@@ -456,6 +464,31 @@ v1.0 Release                                                                    
 | Performance targets | Medium | Medium | Early benchmarking |
 | Agent safety | High | Low | Strict policy enforcement |
 | Documentation drift | Low | Medium | Continuous review |
+
+### Phase 15: Tool Integration
+**Goal:** Export magellan/llmgrep/mirage/splice functions as library APIs in forge_core
+
+**Status:** Planned
+
+**Depends on:** Phase 04 (Agent Layer)
+
+**Plans:** 0 (run `/gsd:plan-phase 16` to create)
+
+**Goal:** [To be planned]
+**Depends on:** Phase 14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 15 to break down)
+
+### Phase 16: --name 05-tool-integration --after 04 --ordinal 5
+
+**Goal:** [To be planned]
+**Depends on:** Phase 15
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 16 to break down)
 
 ---
 
