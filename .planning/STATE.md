@@ -1,25 +1,29 @@
 # ForgeKit Project State
 
 **Project**: ForgeKit
-**Version**: 0.1.0
+**Version**: 0.4.0
 **Last Updated**: 2026-02-12
-**Current Phase**: v0.1 Foundation
+**Current Phase**: v0.4 Agent Layer
 
 ---
 
 ## Project Status
 
-### Overall Status: Foundation Phase (80% Complete)
+### Overall Status: Agent Layer (0% Complete)
 
 | Component | Status | Completion | Notes |
 |-----------|----------|-------------|--------|
-| Workspace Structure | Complete | 100% | All three crates compile |
-| Core Types | Complete | 100% | All types defined |
-| Error System | Complete | 100% | ForgeError enum complete |
-| Module Stubs | Complete | 100% | All 5 modules stubbed |
-| Documentation | Complete | 95% | Minor gaps in examples |
-| Test Infrastructure | Pending | 0% | Not started |
-| Storage Backend | Pending | 0% | Placeholder only |
+| Phase 1: Core SDK | Complete | 100% | All modules functional |
+| Phase 2: Runtime Layer | Complete | 100% | Watching, caching, pooling working |
+| Phase 3: Agent Layer | Planned | 0% | Plan created, not started |
+| Observation Phase | Pending | 0% | Not started |
+| Policy Engine | Pending | 0% | Not started |
+| Planning Engine | Pending | 0% | Not started |
+| Mutation Engine | Pending | 0% | Not started |
+| Verification Engine | Pending | 0% | Not started |
+| Commit Engine | Pending | 0% | Not started |
+| Agent Loop | Pending | 0% | Not started |
+| CLI Integration | Pending | 0% | Not started |
 
 ---
 

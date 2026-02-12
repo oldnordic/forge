@@ -38,6 +38,11 @@
 //! - [`mod@cfg`]: Control flow graph analysis
 //! - [`edit`]: Span-safe code editing
 //! - [`analysis`]: Combined analysis operations
+//! - [`watcher`]: File watching for hot-reload
+//! - [`indexing`]: Incremental indexing
+//! - [`cache`]: Query result caching
+//! - [`pool`]: Database connection pooling
+//! - [`runtime`]: Runtime orchestration layer
 
 pub mod error;
 pub mod types;
@@ -47,13 +52,15 @@ pub mod storage;
 pub mod graph;
 pub mod search;
 pub mod cfg;
-pub mod pool;
+pub mod edit;
 pub mod analysis;
 
 // Runtime layer modules (Phase 2)
 pub mod watcher;
 pub mod indexing;
 pub mod cache;
+pub mod pool;
+pub mod runtime;
 
 // Re-export commonly used types
 pub use error::{ForgeError, Result};
