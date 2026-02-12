@@ -116,34 +116,6 @@ pub mod policy {
 /// 5. Verify: Validate results
 /// 6. Commit: Finalize transaction
 ///
-/// # Examples
-///
-/// ```rust,no_run
-/// # use forge_agent::Agent;
-/// # use forge_agent::policy::Policy;
-/// #
-/// # #[tokio::main]
-/// # async fn main() -> forge_agent::Result<()> {
-/// #     let agent = Agent::new("./my-project").await?;
-/// #
-/// #     let result = agent
-/// #         .observe("Rename function foo to bar")
-/// #         .await?
-/// #         .constrain(Policy::NoUnsafeInPublicAPI)
-/// #         .await?
-/// #         .plan()
-/// #         .await?
-/// #         .mutate()
-/// #         .await?
-/// #         .verify()
-/// #         .await?
-/// #         .commit()
-/// #         .await?;
-/// #
-/// #     println!("Modified {} files", result.files_modified);
-/// #     Ok(())
-/// # }
-/// ```
 pub struct Agent {
     codebase_path: PathBuf,
 }
@@ -181,6 +153,7 @@ impl Agent {
     pub async fn constrain(&self, _observation: Observation, policy: policy::Policy) -> Result<ConstrainedPlan> {
         // TODO: Implement policy validation
         Ok(ConstrainedPlan {
+            observation: _observation,
             policy_violations: Vec::new(),
         })
     }
