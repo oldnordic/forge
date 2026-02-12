@@ -52,7 +52,7 @@ impl Default for RuntimeConfig {
 /// # }
 /// ```
 pub struct ForgeRuntime {
-    config: RuntimeConfig,
+    pub config: RuntimeConfig,
 }
 
 impl ForgeRuntime {
@@ -70,7 +70,7 @@ impl ForgeRuntime {
 
     /// Creates a new runtime with custom configuration.
     pub async fn with_config(
-        codebase_path: impl AsRef<std::path::Path>,
+        _codebase_path: impl AsRef<std::path::Path>,
         config: RuntimeConfig,
     ) -> anyhow::Result<Self> {
         // TODO: Implement runtime initialization

@@ -73,7 +73,7 @@ pub mod policy {
 
     impl Policy {
         /// Validates an edit operation against this policy.
-        pub fn validate(&self, _diff: &str) -> Result<()> {
+        pub fn validate(&self, _diff: &str) -> super::Result<()> {
             match self {
                 Policy::NoUnsafeInPublicAPI => {
                     // TODO: Check for unsafe in public API
@@ -101,7 +101,7 @@ pub mod policy {
     ///
     /// * `name` - Policy name
     /// * `validate_fn` - Validation rule description
-    pub fn custom(name: String, validate_fn: String) -> Self {
+    pub fn custom(name: String, validate_fn: String) -> Policy {
         Policy::Custom { name, validate: validate_fn }
     }
 }
