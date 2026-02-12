@@ -1,0 +1,31 @@
+# ForgeKit .gitignore
+
+# Cargo
+/target
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Forge database
+.forge/
+*.db
+*.db-shm
+*.db-wal
+
+# Test data
+tests/fixtures/temp/
+tests/fixtures/output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = [
+    "forge_core",
+    "forge_runtime",
+    "forge_agent",
+]
+
+# Build profile for all workspace members
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+debug = false
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+debug = true
+
+[profile.test]
+opt-level = 2
