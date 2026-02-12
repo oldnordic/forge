@@ -10,11 +10,7 @@
 
 ## Objective
 
-Build the Runtime Layer on top of the now-complete Core SDK Foundation. This phase adds:
-- File watching with `notify` crate for hot-reload
-- Incremental indexing to avoid full re-scans
-- Query caching layer for performance
-- Connection pooling for database efficiency
+Build the Runtime Layer on top of the now-complete Core SDK Foundation (Phase 1). This phase adds file watching, incremental indexing, query caching, and connection pooling to improve performance and enable hot-reload capabilities.
 
 ---
 
@@ -27,24 +23,27 @@ Build the Runtime Layer on top of the now-complete Core SDK Foundation. This pha
 | Workspace Structure | ✅ Complete | All three crates compile |
 | Core Types | ✅ Complete | All types in `types.rs` |
 | Error System | ✅ Complete | `ForgeError` enum defined |
-| Module Stubs | ✅ Complete | All 5 modules now functional |
+| Module Stubs | ✅ Complete | All 5 modules functional |
 | Storage Backend | ✅ Complete | SQLiteGraph integration working |
-| Graph Module | ✅ Complete | Symbol/reference queries working |
+| Graph Module | ✅ Complete | Symbol/reference queries, BFS/DFS |
 | Search Module | ✅ Complete | SQL filter builder working |
 | CFG Module | ✅ Complete | Dominators, loops working |
-| Edit Module | ✅ Complete | Verify/preview/apply/rollback working |
-| Analysis Module | ✅ Complete | Impact analysis working |
+| Edit Module | ✅ Complete | Verify/preview/apply/rollback |
+| Analysis Module | ✅ Complete | Impact radius, unused functions |
 | Test Infrastructure | ✅ Complete | 38 unit tests passing |
+| Documentation | ✅ Complete | API.md created, examples working |
 
 ### Target State (v0.2 @ 100%)
 
 | Component | Target | Notes |
-|-----------|--------|--------|
-| File Watcher | ⚠️ Pending | `notify` integration needed |
+|-----------|---------|--------|
+| File Watcher | ⚠️ Pending | `notify` crate integration needed |
 | Incremental Index | ⚠️ Pending | Change-based indexing |
-| Query Cache | ⚠️ Pending | LRU or TTL-based caching |
-| Connection Pool | ⚠️ Pending | Reuse database connections |
+| Query Cache | ⚠️ Pending | LRU/TTL-based caching |
+| Connection Pool | ⚠️ Pending | Database connection reuse |
 | Hot Reload | ⚠️ Pending | Auto-refresh on file changes |
+| Runtime Integration | ⚠️ Pending | Unified Runtime type |
+| Examples | ⚠️ Pending | Documentation demonstrates capabilities |
 
 ---
 
@@ -59,105 +58,29 @@ Build the Runtime Layer on top of the now-complete Core SDK Foundation. This pha
 
 #### File: `forge_core/src/watcher.rs` (NEW)
 
-**Objective**: Implement file watching with `notify` crate for hot-reload capability.
+**Objective**: Implement file system monitoring using `notify` crate for hot-reload capability.
 
-**Changes:**
-```rust
-//! Watcher module - File system monitoring.
-//!
-//! This module provides real-time file watching capabilities
-//! using the notify crate for hot-reload and incremental indexing.
-
-use std::sync::Arc;
-use std::collections::HashMap;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
-use tokio::sync::mpsc;
-use crate::storage::UnifiedGraphStore;
-
-/// File watcher for hot-reload and incremental updates.
-///
-/// This monitors the codebase for changes and triggers
-/// incremental indexing when files are modified.
-#[derive(Clone)]
-pub struct Watcher {
-    store: Arc<UnifiedGraphStore>,
-    sender: mpsc::UnboundedSender<WatchEvent>,
-}
-
-/// Events emitted by the watcher.
-#[derive(Clone, Debug)]
-pub enum WatchEvent {
-    /// File or directory created
-    Created(std::path::PathBuf),
-    /// File or directory modified
-    Modified(std::path::PathBuf),
-    /// File or directory deleted
-    Deleted(std::path::PathBuf),
-    /// Watcher error
-    Error(String),
-}
-
-impl Watcher {
-    pub(crate) fn new(store: Arc<UnifiedGraphStore>, sender: mpsc::UnboundedSender<WatchEvent>) -> Self {
-        Self { store, sender }
-    }
-
-    /// Starts watching the codebase directory.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the codebase directory
-    pub async fn start(&self, path: std::path::PathBuf) -> notify::Result<()> {
-        let mut watcher = RecommendedWatcher::new(
-            RecursiveMode::Recursive,
-            notify::Config::default(),
-        )?;
-
-        // Add watch path
-        watcher.watch(path.clone(), RecursiveMode::Recursive)?;
-
-        // Spawn event handler task
-        let store = self.store.clone();
-        let sender = self.sender.clone();
-        tokio::spawn(async move {
-            loop {
-                match watcher.recv() {
-                    Ok(Some(event)) => {
-                        match event.kind {
-                            EventKind::Create(_) => {
-                                let _ = sender.send(WatchEvent::Created(event.paths[0].clone())).await;
-                            }
-                            EventKind::Modify(_) => {
-                                let _ = sender.send(WatchEvent::Modified(event.paths[0].clone())).await;
-                            }
-                            EventKind::Remove(_) => {
-                                let _ = sender.send(WatchEvent::Deleted(event.paths[0].clone())).await;
-                            }
-                            _ => {}
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        let _ = sender.send(WatchEvent::Error(e.to_string())).await;
-                    }
-                }
-            }
-        });
-
-        Ok(())
-    }
-}
-```
+**Required Changes:**
+- Create `Watcher` struct with event channel
+- Implement `start()` method to watch codebase directory
+- Emit events for Create, Modify, Delete
+- Handle watch errors gracefully
 
 **Acceptance Criteria:**
-- [ ] `Watcher` struct created with event channel
+- [ ] `Watcher` struct created with mpsc channel
 - [ ] `start()` method spawns background watch task
-- [ ] Events emitted for Create/Modify/Delete
+- [ ] Events emitted for file system changes
 - [ ] Integration with `notify` crate v6.0
 - [ ] Error handling for watch failures
 - [ ] Unit tests (minimum 3 tests)
 
 **File Size Target**: ≤ 200 lines
+
+**Implementation Notes:**
+- Use `notify::RecommendedWatcher` with recursive mode
+- Channel: mpsc::unbounded_channel for event streaming
+- Event types: Created, Modified, Deleted, Error
+- Graceful shutdown handling
 
 ---
 
@@ -165,72 +88,32 @@ impl Watcher {
 
 **Priority**: P0 (Must Have)
 **Complexity**: High
-**Dependencies**: Task 1 (Watcher)
+**Dependencies**: Task 02-01 (Watcher)
 **Estimated**: 3-4 days
 
 #### File: `forge_core/src/indexing.rs` (NEW)
 
-**Objective**: Implement change-based incremental indexing instead of full re-scans.
+**Objective**: Implement change-based incremental indexing to avoid full re-scans.
 
-**Changes:**
-```rust
-//! Incremental indexing module.
-//!
-//! This module provides incremental indexing capabilities,
-//! processing only changed files rather than full scans.
-
-use std::collections::{HashSet, HashMap};
-use std::path::PathBuf;
-use crate::{watcher::WatchEvent, storage::UnifiedGraphStore};
-use crate::error::Result;
-
-/// Indexer for incremental updates.
-pub struct IncrementalIndexer {
-    store: UnifiedGraphStore,
-    pending_files: HashSet<PathBuf>,
-}
-
-impl IncrementalIndexer {
-    pub fn new(store: UnifiedGraphStore) -> Self {
-        Self {
-            store,
-            pending_files: HashSet::new(),
-        }
-    }
-
-    /// Process a watch event and update index incrementally.
-    pub async fn process_event(&mut self, event: &WatchEvent) -> Result<()> {
-        match event {
-            WatchEvent::Created(path) | WatchEvent::Modified(path) => {
-                self.pending_files.insert(path.clone());
-            }
-            WatchEvent::Deleted(path) => {
-                self.pending_files.remove(path);
-            }
-            WatchEvent::Error(_) => return Ok(()),
-        }
-        Ok(())
-    }
-
-    /// Flush pending changes to storage.
-    pub async fn flush(&mut self) -> Result<()> {
-        for path in self.pending_files.drain() {
-            // TODO: Trigger incremental reindex of path
-            let _ = path;
-        }
-        Ok(())
-    }
-}
-```
+**Required Changes:**
+- Create `IncrementalIndexer` struct
+- Implement `process_event()` to handle watch events
+- Implement `flush()` method to update storage
+- Add full rescan capability
 
 **Acceptance Criteria:**
 - [ ] `IncrementalIndexer` processes watch events
-- [ ] `flush()` method updates storage
-- [ ] Change detection via watcher integration
-- [ ] Full rescan capability available
+- [ ] `flush()` updates storage incrementally
+- [ ] Full rescan available when needed
+- [ ] Integration with watcher channel
 - [ ] Unit tests (minimum 4 tests)
 
 **File Size Target**: ≤ 250 lines
+
+**Implementation Notes:**
+- Track pending files in HashSet
+- On flush: batch process changes via storage layer
+- Full rescan: manually trigger via pub interface
 
 ---
 
@@ -245,81 +128,27 @@ impl IncrementalIndexer {
 
 **Objective**: Implement LRU/TTL-based query caching layer.
 
-**Changes:**
-```rust
-//! Query cache module.
-//!
-//! This module provides caching for frequently accessed queries
-//! to reduce database load.
-
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use std::collections::HashMap;
-use tokio::sync::RwLock;
-use crate::error::Result;
-
-/// Cache entry with TTL.
-struct CacheEntry<V> {
-    value: V,
-    inserted_at: Instant,
-    ttl: Duration,
-}
-
-/// Query cache for symbol and reference queries.
-pub struct QueryCache {
-    max_size: usize,
-    ttl: Duration,
-    entries: HashMap<String, CacheEntry<String>>,
-}
-
-impl QueryCache {
-    pub fn new(max_size: usize, ttl: Duration) -> Self {
-        Self {
-            max_size,
-            ttl,
-            entries: HashMap::new(),
-        }
-    }
-
-    /// Get a cached value if available and not expired.
-    pub fn get(&self, key: &str) -> Option<String> {
-        let now = Instant::now();
-        self.entries.get(key).and_then(|entry| {
-            if now.duration_since(entry.inserted_at) < entry.ttl {
-                Some(entry.value.clone())
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Insert a value into the cache.
-    pub fn insert(&mut self, key: String, value: String) {
-        // Evict oldest if at capacity
-        if self.entries.len() >= self.max_size {
-            // Simple FIFO eviction
-            let oldest_key = self.entries.keys().next()?;
-            self.entries.remove(oldest_key);
-        }
-
-        self.entries.insert(key, CacheEntry {
-            value,
-            inserted_at: Instant::now(),
-            ttl: self.ttl,
-        });
-    }
-}
-```
+**Required Changes:**
+- Create `QueryCache` struct with max_size and TTL
+- Implement `get()` method with expiration check
+- Implement `insert()` method with FIFO eviction
+- Add thread safety via `RwLock`
 
 **Acceptance Criteria:**
 - [ ] `QueryCache` struct with LRU eviction
-- [ ] `get()` method returns cached or None
-- [ ] `insert()` method enforces max_size
+- [ ] `get()` returns cached value or None
+- [ ] `insert()` enforces max_size limit
 - [ ] TTL-based expiration
 - [ ] Thread-safe via `RwLock`
 - [ ] Unit tests (minimum 5 tests)
 
 **File Size Target**: ≤ 200 lines
+
+**Implementation Notes:**
+- Cache size: 1000 entries (configurable)
+- TTL: 5 minutes default
+- FIFO eviction when full
+- Arc<RwLock<CacheEntry>> for thread safety
 
 ---
 
@@ -332,69 +161,31 @@ impl QueryCache {
 
 #### File: `forge_core/src/pool.rs` (NEW)
 
-**Objective**: Implement database connection pooling for efficiency.
+**Objective**: Implement SQLite connection pooling using sqlx for efficiency.
 
-**Changes:**
-```rust
-//! Connection pool module.
-//!
-//! This module provides database connection pooling
-//! to reuse connections and reduce overhead.
-
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use sqlx::Pool as SqlitePool;
-
-/// Connection pool for SQLite databases.
-pub struct ConnectionPool {
-    pool: Option<SqlitePool>,
-    max_connections: usize,
-}
-
-impl ConnectionPool {
-    pub fn new(max_connections: usize) -> Self {
-        Self {
-            pool: None,
-            max_connections,
-        }
-    }
-
-    /// Initialize the pool with a database URL.
-    pub async fn initialize(&mut self, db_url: &str) -> Result<()> {
-        self.pool = Some(
-            sqlx::SqlitePool::connect_with_options(
-                db_url,
-                sqlx::sqlite::SqliteConnectOptions::new()
-                    .max_connections(self.max_connections)
-                    .busy_timeout(Duration::from_secs(30))
-            ).await?
-        );
-        Ok(())
-    }
-
-    /// Get a connection from the pool.
-    pub async fn connection(&self) -> Result<sqlx::SqliteConnection> {
-        match &self.pool {
-            Some(pool) => {
-                Ok(pool.acquire().await?)
-            }
-            None => Err(crate::error::ForgeError::DatabaseError(
-                    "Connection pool not initialized".to_string()
-            ))
-        }
-    }
-}
-```
+**Required Changes:**
+- Create `ConnectionPool` struct with max_connections
+- Implement `initialize()` to create sqlx pool
+- Implement `connection()` to acquire from pool
+- Add busy_timeout handling
+- Add semaphore limiting
 
 **Acceptance Criteria:**
 - [ ] `ConnectionPool` struct with semaphore limiting
-- [ ] `initialize()` creates sqlx pool
+- [ ] `initialize()` creates sqlx::SqlitePool
 - [ ] `connection()` acquires from pool
 - [ ] Max connections enforced
-- [ ] Timeout handling for busy connections
+- [ ] Timeout: 30 second busy timeout
 - [ ] Unit tests (minimum 4 tests)
 
 **File Size Target**: ≤ 150 lines
+
+**Implementation Notes:**
+- Use sqlx::SqlitePool for connection management
+- max_connections: 10 (configurable)
+- busy_timeout: 30 seconds
+- acquire() async method returns SqliteConnection
+- Pool automatically handles database URLs
 
 ---
 
@@ -402,91 +193,33 @@ impl ConnectionPool {
 
 **Priority**: P0 (Must Have)
 **Complexity**: Low
-**Dependencies**: Tasks 1, 2, 3, 4
+**Dependencies**: Tasks 02-01, 02-02, 02-03, 02-04 (Watcher, Indexing, Cache, Pool)
 **Estimated**: 1-2 days
 
 #### File: `forge_core/src/runtime.rs` (NEW)
 
 **Objective**: Wire all runtime components together.
 
-**Changes:**
-```rust
-//! Runtime module - Top-level runtime orchestration.
-//!
-//! This module provides the main Runtime type that combines
-//! watcher, indexer, cache, and connection pool.
-
-use std::sync::Arc;
-use std::path::PathBuf;
-use tokio::sync::mpsc;
-
-use crate::{watcher::Watcher, watcher::WatchEvent};
-use crate::storage::UnifiedGraphStore;
-use crate::cache::QueryCache;
-use crate::pool::ConnectionPool;
-use crate::error::Result;
-
-/// Main runtime orchestrator for ForgeKit.
-///
-/// Combines watching, caching, and connection pooling.
-#[derive(Clone)]
-pub struct Runtime {
-    store: Arc<UnifiedGraphStore>,
-    watcher: Option<Watcher>,
-    cache: QueryCache,
-    pool: ConnectionPool,
-    event_receiver: mpsc::UnboundedReceiver<WatchEvent>,
-}
-
-impl Runtime {
-    pub fn new(store: Arc<UnifiedGraphStore>) -> Self {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        Self {
-            store,
-            watcher: None,
-            cache: QueryCache::new(1000, std::time::Duration::from_secs(300)),
-            pool: ConnectionPool::new(10),
-            event_receiver: receiver,
-        }
-    }
-
-    /// Start the runtime with file watching enabled.
-    pub async fn start_with_watching(&mut self, codebase_path: PathBuf) -> Result<()> {
-        let watcher = Watcher::new(self.store.clone(), self.event_receiver.clone());
-        watcher.start(codebase_path).await?;
-        self.watcher = Some(watcher);
-        Ok(())
-    }
-
-    /// Get the query cache.
-    pub fn cache(&self) -> &QueryCache {
-        &self.cache
-    }
-
-    /// Get the connection pool.
-    pub fn pool(&self) -> &ConnectionPool {
-        &self.pool
-    }
-
-    /// Process incoming watch events.
-    pub async fn process_events(&mut self) -> Result<()> {
-        while let Some(event) = self.event_receiver.recv().await {
-            // Dispatch to indexer, cache invalidation, etc.
-            let _ = event;
-        }
-        Ok(())
-    }
-}
-```
+**Required Changes:**
+- Create `Runtime` struct combining all components
+- Implement `start_with_watching()` for full runtime
+- Add cache(), pool() accessor methods
+- Implement `process_events()` for event handling
+- Expose public API: `Forge::with_runtime()`
 
 **Acceptance Criteria:**
-- [ ] `Runtime` struct combines all components
-- [ ] `start_with_watching()` enables watcher
+- [ ] `Runtime` struct combines watcher, indexer, cache, pool
+- [ ] `start_with_watching()` enables file watching
 - [ ] Cache and pool accessible via methods
 - [ ] Event processing loop
 - [ ] Unit tests (minimum 3 tests)
 
 **File Size Target**: ≤ 150 lines
+
+**Implementation Notes:**
+- Components composed via Arc<UnifiedGraphStore>
+- Event-driven architecture via mpsc channels
+- Public API: Forge::with_runtime() for runtime-enabled Forge
 
 ---
 
@@ -494,47 +227,56 @@ impl Runtime {
 
 **Priority**: P0 (Must Have)
 **Complexity**: Low
-**Dependencies**: All runtime tasks
+**Dependencies**: Task 02-05 (Runtime Integration)
 **Estimated**: 1 day
 
 #### File: `forge_core/src/lib.rs`
 
 **Changes:**
-- Add new `runtime` module
-- Expose `Runtime::new()` and `Forge::with_runtime()`
-- Add `notify` and related dependencies to Cargo.toml
-
-**New Public API:**
-```rust
-/// Creates a new Forge instance with runtime capabilities.
-///
-/// # Arguments
-///
-/// * `path` - Path to the codebase directory
-///
-/// # Returns
-///
-/// A `Forge` instance with runtime enabled
-pub async fn with_runtime(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
-    let store = std::sync::Arc::new(UnifiedGraphStore::open(path).await?);
-    let runtime = Runtime::new(store);
-    Ok(Forge { runtime: Some(runtime) })
-}
-
-impl Forge {
-    /// Returns the runtime if enabled.
-    pub fn runtime(&self) -> Option<&Runtime> {
-        self.runtime.as_ref()
-    }
-}
-```
+- Add runtime module public re-export
+- Implement `Forge::with_runtime()` constructor
+- Add `runtime()` accessor method
 
 **Acceptance Criteria:**
 - [ ] `runtime` module exposed in lib.rs
-- [ ] `with_runtime()` constructor creates Runtime
-- [ ] `runtime()` method returns Option
+- [ ] `with_runtime()` creates Runtime instance
+- [ ] `runtime()` returns Option<&Runtime>
 - [ ] Compile integration
 - [ ] Documentation updated
+
+**File Size Target**: Minimal changes (≤ 50 lines)
+
+---
+
+### 7. Documentation
+
+**Priority**: P1 (Should Have)
+**Complexity**: Low
+**Dependencies**: Task 02-05 (Runtime Integration), all runtime tasks
+**Estimated**: 1-2 days
+
+#### Files to modify:
+- `forge_core/src/runtime.rs` (module examples)
+- `forge_core/src/watcher.rs` (module examples)
+- `forge_core/src/indexing.rs` (module examples)
+- `forge_core/src/cache.rs` (module examples)
+- `forge_core/src/pool.rs` (module examples)
+- `forge_core/src/lib.rs` (public API)
+
+**Changes:**
+- Add comprehensive examples to each runtime module
+- Ensure all examples compile and run
+- Document cache configuration options
+- Document pool connection limits
+
+**Acceptance Criteria:**
+- [ ] Each module has at least 1 working example
+- [ ] Examples demonstrate runtime startup
+- [ ] Examples show cache and pool usage
+- [ ] All examples compile successfully
+- [ ] Documentation updated with runtime capabilities
+
+**File Size Target**: Update existing files only
 
 ---
 
@@ -552,12 +294,13 @@ impl Forge {
 ### Internal Dependencies
 
 ```
-Task 1 (Watcher)      → No dependencies (standalone)
-Task 2 (Indexing)       → Task 1 (Watcher)
-Task 3 (Cache)         → No dependencies (standalone)
-Task 4 (Pool)          → No dependencies (standalone)
-Task 5 (Runtime)       → Tasks 1, 2, 3, 4
-Task 6 (lib.rs)         → All runtime tasks
+Task 02-01 (Watcher)       → None dependencies (standalone)
+Task 02-02 (Indexing)       → Task 02-01 (Watcher)
+Task 02-03 (Cache)          → None dependencies (standalone)
+Task 02-04 (Pool)          → None dependencies (standalone)
+Task 02-05 (Runtime)         → Tasks 02-01, 02-02, 02-03, 02-04
+Task 02-06 (lib.rs)         → All runtime tasks
+Task 02-07 (Documentation) → All runtime tasks
 ```
 
 ---
@@ -604,13 +347,13 @@ forge_core/src/pool.rs          (NEW - connection pooling)
 
 3. **Test Coverage**
    - [ ] Unit tests for each runtime module (≥80% coverage)
-   - [ ] Integration tests for hot-reload
+   - [ ] Integration tests for hot-reload scenarios
    - [ ] All tests pass with `cargo test --workspace`
 
 4. **Documentation**
    - [ ] All new modules documented
    - [ ] `cargo doc --no-deps` completes
-   - [ ] Examples for runtime API
+   - [ ] Examples demonstrate capabilities
 
 5. **Code Quality**
    - [ ] No `#[allow(...)]` without justification
@@ -628,17 +371,18 @@ forge_core/src/pool.rs          (NEW - connection pooling)
 | Risk | Impact | Mitigation |
 |-------|---------|------------|
 | notify platform differences | Medium | Use notify's cross-platform recursive mode |
-| sqlx async complexity | Medium | Leverage existing sqlx patterns from sqlitegraph |
-| Cache coherence | Low | Simple TTL invalidation on watch events |
+| sqlx async complexity | Medium | Leverage existing patterns from sqlitegraph |
+| Cache coherence | Low | Invalidate on watch events |
 | File descriptor limits | Low | OS limits typically high enough |
+| Adding notify dependency | Low | Well-documented crate, widely used |
 
 ---
 
 ## Estimated Timeline
 
 **Week 1** (Days 1-5):
-- Day 1-2: Task 1 (Watcher)
-- Day 3-4: Task 2 (Incremental Indexing)
+- Day 1-3: Task 1 (File Watcher)
+- Day 4-5: Task 2 (Incremental Indexing)
 
 **Week 2** (Days 6-10):
 - Day 6-7: Task 3 (Query Cache)
@@ -648,6 +392,10 @@ forge_core/src/pool.rs          (NEW - connection pooling)
 - Day 11: Task 5 (Runtime Integration)
 - Day 12: Integration testing, bug fixes
 
+**Week 3** (Days 13-14):
+- Day 13: Task 6 (lib.rs Updates)
+- Day 14: Task 7 (Documentation)
+
 ---
 
 ## Next Phase Preparation
@@ -655,8 +403,7 @@ forge_core/src/pool.rs          (NEW - connection pooling)
 Upon completion of Phase 2, the project will have:
 - Complete Core SDK Foundation ✅
 - Complete Runtime Layer with caching/watching ✅
-
-**Ready for Phase 3: Agent Layer** (Policy system, deterministic AI loop)
+- Ready for Phase 3: Agent Layer (Policy system)
 
 ---
 
