@@ -138,6 +138,11 @@ where
     pub async fn insert(&self, key: K, value: V) {
         let mut inner = self.inner.write().await;
 
+        // If max_size is 0, don't insert anything
+        if self.max_size == 0 {
+            return;
+        }
+
         // Check if we need to evict
         while inner.keys.len() >= self.max_size && !inner.keys.is_empty() {
             // Evict oldest (FIFO) - or first key
@@ -261,6 +266,135 @@ mod tests {
         cache.clear().await;
 
         assert!(cache.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn test_cache_lru_touch() {
+        let cache = QueryCache::new(3, Duration::from_secs(60));
+
+        // Insert items 1, 2, 3
+        cache.insert("key1".to_string(), "value1".to_string()).await;
+        cache.insert("key2".to_string(), "value2".to_string()).await;
+        cache.insert("key3".to_string(), "value3".to_string()).await;
+
+        // Access item 1 (moves to end)
+        let _ = cache.get(&"key1".to_string()).await;
+
+        // Insert item 4 (causes eviction of oldest, which should be key2)
+        cache.insert("key4".to_string(), "value4".to_string()).await;
+
+        // Verify key2 is evicted (not key1 which was touched)
+        assert_eq!(cache.len().await, 3);
+        assert!(cache.get(&"key2".to_string()).await.is_none());
+        assert_eq!(cache.get(&"key1".to_string()).await, Some("value1".to_string()));
+        assert_eq!(cache.get(&"key3".to_string()).await, Some("value3".to_string()));
+        assert_eq!(cache.get(&"key4".to_string()).await, Some("value4".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_cache_update_existing() {
+        let cache = QueryCache::new(10, Duration::from_millis(100));
+
+        // Insert key with value A
+        cache.insert("key".to_string(), "valueA".to_string()).await;
+
+        // Wait partial TTL
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Insert same key with value B (refreshes TTL)
+        cache.insert("key".to_string(), "valueB".to_string()).await;
+
+        // Immediately get key - should return B with fresh TTL
+        assert_eq!(cache.get(&"key".to_string()).await, Some("valueB".to_string()));
+
+        // Wait for original TTL to pass (100ms total)
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        // Should still be valid because update refreshed TTL
+        assert_eq!(cache.get(&"key".to_string()).await, Some("valueB".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_cache_concurrent_access() {
+        let cache = QueryCache::new(20, Duration::from_secs(60));
+        let mut handles = vec![];
+
+        // Spawn 10 tasks concurrently inserting different keys
+        for i in 0..10 {
+            let cache_clone = cache.clone();
+            handles.push(tokio::spawn(async move {
+                cache_clone.insert(format!("key{}", i), format!("value{}", i)).await;
+            }));
+        }
+
+        // Wait for all to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Verify all 10 items are in cache
+        assert_eq!(cache.len().await, 10);
+        for i in 0..10 {
+            assert_eq!(
+                cache.get(&format!("key{}", i)).await,
+                Some(format!("value{}", i))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cache_stress_eviction() {
+        let cache = QueryCache::new(5, Duration::from_secs(60));
+
+        // Insert 100 items sequentially
+        for i in 0..100 {
+            cache.insert(format!("key{}", i), format!("value{}", i)).await;
+        }
+
+        // Verify only 5 items remain
+        assert_eq!(cache.len().await, 5);
+
+        // Verify remaining are the last 5 inserted
+        assert!(cache.get(&"key0".to_string()).await.is_none());
+        assert!(cache.get(&"key94".to_string()).await.is_none());
+        assert_eq!(cache.get(&"key95".to_string()).await, Some("value95".to_string()));
+        assert_eq!(cache.get(&"key96".to_string()).await, Some("value96".to_string()));
+        assert_eq!(cache.get(&"key97".to_string()).await, Some("value97".to_string()));
+        assert_eq!(cache.get(&"key98".to_string()).await, Some("value98".to_string()));
+        assert_eq!(cache.get(&"key99".to_string()).await, Some("value99".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_cache_zero_max_size() {
+        let cache = QueryCache::new(0, Duration::from_secs(60));
+
+        // Insert should not add entries
+        cache.insert("key1".to_string(), "value1".to_string()).await;
+        cache.insert("key2".to_string(), "value2".to_string()).await;
+
+        // Verify len() always returns 0
+        assert_eq!(cache.len().await, 0);
+        assert!(cache.is_empty().await);
+        assert!(cache.get(&"key1".to_string()).await.is_none());
+        assert!(cache.get(&"key2".to_string()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_ttl_expiration() {
+        let cache = QueryCache::new(10, Duration::from_millis(100));
+
+        // Insert key
+        cache.insert("key".to_string(), "value".to_string()).await;
+        assert_eq!(cache.len().await, 1);
+
+        // Wait for expiration
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // Verify get returns None (expired)
+        assert!(cache.get(&"key".to_string()).await.is_none());
+
+        // Verify len decreased
+        assert_eq!(cache.len().await, 0);
     }
 }
 
