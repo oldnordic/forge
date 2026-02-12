@@ -10,8 +10,8 @@
 
 | ID | Task | Status | Commit | Notes |
 |----|-------|--------|--------|-------|
-| 01-01 | Storage Layer Implementation | In Progress | - | Active |
-| 01-02 | Graph Module Implementation | Pending | - | Depends on 01-01 |
+| 01-01 | Storage Layer Implementation | Complete | 540bb17 | SQLiteGraph integration complete |
+| 01-02 | Graph Module Implementation | In Progress | - | Active |
 | 01-03 | Search Module Implementation | Pending | - | Depends on 01-01 |
 | 01-04 | CFG Module Implementation | Pending | - | Depends on 01-01 |
 | 01-05 | Edit Module Implementation | Pending | - | Depends on 01-01, 01-02 |
@@ -31,17 +31,43 @@
 - Identified 8 tasks to execute
 - Phase not found in gsd-tools state (running as fresh execution)
 
+### 2026-02-12 13:45:00 UTC
+
+**Task 01-06 (Test Infrastructure) Complete:**
+- Added tempfile to dev-dependencies
+- Added similar crate for diff generation
+- Updated sqlitegraph to v1.6
+- Created tests/common/mod.rs with utilities
+- Fixed lib.rs ForgeBuilder implementation
+- Fixed Arc<UnifiedGraphStore> type consistency
+- Fixed PathId Display, SearchBuilder Default, RenameOperation verified field
+- Commit: daa1bb1
+
+### 2026-02-12 14:00:00 UTC
+
+**Task 01-01 (Storage Layer) Complete:**
+- Added SqliteGraph wrapper to UnifiedGraphStore
+- Implemented query_symbols(), query_references() stubs
+- Implemented symbol_exists(), get_symbol() with introspection
+- Added parse helpers for SymbolKind, Language, ReferenceKind
+- Added 5 unit tests
+- Commit: 540bb17
+
 **Next Steps:**
-1. Initialize git repository
-2. Execute Task 01-06 (Test Infrastructure) - no dependencies
-3. Execute Task 01-01 (Storage Layer) - foundation for others
-4. Execute remaining tasks in dependency order
+- Implement Graph Module (01-02) - currently active
 
 ---
 
 ## Deviations Recorded
 
-*None yet*
+### Rule 2 - Auto-add missing critical functionality
+
+**1. [Rule 2 - Critical Functionality] Added verified field to DeleteOperation**
+- **Found during:** Task 01-01
+- **Issue:** DeleteOperation missing verified field for proper verification workflow
+- **Fix:** Added verified field and new() constructor, updated verify() to set it
+- **Files modified:** forge_core/src/edit/mod.rs
+- **Commit:** 540bb17
 
 ---
 
