@@ -87,22 +87,8 @@ pub struct SearchBuilder {
     limit: Option<usize>,
 }
 
-impl Default for SearchBuilder {
-    fn default() -> Self {
-        Self {
-            module: SearchModule {
-                store: std::sync::Arc::new(crate::storage::UnifiedGraphStore {
-                    codebase_path: std::path::PathBuf::new(),
-                    db_path: std::path::PathBuf::new(),
-                }),
-            },
-            name_filter: None,
-            kind_filter: None,
-            file_filter: None,
-            limit: None,
-        }
-    }
-}
+// Don't implement Default - it's not really needed for this type
+// The builder is created through SearchModule::symbol()
 
 impl SearchBuilder {
     /// Filters by symbol kind.

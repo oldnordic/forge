@@ -140,7 +140,7 @@ mod tests {
         let store = Arc::new(UnifiedGraphStore::open(
             tempfile::tempdir().unwrap()
         ).await.unwrap());
-        let module = GraphModule::new(store);
+        let module = GraphModule::new(store.clone());
 
         // Test that module can be created
         assert_eq!(module.store.db_path(), store.db_path());

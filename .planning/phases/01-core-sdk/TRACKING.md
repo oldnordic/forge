@@ -10,12 +10,12 @@
 
 | ID | Task | Status | Commit | Notes |
 |----|-------|--------|--------|-------|
-| 01-01 | Storage Layer Implementation | Pending | - | Ready to start |
+| 01-01 | Storage Layer Implementation | In Progress | - | Active |
 | 01-02 | Graph Module Implementation | Pending | - | Depends on 01-01 |
 | 01-03 | Search Module Implementation | Pending | - | Depends on 01-01 |
 | 01-04 | CFG Module Implementation | Pending | - | Depends on 01-01 |
 | 01-05 | Edit Module Implementation | Pending | - | Depends on 01-01, 01-02 |
-| 01-06 | Test Infrastructure | Pending | - | No dependencies |
+| 01-06 | Test Infrastructure | Complete | daa1bb1 | Committed |
 | 01-07 | Analysis Module Implementation | Pending | - | Depends on 01-02, 01-04, 01-05 |
 | 01-08 | Documentation Completion | Pending | - | Depends on all impl tasks |
 

@@ -96,6 +96,7 @@ pub struct ImpactAnalysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_analysis_module_creation() {

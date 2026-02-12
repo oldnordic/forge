@@ -190,18 +190,20 @@ mod tests {
         let store = Arc::new(UnifiedGraphStore::open(
             tempfile::tempdir().unwrap()
         ).await.unwrap());
-        let module = CfgModule::new(store);
+        let module = CfgModule::new(store.clone());
 
         // Test that module can be created
         assert_eq!(module.store.db_path(), store.db_path());
     }
 
-    #[test]
-    fn test_path_builder_filters() {
+    #[tokio::test]
+    async fn test_path_builder_filters() {
+        let store = Arc::new(UnifiedGraphStore::open(
+            std::env::current_dir().unwrap()
+        ).await.unwrap());
+
         let dummy_module = CfgModule {
-            store: Arc::new(UnifiedGraphStore::open(
-                std::env::current_dir().unwrap()
-            ).await_now_unwrap()),
+            store: store.clone(),
         };
 
         let builder = dummy_module.paths(SymbolId(1))

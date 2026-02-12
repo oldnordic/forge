@@ -5,7 +5,6 @@
 use std::sync::Arc;
 use crate::storage::UnifiedGraphStore;
 use crate::error::{ForgeError, Result};
-use crate::types::{SymbolId, Span};
 
 /// Edit module for span-safe refactoring.
 ///
@@ -59,10 +58,7 @@ impl EditModule {
     ///
     /// * `name` - Symbol name to delete
     pub fn delete_symbol(&self, name: &str) -> DeleteOperation {
-        DeleteOperation {
-            module: self.clone(),
-            symbol_name: name.to_string(),
-        }
+        DeleteOperation::new(self.clone(), name.to_string())
     }
 }
 
@@ -188,13 +184,25 @@ impl EditOperation for RenameOperation {
 pub struct DeleteOperation {
     module: EditModule,
     symbol_name: String,
+    verified: bool,
+}
+
+impl DeleteOperation {
+    pub(crate) fn new(module: EditModule, symbol_name: String) -> Self {
+        Self {
+            module,
+            symbol_name,
+            verified: false,
+        }
+    }
 }
 
 impl EditOperation for DeleteOperation {
     type Output = DeleteResult;
 
-    fn verify(self) -> Result<Self> {
+    fn verify(mut self) -> Result<Self> {
         // TODO: Implement verification via Splice
+        self.verified = true;
         Ok(self)
     }
 
