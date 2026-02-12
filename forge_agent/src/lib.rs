@@ -24,6 +24,15 @@ pub mod policy;
 // Planning module (Phase 4 - Task 3)
 pub mod planner;
 
+// Mutation module (Phase 4 - Task 4)
+pub mod mutate;
+
+// Verification module (Phase 4 - Task 5)
+pub mod verify;
+
+// Commit module (Phase 4 - Task 6)
+pub mod commit;
+
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
@@ -250,27 +259,57 @@ impl Agent {
     }
 
     /// Executes the mutation phase of the plan.
-    pub async fn mutate(&self, _plan: ExecutionPlan) -> Result<MutationResult> {
-        // TODO: Implement mutation via edit module
-        Err(AgentError::MutationFailed(
-            "Mutation not yet implemented".to_string()
-        ))
+    pub async fn mutate(&self, plan: ExecutionPlan) -> Result<MutationResult> {
+        let forge = self.forge.as_ref()
+            .ok_or_else(|| AgentError::MutationFailed(
+                "Forge SDK not available".to_string()
+            ))?;
+
+        let mutator = mutate::Mutator::new(forge.clone());
+        mutator.begin_transaction().await?;
+
+        for step in &plan.steps {
+            mutator.apply_step(step).await?;
+        }
+
+        Ok(MutationResult {
+            modified_files: vec![],
+            diffs: vec!["Transaction completed".to_string()],
+        })
     }
 
     /// Verifies the mutation result.
     pub async fn verify(&self, _result: MutationResult) -> Result<VerificationResult> {
-        // TODO: Implement verification
-        Err(AgentError::VerificationFailed(
-            "Verification not yet implemented".to_string()
-        ))
+        let forge = self.forge.as_ref()
+            .ok_or_else(|| AgentError::VerificationFailed(
+                "Forge SDK not available".to_string()
+            ))?;
+
+        let verifier = verify::Verifier::new(forge.clone());
+        let report = verifier.verify(&self.codebase_path).await?;
+
+        Ok(VerificationResult {
+            passed: report.passed,
+            diagnostics: report.diagnostics.iter()
+                .map(|d| d.message.clone())
+                .collect(),
+        })
     }
 
     /// Commits the verified mutation.
-    pub async fn commit(&self, _result: VerificationResult) -> Result<CommitResult> {
-        // TODO: Implement commit
-        Err(AgentError::CommitFailed(
-            "Commit not yet implemented".to_string()
-        ))
+    pub async fn commit(&self, result: VerificationResult) -> Result<CommitResult> {
+        let forge = self.forge.as_ref()
+            .ok_or_else(|| AgentError::CommitFailed(
+                "Forge SDK not available".to_string()
+            ))?;
+
+        let committer = commit::Committer::new(forge.clone());
+        let commit_report = committer.finalize(&self.codebase_path, &result.diagnostics).await?;
+
+        Ok(CommitResult {
+            transaction_id: commit_report.transaction_id,
+            files_committed: commit_report.files_committed,
+        })
     }
 }
 
