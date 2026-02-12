@@ -11,7 +11,7 @@
 //!
 //! # Status
 //!
-//! This crate is under active development. Observation phase is implemented.
+//! This crate is under active development. Observation and planning phases are implemented.
 
 use std::path::PathBuf;
 
@@ -20,6 +20,9 @@ pub mod observe;
 
 // Policy module (Phase 4 - Task 2)
 pub mod policy;
+
+// Planning module (Phase 4 - Task 3)
+pub mod planner;
 
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
@@ -58,6 +61,56 @@ pub type Result<T> = std::result::Result<T, AgentError>;
 
 // Re-export policy module
 pub use policy::{Policy, PolicyValidator, PolicyReport, PolicyViolation};
+
+// Re-export observation types
+pub use observe::Observation;
+
+/// Result of applying policy constraints.
+#[derive(Clone, Debug)]
+pub struct ConstrainedPlan {
+    /// The original observation
+    pub observation: Observation,
+    /// Any policy violations detected
+    pub policy_violations: Vec<policy::PolicyViolation>,
+}
+
+/// Execution plan for the mutation phase.
+#[derive(Clone, Debug)]
+pub struct ExecutionPlan {
+    /// Steps to execute
+    pub steps: Vec<planner::PlanStep>,
+    /// Estimated impact
+    pub estimated_impact: planner::ImpactEstimate,
+    /// Rollback plan
+    pub rollback_plan: Vec<planner::RollbackStep>,
+}
+
+/// Result of the mutation phase.
+#[derive(Clone, Debug)]
+pub struct MutationResult {
+    /// Files that were modified
+    pub modified_files: Vec<PathBuf>,
+    /// Diffs of changes made
+    pub diffs: Vec<String>,
+}
+
+/// Result of the verification phase.
+#[derive(Clone, Debug)]
+pub struct VerificationResult {
+    /// Whether verification passed
+    pub passed: bool,
+    /// Any diagnostics or errors
+    pub diagnostics: Vec<String>,
+}
+
+/// Result of the commit phase.
+#[derive(Clone, Debug)]
+pub struct CommitResult {
+    /// Transaction ID for the commit
+    pub transaction_id: String,
+    /// Files that were committed
+    pub files_committed: Vec<PathBuf>,
+}
 
 /// Agent for deterministic AI-driven code operations.
 ///
@@ -109,17 +162,8 @@ impl Agent {
         let observer = observe::Observer::new(forge.clone());
         let obs = observer.gather(query).await?;
 
-        Ok(Observation {
-            relevant_symbols: obs.symbols.iter()
-                .map(|s| format!("{} at {:?}", s.name, s.location))
-                .collect(),
-            references: obs.references.iter()
-                .map(|r| format!("{:?} -> {:?}", r.from, r.to))
-                .collect(),
-            cfg_data: obs.cfg_data.iter()
-                .map(|c| format!("symbol {:?}: {} paths, complexity {}", c.symbol_id, c.path_count, c.complexity))
-                .collect(),
-        })
+        // Return the observation directly - it's already the correct type
+        Ok(obs)
     }
 
     /// Applies policy constraints to the observation.
@@ -156,11 +200,53 @@ impl Agent {
     }
 
     /// Generates an execution plan from the constrained observation.
-    pub async fn plan(&self, _constrained: ConstrainedPlan) -> Result<ExecutionPlan> {
-        // TODO: Implement planning
-        Err(AgentError::PlanningFailed(
-            "Planning not yet implemented".to_string()
-        ))
+    pub async fn plan(&self, constrained: ConstrainedPlan) -> Result<ExecutionPlan> {
+        let forge = self.forge.as_ref()
+            .ok_or_else(|| AgentError::PlanningFailed(
+                "Forge SDK not available for planning".to_string()
+            ))?;
+
+        // Create planner
+        let planner_instance = planner::Planner::new(forge.clone());
+
+        // Convert observation to the planner's format
+        let obs = observe::Observation {
+            query: constrained.observation.query.clone(),
+            symbols: vec![],
+            references: vec![],
+            cfg_data: vec![],
+        };
+
+        // Generate steps
+        let steps = planner_instance.generate_steps(&obs).await?;
+
+        // Estimate impact
+        let impact = planner_instance.estimate_impact(&steps).await?;
+
+        // Detect conflicts
+        let conflicts = planner_instance.detect_conflicts(&steps)?;
+
+        if !conflicts.is_empty() {
+            return Err(AgentError::PlanningFailed(
+                format!("Found {} conflicts in plan", conflicts.len())
+            ));
+        }
+
+        // Order steps based on dependencies
+        let mut ordered_steps = steps;
+        planner_instance.order_steps(&mut ordered_steps)?;
+
+        // Generate rollback plan
+        let rollback = planner_instance.generate_rollback(&ordered_steps);
+
+        Ok(ExecutionPlan {
+            steps: ordered_steps,
+            estimated_impact: planner::ImpactEstimate {
+                affected_files: impact.affected_files,
+                complexity: impact.complexity,
+            },
+            rollback_plan: rollback,
+        })
     }
 
     /// Executes the mutation phase of the plan.
@@ -186,91 +272,6 @@ impl Agent {
             "Commit not yet implemented".to_string()
         ))
     }
-}
-
-/// Result of the observation phase.
-#[derive(Clone, Debug)]
-pub struct Observation {
-    /// Symbols relevant to the query
-    pub relevant_symbols: Vec<String>,
-    /// References found
-    pub references: Vec<String>,
-    /// CFG data for relevant functions
-    pub cfg_data: Vec<String>,
-}
-
-/// Result of applying policy constraints.
-#[derive(Clone, Debug)]
-pub struct ConstrainedPlan {
-    /// The original observation
-    pub observation: Observation,
-    /// Any policy violations detected
-    pub policy_violations: Vec<policy::PolicyViolation>,
-}
-
-/// Execution plan for the mutation phase.
-#[derive(Clone, Debug)]
-pub struct ExecutionPlan {
-    /// Steps to execute
-    pub steps: Vec<PlanStep>,
-    /// Estimated impact
-    pub estimated_impact: ImpactEstimate,
-}
-
-/// A single step in the execution plan.
-#[derive(Clone, Debug)]
-pub struct PlanStep {
-    /// Step description
-    pub description: String,
-    /// Operation to perform
-    pub operation: PlanOperation,
-}
-
-/// Operation to perform in a plan step.
-#[derive(Clone, Debug)]
-pub enum PlanOperation {
-    /// Rename a symbol
-    Rename { old: String, new: String },
-    /// Delete a symbol
-    Delete { name: String },
-    /// Create new code
-    Create { path: String, content: String },
-}
-
-/// Estimated impact of a plan.
-#[derive(Clone, Debug)]
-pub struct ImpactEstimate {
-    /// Files to be modified
-    pub affected_files: Vec<PathBuf>,
-    /// Estimated complexity
-    pub complexity: usize,
-}
-
-/// Result of the mutation phase.
-#[derive(Clone, Debug)]
-pub struct MutationResult {
-    /// Files that were modified
-    pub modified_files: Vec<PathBuf>,
-    /// Diffs of changes made
-    pub diffs: Vec<String>,
-}
-
-/// Result of the verification phase.
-#[derive(Clone, Debug)]
-pub struct VerificationResult {
-    /// Whether verification passed
-    pub passed: bool,
-    /// Any diagnostics or errors
-    pub diagnostics: Vec<String>,
-}
-
-/// Result of the commit phase.
-#[derive(Clone, Debug)]
-pub struct CommitResult {
-    /// Transaction ID for the commit
-    pub transaction_id: String,
-    /// Files that were committed
-    pub files_committed: Vec<PathBuf>,
 }
 
 #[cfg(test)]
