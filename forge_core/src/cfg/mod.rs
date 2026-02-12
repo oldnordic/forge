@@ -258,4 +258,247 @@ mod tests {
         let paths = module.paths(SymbolId(1)).execute().await.unwrap();
         assert_eq!(paths.len(), 0);
     }
+
+    #[test]
+    fn test_dominator_tree_creation() {
+        let tree = DominatorTree::new(BlockId(0));
+        assert_eq!(tree.root, BlockId(0));
+        assert!(tree.is_empty());
+        assert_eq!(tree.len(), 1);
+    }
+
+    #[test]
+    fn test_dominator_tree_insert() {
+        let mut tree = DominatorTree::new(BlockId(0));
+        tree.insert(BlockId(1), BlockId(0));
+        tree.insert(BlockId(2), BlockId(1));
+
+        assert_eq!(tree.len(), 3);
+        assert_eq!(tree.immediate_dominator(BlockId(1)), Some(BlockId(0)));
+        assert_eq!(tree.immediate_dominator(BlockId(2)), Some(BlockId(1)));
+        assert_eq!(tree.immediate_dominator(BlockId(0)), None);
+    }
+
+    #[test]
+    fn test_dominator_tree_dominates() {
+        let mut tree = DominatorTree::new(BlockId(0));
+        tree.insert(BlockId(1), BlockId(0));
+        tree.insert(BlockId(2), BlockId(1));
+
+        assert!(tree.dominates(BlockId(0), BlockId(0)));
+        assert!(tree.dominates(BlockId(0), BlockId(1)));
+        assert!(tree.dominates(BlockId(0), BlockId(2)));
+        assert!(tree.dominates(BlockId(1), BlockId(1)));
+        assert!(tree.dominates(BlockId(1), BlockId(2)));
+        assert!(!tree.dominates(BlockId(1), BlockId(0)));
+    }
+
+    #[test]
+    fn test_loop_creation() {
+        let loop_ = Loop::new(BlockId(1));
+        assert_eq!(loop_.header, BlockId(1));
+        assert!(loop_.is_empty());
+        assert_eq!(loop_.len(), 1);
+        assert_eq!(loop_.depth, 0);
+    }
+
+    #[test]
+    fn test_loop_with_blocks() {
+        let blocks = vec![BlockId(2), BlockId(3)];
+        let loop_ = Loop::with_blocks(BlockId(1), blocks.clone());
+
+        assert_eq!(loop_.header, BlockId(1));
+        assert_eq!(loop_.blocks, blocks);
+        assert!(!loop_.is_empty());
+        assert_eq!(loop_.len(), 3);
+    }
+
+    #[test]
+    fn test_loop_contains() {
+        let loop_ = Loop::with_blocks(BlockId(1), vec![BlockId(2), BlockId(3)]);
+
+        assert!(loop_.contains(BlockId(1)));
+        assert!(loop_.contains(BlockId(2)));
+        assert!(loop_.contains(BlockId(3)));
+        assert!(!loop_.contains(BlockId(4)));
+    }
+
+    #[test]
+    fn test_path_creation() {
+        let blocks = vec![BlockId(0), BlockId(1), BlockId(2)];
+        let path = Path::new(blocks.clone());
+
+        assert_eq!(path.blocks, blocks);
+        assert_eq!(path.length, 3);
+        assert!(path.is_normal());
+        assert!(!path.is_error());
+    }
+
+    #[test]
+    fn test_path_with_kind() {
+        let blocks = vec![BlockId(0), BlockId(1)];
+        let path = Path::with_kind(blocks.clone(), PathKind::Error);
+
+        assert_eq!(path.blocks, blocks);
+        assert_eq!(path.kind, PathKind::Error);
+        assert!(!path.is_normal());
+        assert!(path.is_error());
+    }
+
+    #[test]
+    fn test_path_contains() {
+        let path = Path::new(vec![BlockId(0), BlockId(1), BlockId(2)]);
+
+        assert!(path.contains(BlockId(0)));
+        assert!(path.contains(BlockId(1)));
+        assert!(path.contains(BlockId(2)));
+        assert!(!path.contains(BlockId(3)));
+    }
+
+    #[test]
+    fn test_path_entry_exit() {
+        let path = Path::new(vec![BlockId(0), BlockId(1), BlockId(2)]);
+
+        assert_eq!(path.entry(), Some(BlockId(0)));
+        assert_eq!(path.exit(), Some(BlockId(2)));
+    }
+
+    #[test]
+    fn test_path_id_stability() {
+        let blocks = vec![BlockId(0), BlockId(1), BlockId(2)];
+        let path1 = Path::new(blocks.clone());
+        let path2 = Path::new(blocks);
+
+        assert_eq!(path1.id, path2.id);
+    }
+
+    #[test]
+    fn test_path_id_uniqueness() {
+        let blocks1 = vec![BlockId(0), BlockId(1), BlockId(2)];
+        let blocks2 = vec![BlockId(0), BlockId(1), BlockId(3)];
+        let path1 = Path::new(blocks1);
+        let path2 = Path::new(blocks2);
+
+        assert_ne!(path1.id, path2.id);
+    }
+
+    #[test]
+    fn test_test_cfg_chain() {
+        let cfg = TestCfg::chain(0, 5);
+
+        assert_eq!(cfg.entry, BlockId(0));
+        assert!(cfg.exits.contains(&BlockId(4)));
+
+        assert_eq!(cfg.successors.get(&BlockId(0)), Some(&vec![BlockId(1)]));
+        assert_eq!(cfg.successors.get(&BlockId(1)), Some(&vec![BlockId(2)]));
+        assert_eq!(cfg.successors.get(&BlockId(2)), Some(&vec![BlockId(3)]));
+        assert_eq!(cfg.successors.get(&BlockId(3)), Some(&vec![BlockId(4)]));
+    }
+
+    #[test]
+    fn test_test_cfg_if_else() {
+        let cfg = TestCfg::if_else();
+
+        assert_eq!(cfg.entry, BlockId(0));
+        assert!(cfg.exits.contains(&BlockId(3)));
+
+        let succ0 = cfg.successors.get(&BlockId(0)).unwrap();
+        assert!(succ0.contains(&BlockId(1)));
+        assert!(succ0.contains(&BlockId(2)));
+        assert_eq!(cfg.successors.get(&BlockId(1)), Some(&vec![BlockId(3)]));
+        assert_eq!(cfg.successors.get(&BlockId(2)), Some(&vec![BlockId(3)]));
+    }
+
+    #[test]
+    fn test_test_cfg_simple_loop() {
+        let cfg = TestCfg::simple_loop();
+
+        assert_eq!(cfg.entry, BlockId(0));
+        assert!(cfg.exits.contains(&BlockId(3)));
+
+        assert_eq!(cfg.successors.get(&BlockId(0)), Some(&vec![BlockId(1)]));
+        let succ1 = cfg.successors.get(&BlockId(1)).unwrap();
+        assert!(succ1.contains(&BlockId(2)));
+        assert!(succ1.contains(&BlockId(3)));
+        assert!(cfg.successors.get(&BlockId(2)).unwrap().contains(&BlockId(1)));
+    }
+
+    #[test]
+    fn test_paths_simple_chain() {
+        let cfg = TestCfg::chain(0, 4);
+        let paths = cfg.enumerate_paths();
+
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].blocks, vec![BlockId(0), BlockId(1), BlockId(2), BlockId(3)]);
+        assert!(paths[0].is_normal());
+    }
+
+    #[test]
+    fn test_paths_if_else() {
+        let cfg = TestCfg::if_else();
+        let paths = cfg.enumerate_paths();
+
+        assert_eq!(paths.len(), 2);
+
+        assert_eq!(paths[0].entry(), Some(BlockId(0)));
+        assert_eq!(paths[0].exit(), Some(BlockId(3)));
+        assert_eq!(paths[1].entry(), Some(BlockId(0)));
+        assert_eq!(paths[1].exit(), Some(BlockId(3)));
+
+        let paths_set: HashSet<_> = paths.iter().map(|p| p.blocks.clone()).collect();
+
+        assert!(paths_set.contains(&vec![BlockId(0), BlockId(1), BlockId(3)]));
+        assert!(paths_set.contains(&vec![BlockId(0), BlockId(2), BlockId(3)]));
+    }
+
+    #[test]
+    fn test_dominators_chain() {
+        let cfg = TestCfg::chain(0, 5);
+        let dom = cfg.compute_dominators();
+
+        assert_eq!(dom.root, BlockId(0));
+        assert_eq!(dom.immediate_dominator(BlockId(1)), Some(BlockId(0)));
+        assert_eq!(dom.immediate_dominator(BlockId(2)), Some(BlockId(1)));
+        assert_eq!(dom.immediate_dominator(BlockId(3)), Some(BlockId(2)));
+        assert_eq!(dom.immediate_dominator(BlockId(4)), Some(BlockId(3)));
+    }
+
+    #[test]
+    fn test_dominators_if_else() {
+        let cfg = TestCfg::if_else();
+        let dom = cfg.compute_dominators();
+
+        assert!(dom.dominates(BlockId(0), BlockId(0)));
+        assert!(dom.dominates(BlockId(0), BlockId(1)));
+        assert!(dom.dominates(BlockId(0), BlockId(2)));
+        assert!(dom.dominates(BlockId(0), BlockId(3)));
+        assert_eq!(dom.immediate_dominator(BlockId(3)), Some(BlockId(0)));
+    }
+
+    #[test]
+    fn test_loops_simple_loop() {
+        let cfg = TestCfg::simple_loop();
+        let loops = cfg.detect_loops();
+
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].header, BlockId(1));
+        assert!(!loops[0].blocks.is_empty(), "Loop should contain body blocks");
+        assert!(loops[0].blocks.contains(BlockId(2)), "Loop body should contain block 2");
+    }
+
+    #[test]
+    fn test_loops_none_in_chain() {
+        let cfg = TestCfg::chain(0, 5);
+        let loops = cfg.detect_loops();
+
+        assert_eq!(loops.len(), 0);
+    }
+
+    #[test]
+    fn test_loops_none_in_if_else() {
+        let cfg = TestCfg::if_else();
+        let loops = cfg.detect_loops();
+
+        assert_eq!(loops.len(), 0);
+    }
 }

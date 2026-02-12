@@ -22,7 +22,7 @@ impl From<i64> for SymbolId {
 }
 
 /// Stable identifier for a CFG block.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub i64);
 
 impl std::fmt::Display for BlockId {
