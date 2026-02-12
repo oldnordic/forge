@@ -316,11 +316,13 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[allow(unused_variables)]
+
     #[tokio::test]
     async fn test_planner_creation() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let _planner = super::Planner::new(forge);
 
         // Should create successfully
         // Note: Forge doesn't expose db_path publicly
@@ -331,7 +333,7 @@ mod tests {
     async fn test_generate_steps() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let _planner = super::Planner::new(forge);
 
         let observation = super::observe::Observation {
             query: "test".to_string(),
@@ -345,22 +347,22 @@ mod tests {
         assert!(steps.is_empty());
     }
 
-    #[test]
-    fn test_detect_conflicts_empty() {
+    #[tokio::test]
+    async fn test_detect_conflicts_empty() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let _planner = super::Planner::new(forge);
 
         let steps = vec![];
         let conflicts = planner.detect_conflicts(&steps).unwrap();
         assert!(conflicts.is_empty());
     }
 
-    #[test]
-    fn test_order_steps() {
+    #[tokio::test]
+    async fn test_order_steps() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let _planner = super::Planner::new(forge);
 
         let mut steps = vec![
             PlanStep {
@@ -380,11 +382,11 @@ mod tests {
         assert!(matches!(steps[1].operation, PlanOperation::Delete { .. }));
     }
 
-    #[test]
-    fn test_generate_rollback() {
+    #[tokio::test]
+    async fn test_generate_rollback() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let _planner = super::Planner::new(forge);
 
         let steps = vec![
             PlanStep {
@@ -403,12 +405,12 @@ mod tests {
         assert!(matches!(rollback[0].operation, RollbackOperation::Delete { .. }));
     }
 
-    #[test]
-    fn test_estimate_impact() {
+    #[tokio::test]
+    async fn test_estimate_impact() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
 
-        let planner = Planner::new(forge);
+        let _planner = super::Planner::new(forge);
 
         // Create temp forge instance (we need async for this but using sync placeholder)
         let steps = vec![

@@ -98,7 +98,7 @@ impl Mutator {
                 // Inspect doesn't modify files
             }
             crate::planner::PlanOperation::Modify { file, .. } => {
-                if let Ok(original_content) = std::fs::read_to_string(file).await {
+                if let Ok(original_content) = std::fs::read_to_string(file) {
                     transaction.rollback_state.push(RollbackState {
                         file: file.clone(),
                         original_content,
@@ -113,14 +113,14 @@ impl Mutator {
 
     /// Rolls back the current transaction.
     pub async fn rollback(&mut self) -> Result<()> {
-        let mut transaction = self.transaction.take()
+        let transaction = self.transaction.take()
             .ok_or_else(|| AgentError::MutationFailed(
                 "No active transaction".to_string()
             ))?;
 
         // Rollback in reverse order
         for state in transaction.rollback_state.iter().rev() {
-            std::fs::write(&state.file, &state.original_content).await
+            std::fs::write(&state.file, &state.original_content)
                 .map_err(|e| AgentError::MutationFailed(
                     format!("Rollback failed for {}: {}", state.file, e)
                 ))?;

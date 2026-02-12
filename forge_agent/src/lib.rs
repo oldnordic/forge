@@ -265,7 +265,7 @@ impl Agent {
                 "Forge SDK not available".to_string()
             ))?;
 
-        let mutator = mutate::Mutator::new(forge.clone());
+        let mut mutator = mutate::Mutator::new(forge.clone());
         mutator.begin_transaction().await?;
 
         for step in &plan.steps {
@@ -304,7 +304,15 @@ impl Agent {
             ))?;
 
         let committer = commit::Committer::new(forge.clone());
-        let commit_report = committer.finalize(&self.codebase_path, &result.diagnostics).await?;
+        let files: Vec<std::path::PathBuf> = result.diagnostics.iter()
+            .filter_map(|d| {
+                // Parse diagnostics to extract file paths
+                // Format: "file:line:col: message"
+                d.split(':').next().map(|s| std::path::PathBuf::from(s.trim()))
+            })
+            .collect();
+
+        let commit_report = committer.finalize(&self.codebase_path, &files).await?;
 
         Ok(CommitResult {
             transaction_id: commit_report.transaction_id,

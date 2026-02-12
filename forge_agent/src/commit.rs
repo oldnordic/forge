@@ -78,21 +78,21 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_committer_creation() {
+    #[tokio::test]
+    async fn test_committer_creation() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let committer = Committer::new(forge);
+        let _committer = Committer::new(forge);
 
         // Should create successfully
         assert!(true);
     }
 
-    #[test]
-    fn test_generate_summary() {
+    #[tokio::test]
+    async fn test_generate_summary() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let committer = Committer::new(forge);
+        let _committer = Committer::new(forge);
 
         let steps = vec![
             crate::planner::PlanStep {
