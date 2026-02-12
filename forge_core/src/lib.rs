@@ -47,8 +47,13 @@ pub mod storage;
 pub mod graph;
 pub mod search;
 pub mod cfg;
-pub mod edit;
+pub mod pool;
 pub mod analysis;
+
+// Runtime layer modules (Phase 2)
+pub mod watcher;
+pub mod indexing;
+pub mod cache;
 
 // Re-export commonly used types
 pub use error::{ForgeError, Result};
@@ -83,6 +88,7 @@ use anyhow::anyhow;
 #[derive(Clone)]
 pub struct Forge {
     store: std::sync::Arc<UnifiedGraphStore>,
+    runtime: Option<std::sync::Arc<runtime::Runtime>>,
 }
 
 impl Forge {
@@ -112,7 +118,7 @@ impl Forge {
     /// ```
     pub async fn open(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
         let store = std::sync::Arc::new(UnifiedGraphStore::open(path).await?);
-        Ok(Forge { store })
+        Ok(Forge { store, runtime: None })
     }
 
     /// Returns the graph module for symbol and reference queries.
@@ -183,6 +189,60 @@ impl Forge {
             self.edit(),
         )
     }
+
+    /// Creates a Forge instance with runtime enabled.
+    ///
+    /// This enables file watching, incremental indexing, and caching.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the codebase directory
+    ///
+    /// # Returns
+    ///
+    /// A `Forge` instance with runtime enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use forge::Forge;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> anyhow::Result<()> {
+    /// let mut forge = Forge::with_runtime("./my-project").await?;
+    ///
+    /// // Runtime is available
+    /// if let Some(runtime) = forge.runtime() {
+    ///     runtime.start_with_watching().await?;
+    /// }
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub async fn with_runtime(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let runtime = runtime::Runtime::new(path.clone()).await?;
+        let store = runtime.store.clone();
+
+        Ok(Forge {
+            store,
+            runtime: Some(std::sync::Arc::new(runtime)),
+        })
+    }
+
+    /// Returns the runtime instance if available.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # let forge: Forge = unimplemented!();
+    /// if let Some(runtime) = forge.runtime() {
+    ///     let pending = runtime.pending_changes().await;
+    ///     println!("Pending changes: {}", pending);
+    /// }
+    /// ```
+    pub fn runtime(&self) -> Option<&std::sync::Arc<runtime::Runtime>> {
+        self.runtime.as_ref()
+    }
 }
 
 /// Builder for configuring and creating a Forge instance.
@@ -246,6 +306,6 @@ impl ForgeBuilder {
             std::sync::Arc::new(UnifiedGraphStore::open(&path).await?)
         };
 
-        Ok(Forge { store })
+        Ok(Forge { store, runtime: None })
     }
 }

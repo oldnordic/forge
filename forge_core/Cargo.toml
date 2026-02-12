@@ -25,6 +25,7 @@ serde_json = "1"
 thiserror = "1"
 similar = "2"
 blake3 = "1"
+notify = "6"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }

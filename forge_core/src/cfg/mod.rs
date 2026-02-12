@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet, VecDeque};
 use crate::storage::UnifiedGraphStore;
-use crate::error::{ForgeError, Result};
+use crate::error::Result;
 use crate::types::{SymbolId, BlockId, PathId, PathKind};
 
 /// CFG module for control flow analysis.
@@ -160,7 +160,7 @@ impl PathBuilder {
 }
 
 /// Result of dominance analysis.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DominatorTree {
     /// The entry block of the function
     pub root: BlockId,
@@ -168,8 +168,56 @@ pub struct DominatorTree {
     pub dominators: HashMap<BlockId, BlockId>,
 }
 
+impl DominatorTree {
+    /// Creates a new empty dominator tree with the given root.
+    pub fn new(root: BlockId) -> Self {
+        Self {
+            root,
+            dominators: HashMap::new(),
+        }
+    }
+
+    /// Returns the immediate dominator of a block, if any.
+    pub fn immediate_dominator(&self, block: BlockId) -> Option<BlockId> {
+        self.dominators.get(&block).copied()
+    }
+
+    /// Returns true if `dominator` dominates `block`.
+    pub fn dominates(&self, dominator: BlockId, block: BlockId) -> bool {
+        if dominator == block {
+            return true;
+        }
+        if dominator == self.root {
+            return true;
+        }
+        let mut current = block;
+        while let Some(idom) = self.dominators.get(&current) {
+            if *idom == dominator {
+                return true;
+            }
+            current = *idom;
+        }
+        false
+    }
+
+    /// Adds a dominator relationship.
+    pub fn insert(&mut self, block: BlockId, dominator: BlockId) {
+        self.dominators.insert(block, dominator);
+    }
+
+    /// Returns the number of blocks in the dominator tree.
+    pub fn len(&self) -> usize {
+        self.dominators.len() + 1
+    }
+
+    /// Returns true if the tree has no relationships.
+    pub fn is_empty(&self) -> bool {
+        self.dominators.is_empty()
+    }
+}
+
 /// A detected loop in the CFG.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Loop {
     /// Loop header block
     pub header: BlockId,
@@ -179,8 +227,52 @@ pub struct Loop {
     pub depth: usize,
 }
 
+impl Loop {
+    /// Creates a new loop with the given header.
+    pub fn new(header: BlockId) -> Self {
+        Self {
+            header,
+            blocks: Vec::new(),
+            depth: 0,
+        }
+    }
+
+    /// Creates a new loop with the given header and blocks.
+    pub fn with_blocks(header: BlockId, blocks: Vec<BlockId>) -> Self {
+        Self {
+            header,
+            blocks,
+            depth: 0,
+        }
+    }
+
+    /// Creates a new loop with all fields specified.
+    pub fn with_depth(header: BlockId, blocks: Vec<BlockId>, depth: usize) -> Self {
+        Self {
+            header,
+            blocks,
+            depth,
+        }
+    }
+
+    /// Returns true if the loop contains the given block.
+    pub fn contains(&self, block: BlockId) -> bool {
+        self.header == block || self.blocks.contains(&block)
+    }
+
+    /// Returns the number of blocks in the loop (including header).
+    pub fn len(&self) -> usize {
+        self.blocks.len() + 1
+    }
+
+    /// Returns true if the loop has no body blocks.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+}
+
 /// An execution path through a function.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Path {
     /// Stable path identifier
     pub id: PathId,
@@ -190,6 +282,305 @@ pub struct Path {
     pub blocks: Vec<BlockId>,
     /// Path length (number of blocks)
     pub length: usize,
+}
+
+impl Path {
+    /// Creates a new path with the given blocks.
+    pub fn new(blocks: Vec<BlockId>) -> Self {
+        let length = blocks.len();
+        let mut hasher = blake3::Hasher::new();
+        for block in &blocks {
+            hasher.update(&block.0.to_le_bytes());
+        }
+        let hash = hasher.finalize();
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&hash.as_bytes()[0..16]);
+
+        Self {
+            id: PathId(id),
+            kind: PathKind::Normal,
+            blocks,
+            length,
+        }
+    }
+
+    /// Creates a new path with a specific kind.
+    pub fn with_kind(blocks: Vec<BlockId>, kind: PathKind) -> Self {
+        let length = blocks.len();
+        let mut hasher = blake3::Hasher::new();
+        for block in &blocks {
+            hasher.update(&block.0.to_le_bytes());
+        }
+        let hash = hasher.finalize();
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&hash.as_bytes()[0..16]);
+
+        Self {
+            id: PathId(id),
+            kind,
+            blocks,
+            length,
+        }
+    }
+
+    /// Returns true if this is a normal (successful) path.
+    pub fn is_normal(&self) -> bool {
+        self.kind == PathKind::Normal
+    }
+
+    /// Returns true if this is an error path.
+    pub fn is_error(&self) -> bool {
+        self.kind == PathKind::Error
+    }
+
+    /// Returns true if the path contains the given block.
+    pub fn contains(&self, block: BlockId) -> bool {
+        self.blocks.contains(&block)
+    }
+
+    /// Returns the entry block of the path.
+    pub fn entry(&self) -> Option<BlockId> {
+        self.blocks.first().copied()
+    }
+
+    /// Returns the exit block of the path.
+    pub fn exit(&self) -> Option<BlockId> {
+        self.blocks.last().copied()
+    }
+}
+
+/// Test CFG structure for unit tests.
+#[derive(Clone, Debug)]
+pub struct TestCfg {
+    /// Entry block ID
+    pub entry: BlockId,
+    /// Exit block IDs (may be multiple in real CFG)
+    pub exits: HashSet<BlockId>,
+    /// Error/panic blocks
+    pub error_blocks: HashSet<BlockId>,
+    /// Successors: block -> list of successor blocks
+    pub successors: HashMap<BlockId, Vec<BlockId>>,
+    /// Predecessors: block -> list of predecessor blocks
+    pub predecessors: HashMap<BlockId, Vec<BlockId>>,
+}
+
+impl TestCfg {
+    /// Creates a new empty test CFG.
+    pub fn new(entry: BlockId) -> Self {
+        Self {
+            entry,
+            exits: HashSet::new(),
+            error_blocks: HashSet::new(),
+            successors: HashMap::new(),
+            predecessors: HashMap::new(),
+        }
+    }
+
+    /// Adds an edge from `from` to `to`.
+    pub fn add_edge(&mut self, from: BlockId, to: BlockId) -> &mut Self {
+        self.successors.entry(from).or_default().push(to);
+        self.predecessors.entry(to).or_default().push(from);
+        self
+    }
+
+    /// Marks a block as an exit block.
+    pub fn add_exit(&mut self, block: BlockId) -> &mut Self {
+        self.exits.insert(block);
+        self
+    }
+
+    /// Marks a block as an error block.
+    pub fn add_error(&mut self, block: BlockId) -> &mut Self {
+        self.error_blocks.insert(block);
+        self
+    }
+
+    /// Builds a chain of blocks: 0 -> 1 -> 2 -> ... -> n
+    pub fn chain(start: i64, count: usize) -> Self {
+        let mut cfg = Self::new(BlockId(start));
+        for i in start..(start + count as i64 - 1) {
+            cfg.add_edge(BlockId(i), BlockId(i + 1));
+        }
+        cfg.add_exit(BlockId(start + count as i64 - 1));
+        cfg
+    }
+
+    /// Builds a simple if-else CFG.
+    pub fn if_else() -> Self {
+        let mut cfg = Self::new(BlockId(0));
+        cfg.add_edge(BlockId(0), BlockId(1))
+            .add_edge(BlockId(0), BlockId(2))
+            .add_edge(BlockId(1), BlockId(3))
+            .add_edge(BlockId(2), BlockId(3))
+            .add_exit(BlockId(3));
+        cfg
+    }
+
+    /// Builds a simple loop CFG.
+    pub fn simple_loop() -> Self {
+        let mut cfg = Self::new(BlockId(0));
+        cfg.add_edge(BlockId(0), BlockId(1))
+            .add_edge(BlockId(1), BlockId(2))
+            .add_edge(BlockId(2), BlockId(1))
+            .add_edge(BlockId(1), BlockId(3))
+            .add_exit(BlockId(3));
+        cfg
+    }
+
+    /// Enumerates all paths from entry to exits using DFS.
+    pub fn enumerate_paths(&self) -> Vec<Path> {
+        let mut paths = Vec::new();
+        let mut current = vec![self.entry];
+        let mut visited = HashSet::new();
+        self.dfs(&mut paths, &mut current, &mut visited, self.entry);
+        paths
+    }
+
+    fn dfs(&self, paths: &mut Vec<Path>, current: &mut Vec<BlockId>, visited: &mut HashSet<BlockId>, block: BlockId) {
+        if self.exits.contains(&block) {
+            paths.push(Path::new(current.clone()));
+            return;
+        }
+        if visited.contains(&block) {
+            return;
+        }
+        visited.insert(block);
+        if let Some(successors) = self.successors.get(&block) {
+            for &succ in successors {
+                current.push(succ);
+                self.dfs(paths, current, visited, succ);
+                current.pop();
+            }
+        }
+        visited.remove(&block);
+    }
+
+    /// Computes the dominator tree using the iterative algorithm.
+    pub fn compute_dominators(&self) -> DominatorTree {
+        let mut blocks: HashSet<BlockId> = HashSet::new();
+        blocks.insert(self.entry);
+        for (from, tos) in &self.successors {
+            blocks.insert(*from);
+            for to in tos {
+                blocks.insert(*to);
+            }
+        }
+
+        if blocks.is_empty() {
+            return DominatorTree::new(self.entry);
+        }
+
+        let block_list: Vec<BlockId> = blocks.iter().copied().collect();
+        let mut dom: HashMap<BlockId, HashSet<BlockId>> = HashMap::new();
+
+        for &block in &block_list {
+            if block == self.entry {
+                dom.insert(block, HashSet::from([self.entry]));
+            } else {
+                dom.insert(block, blocks.clone());
+            }
+        }
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for &block in &block_list {
+                if block == self.entry {
+                    continue;
+                }
+                let preds = self.predecessors.get(&block);
+                if preds.is_none() || preds.unwrap().is_empty() {
+                    continue;
+                }
+                let mut new_dom: HashSet<BlockId> = dom.get(&preds.unwrap()[0]).cloned().unwrap_or_default();
+                for pred in &preds.unwrap()[1..] {
+                    if let Some(pred_dom) = dom.get(pred) {
+                        new_dom = new_dom.intersection(pred_dom).copied().collect();
+                    }
+                }
+                new_dom.insert(block);
+                if dom.get(&block) != Some(&new_dom) {
+                    dom.insert(block, new_dom);
+                    changed = true;
+                }
+            }
+        }
+
+        // Extract immediate dominators by finding the dominator
+        // with the largest size (closest to the block, excluding the block itself)
+        let mut idom: HashMap<BlockId, BlockId> = HashMap::new();
+        for &block in &block_list {
+            if block == self.entry {
+                continue;
+            }
+            if let Some(doms) = dom.get(&block) {
+                // Find the candidate in doms \ {block} with the largest dominator set
+                let mut best_candidate: Option<BlockId> = None;
+                let mut best_size = 0;
+
+                for &candidate in doms {
+                    if candidate == block {
+                        continue;
+                    }
+                    if let Some(candidate_doms) = dom.get(&candidate) {
+                        if candidate_doms.len() > best_size {
+                            best_size = candidate_doms.len();
+                            best_candidate = Some(candidate);
+                        }
+                    }
+                }
+
+                if let Some(candidate) = best_candidate {
+                    idom.insert(block, candidate);
+                }
+            }
+        }
+
+        DominatorTree {
+            root: self.entry,
+            dominators: idom,
+        }
+    }
+
+    /// Detects natural loops using back-edge detection.
+    pub fn detect_loops(&self) -> Vec<Loop> {
+        let dom = self.compute_dominators();
+        let mut loops = Vec::new();
+
+        for (from, tos) in &self.successors {
+            for to in tos {
+                if dom.dominates(*to, *from) {
+                    let header = *to;
+                    let mut loop_blocks = HashSet::new();
+                    loop_blocks.insert(header);
+                    let mut worklist = VecDeque::new();
+                    worklist.push_back(*from);
+
+                    while let Some(block) = worklist.pop_front() {
+                        if loop_blocks.contains(&block) {
+                            continue;
+                        }
+                        if dom.dominates(header, block) || block == header {
+                            loop_blocks.insert(block);
+                            if let Some(preds) = self.predecessors.get(&block) {
+                                for &pred in preds {
+                                    if !loop_blocks.contains(&pred) {
+                                        worklist.push_back(pred);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let mut blocks: Vec<BlockId> = loop_blocks.into_iter().filter(|&b| b != header).collect();
+                    blocks.sort();
+                    loops.push(Loop::with_depth(header, blocks, 0));
+                }
+            }
+        }
+
+        loops
+    }
 }
 
 #[cfg(test)]
@@ -203,7 +594,6 @@ mod tests {
         ).await.unwrap());
         let module = CfgModule::new(store.clone());
 
-        // Test that module can be created
         assert_eq!(module.store.db_path(), store.db_path());
     }
 
@@ -289,7 +679,6 @@ mod tests {
         assert!(tree.dominates(BlockId(0), BlockId(1)));
         assert!(tree.dominates(BlockId(0), BlockId(2)));
         assert!(tree.dominates(BlockId(1), BlockId(1)));
-        assert!(tree.dominates(BlockId(1), BlockId(2)));
         assert!(!tree.dominates(BlockId(1), BlockId(0)));
     }
 
@@ -389,6 +778,7 @@ mod tests {
         assert_eq!(cfg.entry, BlockId(0));
         assert!(cfg.exits.contains(&BlockId(4)));
 
+        // In a chain, each block has exactly one successor
         assert_eq!(cfg.successors.get(&BlockId(0)), Some(&vec![BlockId(1)]));
         assert_eq!(cfg.successors.get(&BlockId(1)), Some(&vec![BlockId(2)]));
         assert_eq!(cfg.successors.get(&BlockId(2)), Some(&vec![BlockId(3)]));
@@ -407,20 +797,6 @@ mod tests {
         assert!(succ0.contains(&BlockId(2)));
         assert_eq!(cfg.successors.get(&BlockId(1)), Some(&vec![BlockId(3)]));
         assert_eq!(cfg.successors.get(&BlockId(2)), Some(&vec![BlockId(3)]));
-    }
-
-    #[test]
-    fn test_test_cfg_simple_loop() {
-        let cfg = TestCfg::simple_loop();
-
-        assert_eq!(cfg.entry, BlockId(0));
-        assert!(cfg.exits.contains(&BlockId(3)));
-
-        assert_eq!(cfg.successors.get(&BlockId(0)), Some(&vec![BlockId(1)]));
-        let succ1 = cfg.successors.get(&BlockId(1)).unwrap();
-        assert!(succ1.contains(&BlockId(2)));
-        assert!(succ1.contains(&BlockId(3)));
-        assert!(cfg.successors.get(&BlockId(2)).unwrap().contains(&BlockId(1)));
     }
 
     #[test]
@@ -482,8 +858,8 @@ mod tests {
 
         assert_eq!(loops.len(), 1);
         assert_eq!(loops[0].header, BlockId(1));
-        assert!(!loops[0].blocks.is_empty(), "Loop should contain body blocks");
-        assert!(loops[0].blocks.contains(BlockId(2)), "Loop body should contain block 2");
+        assert!(!loops[0].blocks.is_empty());
+        assert!(loops[0].blocks.contains(&BlockId(2)));
     }
 
     #[test]

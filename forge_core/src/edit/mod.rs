@@ -187,7 +187,7 @@ impl EditOperation for RenameOperation {
         }
 
         // Generate a simple diff showing the rename
-        let diff_content = format!(
+        let _diff_content = format!(
             "- {}\n+ {}",
             self.old_name, self.new_name
         );
@@ -261,7 +261,7 @@ impl EditOperation for DeleteOperation {
         }
 
         // Generate a simple diff showing the deletion
-        let diff_content = format!("- {}", self.symbol_name);
+        let _diff_content = format!("- {}", self.symbol_name);
 
         Ok(Diff {
             file_path: PathBuf::from("<unknown>"),

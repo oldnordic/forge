@@ -3,9 +3,8 @@
 //! This module provides high-level analysis that combines graph, CFG,
 //! and edit operations.
 
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use crate::{graph::GraphModule, cfg::CfgModule, edit::EditModule};
 use crate::error::Result;
 use crate::types::{SymbolId, Cycle};
@@ -135,6 +134,7 @@ pub struct ImpactAnalysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_analysis_module_creation() {

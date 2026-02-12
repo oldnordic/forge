@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet, VecDeque};
 use crate::storage::UnifiedGraphStore;
-use crate::error::{ForgeError, Result};
+use crate::error::Result;
 use crate::types::{Symbol, SymbolId, Reference, Cycle, ReferenceKind};
 
 /// Graph module for symbol and reference queries.

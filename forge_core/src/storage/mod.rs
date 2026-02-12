@@ -118,6 +118,27 @@ impl UnifiedGraphStore {
         self.graph.is_some()
     }
 
+    /// Creates an in-memory graph store for testing.
+    ///
+    /// # Returns
+    ///
+    /// A `UnifiedGraphStore` instance backed by an in-memory database.
+    pub async fn memory() -> Result<Self> {
+        #[cfg(feature = "sqlite")]
+        let graph = Some(Arc::new(sqlitegraph::SqliteGraph::open_in_memory_with_config(
+            &sqlitegraph::SqliteConfig::default(),
+        ).map_err(|e| ForgeError::DatabaseError(e.to_string()))?));
+
+        #[cfg(not(feature = "sqlite"))]
+        let graph = None;
+
+        Ok(UnifiedGraphStore {
+            codebase_path: std::path::PathBuf::from("/memory"),
+            db_path: std::path::PathBuf::from(":memory:"),
+            graph,
+        })
+    }
+
     /// Query symbols by name from the database.
     ///
     /// # Arguments
