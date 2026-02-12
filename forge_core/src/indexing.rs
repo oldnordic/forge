@@ -249,8 +249,8 @@ mod tests {
 
         // Note: actual indexing is stubbed, so counts may vary
         // The test verifies the stats structure is returned
-        assert!(stats.indexed >= 0);
-        assert!(stats.deleted >= 0);
+        assert!(stats.indexed > 0);
+        assert!(stats.deleted > 0);
     }
 
     #[tokio::test]
@@ -263,5 +263,139 @@ mod tests {
 
         indexer.clear_pending().await;
         assert_eq!(indexer.pending_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_indexer_flush_multiple() {
+        let store = Arc::new(UnifiedGraphStore::memory().await.unwrap());
+        let indexer = IncrementalIndexer::new(store);
+
+        // Queue 3 different Modified events
+        indexer.queue(WatchEvent::Modified(PathBuf::from("src/a.rs")));
+        indexer.queue(WatchEvent::Modified(PathBuf::from("src/b.rs")));
+        indexer.queue(WatchEvent::Modified(PathBuf::from("src/c.rs")));
+
+        // Wait for async queue processing
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Verify pending count
+        assert_eq!(indexer.pending_count().await, 3);
+
+        // Flush and verify stats
+        let stats = indexer.flush().await.unwrap();
+        assert_eq!(stats.indexed, 3);
+        assert_eq!(stats.deleted, 0);
+
+        // Verify pending is empty after flush
+        assert_eq!(indexer.pending_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_indexer_delete_handling() {
+        let store = Arc::new(UnifiedGraphStore::memory().await.unwrap());
+        let indexer = IncrementalIndexer::new(store);
+
+        // Queue a Deleted event
+        indexer.queue(WatchEvent::Deleted(PathBuf::from("src/removed.rs")));
+
+        // Wait for async queue processing
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Verify it's counted in pending
+        assert_eq!(indexer.pending_count().await, 1);
+
+        // Flush and verify deleted_count in stats
+        let stats = indexer.flush().await.unwrap();
+        assert_eq!(stats.indexed, 0);
+        assert_eq!(stats.deleted, 1);
+    }
+
+    #[tokio::test]
+    async fn test_indexer_clear() {
+        let store = Arc::new(UnifiedGraphStore::memory().await.unwrap());
+        let indexer = IncrementalIndexer::new(store);
+
+        // Add some pending changes
+        indexer.queue(WatchEvent::Created(PathBuf::from("src/new.rs")));
+        indexer.queue(WatchEvent::Modified(PathBuf::from("src/existing.rs")));
+
+        // Wait for async queue processing
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Verify we have pending changes
+        assert_eq!(indexer.pending_count().await, 2);
+
+        // Clear state
+        indexer.clear_pending().await;
+
+        // Verify pending_changes() returns 0
+        assert_eq!(indexer.pending_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_indexer_duplicate_queue() {
+        let store = Arc::new(UnifiedGraphStore::memory().await.unwrap());
+        let indexer = IncrementalIndexer::new(store);
+
+        // Queue the same file path twice
+        let path = PathBuf::from("src/duplicate.rs");
+        indexer.queue(WatchEvent::Created(path.clone()));
+        indexer.queue(WatchEvent::Modified(path.clone()));
+
+        // Wait for async queue processing
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Verify only one entry is in pending (HashSet deduplicates)
+        // Note: Both Created and Modified go to pending HashSet, so we get 1
+        assert_eq!(indexer.pending_count().await, 1);
+
+        // Flush to verify
+        let stats = indexer.flush().await.unwrap();
+        assert_eq!(stats.indexed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_indexer_statistics() {
+        let store = Arc::new(UnifiedGraphStore::memory().await.unwrap());
+        let indexer = IncrementalIndexer::new(store);
+
+        // Create a known mix of events
+        indexer.queue(WatchEvent::Created(PathBuf::from("src/a.rs")));
+        indexer.queue(WatchEvent::Created(PathBuf::from("src/b.rs")));
+        indexer.queue(WatchEvent::Modified(PathBuf::from("src/c.rs")));
+        indexer.queue(WatchEvent::Deleted(PathBuf::from("src/d.rs")));
+        indexer.queue(WatchEvent::Deleted(PathBuf::from("src/e.rs")));
+
+        // Wait for async queue processing
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Flush and verify all counts match
+        let stats = indexer.flush().await.unwrap();
+        assert_eq!(stats.indexed, 3); // 2 Created + 1 Modified
+        assert_eq!(stats.deleted, 2); // 2 Deleted
+    }
+
+    #[tokio::test]
+    async fn test_indexer_concurrent_flush() {
+        let store = Arc::new(UnifiedGraphStore::memory().await.unwrap());
+        let indexer = IncrementalIndexer::new(store);
+
+        // Queue multiple events rapidly (the indexer uses tokio::spawn internally)
+        // This tests that the internal async queue handling is thread-safe
+        for i in 0..5 {
+            indexer.queue(WatchEvent::Modified(PathBuf::from(format!("src/file{}.rs", i))));
+        }
+
+        // Wait for all async queue operations to complete
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Flush and verify all events processed
+        let stats = indexer.flush().await.unwrap();
+        assert_eq!(stats.indexed, 5);
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(indexer.pending_count().await, 0);
+
+        // Verify no race conditions or panics occurred
+        // (If we got here without panic, the test passed)
     }
 }
