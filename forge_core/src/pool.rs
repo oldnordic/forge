@@ -26,7 +26,7 @@ use tokio::sync::Semaphore;
 /// #     Ok(())
 /// # }
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConnectionPool {
     /// Path to the database file.
     pub db_path: std::path::PathBuf,

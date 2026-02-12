@@ -22,6 +22,16 @@ pub struct UnifiedGraphStore {
     graph: Option<Arc<sqlitegraph::SqliteGraph>>,
 }
 
+impl std::fmt::Debug for UnifiedGraphStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnifiedGraphStore")
+            .field("codebase_path", &self.codebase_path)
+            .field("db_path", &self.db_path)
+            .field("graph", &self.graph.as_ref().map(|_| "<SqliteGraph>"))
+            .finish()
+    }
+}
+
 impl UnifiedGraphStore {
     /// Opens a graph store at the given path.
     ///

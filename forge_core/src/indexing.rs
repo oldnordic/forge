@@ -23,6 +23,7 @@ use std::sync::Arc;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> anyhow::Result<()> {
+/// # let store = unimplemented!();
 /// let indexer = IncrementalIndexer::new(store);
 ///
 /// // Queue some changes
@@ -34,7 +35,7 @@ use std::sync::Arc;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IncrementalIndexer {
     /// The graph store for writing index updates.
     store: Arc<UnifiedGraphStore>,

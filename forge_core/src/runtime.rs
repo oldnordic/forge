@@ -25,17 +25,17 @@ use std::time::Duration;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> anyhow::Result<()> {
-/// let runtime = Runtime::new(PathBuf::from("./project")).await?;
+/// let mut runtime = Runtime::new(PathBuf::from("./project")).await?;
 ///
 /// // Start watching for file changes
-/// runtime.start_with_watching().await?;
+/// let _result = runtime.start_with_watching().await?;
 ///
 /// // Process events as they arrive
-/// runtime.process_events().await?;
+/// let _stats = runtime.process_events().await?;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Runtime {
     /// The underlying graph store.
     pub store: Arc<UnifiedGraphStore>,

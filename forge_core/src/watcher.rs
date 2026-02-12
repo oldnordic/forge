@@ -27,7 +27,7 @@ pub enum WatchEvent {
 /// The `Watcher` spawns a background task that monitors the specified
 /// directory and emits events via a channel. Events are consumed by
 /// the incremental indexer for hot-reload capability.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Watcher {
     /// The graph store (for future use in event correlation).
     store: Arc<UnifiedGraphStore>,

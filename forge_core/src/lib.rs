@@ -92,7 +92,7 @@ use anyhow::anyhow;
 ///     Ok(())
 /// }
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Forge {
     store: std::sync::Arc<UnifiedGraphStore>,
     runtime: Option<std::sync::Arc<runtime::Runtime>>,
@@ -186,7 +186,7 @@ impl Forge {
 }
 
 /// Builder for configuring and creating a Forge instance.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ForgeBuilder {
     path: Option<std::path::PathBuf>,
     database_path: Option<std::path::PathBuf>,
@@ -230,5 +230,283 @@ impl ForgeBuilder {
         };
 
         Ok(Forge { store, runtime: None })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Forge Creation Tests
+
+    #[tokio::test]
+    async fn test_forge_open_creates_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".forge").join("graph.db");
+
+        // Verify database doesn't exist initially
+        assert!(!db_path.exists());
+
+        // Open Forge
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Verify database was created
+        assert!(db_path.exists());
+
+        // Verify Forge instance is valid
+        let _graph = forge.graph();
+        let _search = forge.search();
+
+        drop(forge);
+    }
+
+    #[tokio::test]
+    async fn test_forge_with_runtime_creates_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+
+        // Create Forge with runtime
+        let forge = Forge::with_runtime(temp.path()).await.unwrap();
+
+        // Verify runtime exists
+        assert!(forge.runtime().is_some());
+
+        // Verify runtime is accessible
+        let runtime = forge.runtime().unwrap();
+        // Verify cache and pool are accessible (they are public fields)
+        let _cache = &runtime.cache;
+        let _pool = &runtime.pool;
+    }
+
+    #[tokio::test]
+    async fn test_forge_open_invalid_path() {
+        // Try to open with non-existent path that parent can't be created
+        // Use an invalid path that will fail
+        let result = Forge::open("/nonexistent/path/that/cannot/be/created/permission/denied/test12345/path").await;
+
+        // This should error because we can't create the directory
+        assert!(result.is_err());
+
+        // Verify error mentions path issue
+        if let Err(e) = result {
+            let error_msg = e.to_string().to_lowercase();
+            // Error might be about permission, path, or directory creation
+            assert!(error_msg.contains("path") || error_msg.contains("directory") || error_msg.contains("permission") || error_msg.contains("failed"));
+        }
+    }
+
+    // Module Accessor Tests
+
+    #[tokio::test]
+    async fn test_forge_graph_accessor() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Graph accessor should return GraphModule
+        let graph = forge.graph();
+        // Verify it's the right type (can't directly check type, but can call methods)
+        drop(graph);
+    }
+
+    #[tokio::test]
+    async fn test_forge_search_accessor() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Search accessor should return SearchModule
+        let search = forge.search();
+        drop(search);
+    }
+
+    #[tokio::test]
+    async fn test_forge_cfg_accessor() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // CFG accessor should return CfgModule
+        let cfg = forge.cfg();
+        drop(cfg);
+    }
+
+    #[tokio::test]
+    async fn test_forge_edit_accessor() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Edit accessor should return EditModule
+        let edit = forge.edit();
+        drop(edit);
+    }
+
+    #[tokio::test]
+    async fn test_forge_analysis_accessor() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Analysis accessor should return AnalysisModule with correct modules
+        let analysis = forge.analysis();
+        drop(analysis);
+    }
+
+    #[tokio::test]
+    async fn test_forge_multiple_accessor_calls() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // All accessors can be called multiple times
+        let _g1 = forge.graph();
+        let _g2 = forge.graph();
+        let _s1 = forge.search();
+        let _s2 = forge.search();
+        let _c1 = forge.cfg();
+        let _c2 = forge.cfg();
+    }
+
+    // ForgeBuilder Tests
+
+    #[test]
+    fn test_forge_builder_default() {
+        let builder = ForgeBuilder::new();
+
+        // Default builder should have None for all fields
+        assert!(builder.path.is_none());
+        assert!(builder.database_path.is_none());
+        assert!(builder.cache_ttl.is_none());
+    }
+
+    #[test]
+    fn test_forge_builder_path() {
+        let builder = ForgeBuilder::new().path("/tmp/test");
+
+        assert_eq!(builder.path, Some(std::path::PathBuf::from("/tmp/test")));
+        assert!(builder.database_path.is_none());
+        assert!(builder.cache_ttl.is_none());
+    }
+
+    #[test]
+    fn test_forge_builder_database_path() {
+        let builder = ForgeBuilder::new().database_path("/custom/db.sqlite");
+
+        assert!(builder.path.is_none());
+        assert_eq!(builder.database_path, Some(std::path::PathBuf::from("/custom/db.sqlite")));
+        assert!(builder.cache_ttl.is_none());
+    }
+
+    #[test]
+    fn test_forge_builder_cache_ttl() {
+        let ttl = std::time::Duration::from_secs(60);
+        let builder = ForgeBuilder::new().cache_ttl(ttl);
+
+        assert!(builder.path.is_none());
+        assert!(builder.database_path.is_none());
+        assert_eq!(builder.cache_ttl, Some(ttl));
+    }
+
+    #[test]
+    fn test_forge_builder_chain() {
+        let ttl = std::time::Duration::from_secs(30);
+        let builder = ForgeBuilder::new()
+            .path("/tmp/test")
+            .database_path("/custom/db.sqlite")
+            .cache_ttl(ttl);
+
+        assert_eq!(builder.path, Some(std::path::PathBuf::from("/tmp/test")));
+        assert_eq!(builder.database_path, Some(std::path::PathBuf::from("/custom/db.sqlite")));
+        assert_eq!(builder.cache_ttl, Some(ttl));
+    }
+
+    // ForgeBuilder Build Tests
+
+    #[tokio::test]
+    async fn test_forge_builder_build_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let builder = ForgeBuilder::new().path(temp.path());
+
+        // Valid builder should build Forge instance
+        let forge = builder.build().await.unwrap();
+
+        // Verify Forge works
+        let _graph = forge.graph();
+        let _search = forge.search();
+    }
+
+    #[tokio::test]
+    async fn test_forge_builder_build_missing_path() {
+        let builder = ForgeBuilder::new();
+
+        // Builder without path should return error
+        let result = builder.build().await;
+        assert!(result.is_err());
+
+        // Verify error message mentions path
+        if let Err(e) = result {
+            let error_msg = e.to_string().to_lowercase();
+            assert!(error_msg.contains("path") || error_msg.contains("required"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_forge_builder_custom_cache_ttl() {
+        let temp = tempfile::tempdir().unwrap();
+        let ttl = std::time::Duration::from_secs(120);
+
+        // Builder with custom TTL - note: TTL is stored in builder
+        // but runtime is None in basic build, so we verify builder stores it
+        let builder = ForgeBuilder::new()
+            .path(temp.path())
+            .cache_ttl(ttl);
+
+        assert_eq!(builder.cache_ttl, Some(ttl));
+
+        // Build succeeds (TTL stored but not used without runtime)
+        let _forge = builder.build().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_forge_builder_multiple_builds() {
+        let temp1 = tempfile::tempdir().unwrap();
+        let temp2 = tempfile::tempdir().unwrap();
+
+        // Same builder can build multiple instances with different paths
+        let forge1 = ForgeBuilder::new().path(temp1.path()).build().await.unwrap();
+        let forge2 = ForgeBuilder::new().path(temp2.path()).build().await.unwrap();
+
+        // Verify both work
+        let _g1 = forge1.graph();
+        let _g2 = forge2.graph();
+    }
+
+    // Forge Clone Tests
+
+    #[tokio::test]
+    async fn test_forge_clone() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Forge should be cloneable
+        let forge_clone = forge.clone();
+
+        // Both should work
+        let _g1 = forge.graph();
+        let _g2 = forge_clone.graph();
+    }
+
+    #[tokio::test]
+    async fn test_forge_clone_independence() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        // Clone Forge
+        let forge_clone = forge.clone();
+
+        // Both should be able to create modules independently
+        let g1 = forge.graph();
+        let g2 = forge_clone.graph();
+
+        // Both should be functional (drop doesn't panic)
+        drop(g1);
+        drop(g2);
+
+        // Original should still work after clone's modules are dropped
+        let _g3 = forge.graph();
     }
 }
