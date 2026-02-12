@@ -229,4 +229,144 @@ mod tests {
         let permit = pool.acquire().await.unwrap();
         assert_eq!(permit.db_path(), std::path::Path::new("/tmp/test.db"));
     }
+
+    #[tokio::test]
+    async fn test_pool_concurrent_acquires() {
+        use tokio::sync::Barrier;
+
+        let pool = Arc::new(ConnectionPool::new("/tmp/test.db", 5));
+        let barrier = Arc::new(Barrier::new(10));
+        let mut handles = vec![];
+
+        // Spawn 10 tasks trying to acquire
+        for _i in 0..10 {
+            let pool_clone = pool.clone();
+            let barrier_clone = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                barrier_clone.wait().await; // Coordinate start
+                let _permit = pool_clone.acquire().await.unwrap();
+                // Hold permit briefly
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                // Permit releases here when dropped
+            }));
+        }
+
+        // Wait for all to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // All 10 should have completed eventually
+        assert_eq!(pool.available_connections(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_pool_timeout_behavior() {
+        use tokio::time::{timeout, Duration};
+
+        let pool = ConnectionPool::new("/tmp/test.db", 1);
+
+        // Acquire 1 permit
+        let _permit1 = pool.acquire().await.unwrap();
+        assert_eq!(pool.available_connections(), 0);
+
+        // Try to acquire another - should timeout
+        let start = std::time::Instant::now();
+        let result = timeout(Duration::from_millis(100), pool.acquire()).await;
+
+        let elapsed = start.elapsed();
+
+        // Should have timed out
+        assert!(result.is_err());
+        // Should have taken approximately the timeout duration
+        assert!(elapsed >= Duration::from_millis(90));
+        assert!(elapsed < Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn test_pool_permit_drop_returns() {
+        let pool = ConnectionPool::new("/tmp/test.db", 3);
+        assert_eq!(pool.available_connections(), 3);
+
+        // Acquire permit
+        let permit = pool.acquire().await.unwrap();
+        assert_eq!(pool.available_connections(), 2);
+
+        // Drop permit
+        drop(permit);
+        assert_eq!(pool.available_connections(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_pool_stress() {
+        let pool = ConnectionPool::new("/tmp/test.db", 10);
+
+        // Run 100 acquire/release cycles
+        for _ in 0..100 {
+            let permit = pool.acquire().await.unwrap();
+            // Verify no deadlocks
+            assert_eq!(permit.db_path(), std::path::Path::new("/tmp/test.db"));
+            drop(permit);
+        }
+
+        // Verify final available equals max
+        assert_eq!(pool.available_connections(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_pool_all_permits_acquired() {
+        let pool = ConnectionPool::new("/tmp/test.db", 3);
+
+        // Acquire all permits up to max
+        let permit1 = pool.acquire().await.unwrap();
+        let permit2 = pool.acquire().await.unwrap();
+        let permit3 = pool.acquire().await.unwrap();
+
+        // Verify available is 0
+        assert_eq!(pool.available_connections(), 0);
+
+        // Verify try_acquire returns None
+        let permit4 = pool.try_acquire().await;
+        assert!(permit4.is_none());
+
+        // Release one permit
+        drop(permit1);
+
+        // Verify try_acquire now works
+        let permit5 = pool.try_acquire().await;
+        assert!(permit5.is_some());
+
+        // Clean up
+        drop(permit2);
+        drop(permit3);
+        drop(permit5);
+    }
+
+    #[tokio::test]
+    async fn test_pool_available_count() {
+        let pool = ConnectionPool::new("/tmp/test.db", 5);
+
+        // Initial available should be max
+        assert_eq!(pool.available_connections(), 5);
+
+        // Acquire varying number of permits
+        let permit1 = pool.acquire().await.unwrap();
+        assert_eq!(pool.available_connections(), 4);
+
+        let permit2 = pool.acquire().await.unwrap();
+        assert_eq!(pool.available_connections(), 3);
+
+        let permit3 = pool.acquire().await.unwrap();
+        assert_eq!(pool.available_connections(), 2);
+
+        // Drop permits and verify available increases
+        drop(permit1);
+        assert_eq!(pool.available_connections(), 3);
+
+        drop(permit2);
+        assert_eq!(pool.available_connections(), 4);
+
+        drop(permit3);
+        assert_eq!(pool.available_connections(), 5);
+    }
 }
