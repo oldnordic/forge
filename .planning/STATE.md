@@ -2,8 +2,8 @@
 
 **Project**: ForgeKit
 **Version**: 0.4.0
-**Last Updated**: 2026-02-12
-**Current Phase**: v0.4 Agent Layer
+**Last Updated**: 2026-02-13
+**Current Phase**: v0.3 Runtime Layer (Test Infrastructure)
 
 ---
 
@@ -39,7 +39,7 @@ Establish project foundation with proper workspace structure, documentation, and
 | Task ID | Task | Status | Assigned | Target |
 |----------|-------|--------|----------|---------|
 | 03-01 | Test Infrastructure | Pending | - | Week 1 |
-| 03-02 | Unit Tests | Pending | - | Week 1 |
+| 03-02 | Unit Tests | Complete | - | Week 1 |
 | 03-03 | Integration Tests | Pending | - | Week 1 |
 | 04-01 | README Validation | Pending | - | Week 1 |
 | 04-02 | API Documentation | Pending | - | Week 1 |
@@ -190,6 +190,39 @@ Establish project foundation with proper workspace structure, documentation, and
 - [x] `Agent` struct
 - [x] Data types for agent loop
 - [x] All phase stubs
+
+---
+
+### v0.1 Phase 03-02: Unit Tests (Complete)
+
+**Completed**: 2026-02-13
+
+**Deliverables:**
+
+**Unit Tests (20 tests in forge_core/src/lib.rs):**
+- [x] Forge Creation Tests (3): test_forge_open_creates_database, test_forge_with_runtime_creates_runtime, test_forge_open_invalid_path
+- [x] Module Accessor Tests (6): test_forge_graph_accessor, test_forge_search_accessor, test_forge_cfg_accessor, test_forge_edit_accessor, test_forge_analysis_accessor, test_forge_multiple_accessor_calls
+- [x] ForgeBuilder Tests (5): test_forge_builder_default, test_forge_builder_path, test_forge_builder_database_path, test_forge_builder_cache_ttl, test_forge_builder_chain
+- [x] ForgeBuilder Build Tests (4): test_forge_builder_build_success, test_forge_builder_build_missing_path, test_forge_builder_custom_cache_ttl, test_forge_builder_multiple_builds
+- [x] Forge Clone Tests (2): test_forge_clone, test_forge_clone_independence
+
+**Integration Tests (8 tests):**
+- [x] `forge_core/tests/builder_tests.rs` (4): test_builder_default_config, test_builder_custom_db_path, test_builder_requires_path, test_forge_creates_database_file
+- [x] `forge_core/tests/accessor_tests.rs` (4): test_all_accessors_work, test_accessor_returns_different_instances, test_graph_module_has_store, test_search_module_works
+- [x] Integration test infrastructure in `tests/integration/` for future expansion
+
+**Debug Trait Infrastructure:**
+- [x] Debug derive added to Watcher, IncrementalIndexer, QueryCache, ConnectionPool
+- [x] Manual Debug implementation for UnifiedGraphStore
+
+**Test Results:**
+- Total workspace tests: 198 (28% increase)
+- forge_core: 165 tests (142 unit + 8 integration + 15 doc)
+- All tests passing
+
+**Commits:**
+- aef683c: test(03-02): add 20 unit tests for Forge and ForgeBuilder
+- d499a94: test(03-02): add integration test infrastructure with 8 tests
 
 ---
 
