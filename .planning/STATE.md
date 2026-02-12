@@ -354,6 +354,72 @@ Establish project foundation with proper workspace structure, documentation, and
 
 ---
 
+### Decision 007: Watcher Lifetime Management
+
+**Date**: 2026-02-13
+**Context**: How to keep the notify watcher alive to continue receiving file system events?
+
+**Options:**
+1. Return the watcher from start() and require caller to store it
+2. Store the watcher internally in the Watcher struct
+3. Use a background task with a channel
+
+**Decision**: Option 2 - Store the watcher internally in `Arc<Mutex<Option<RecommendedWatcher>>>`
+
+**Rationale:**
+- The notify watcher must remain in memory to continue receiving events
+- Storing internally abstracts this detail from users
+- Arc<Mutex> allows shared access and keeps the watcher alive
+- Option wrapper allows for future cleanup if needed
+
+**Impact**: Watcher struct now has an `inner` field that stores the underlying notify watcher
+
+---
+
+### Decision 008: Test Timing for File System Events
+
+**Date**: 2026-02-13
+**Context**: How long should tests wait for file system events to propagate?
+
+**Options:**
+1. Use minimal delays (10-50ms)
+2. Use moderate delays (100-200ms)
+3. Use conservative delays (300-500ms)
+
+**Decision**: Option 2 - Use 200-300ms delays with 3s timeouts
+
+**Rationale:**
+- File system event latency varies by system load and platform
+- Shorter delays cause test flakiness and timeouts
+- Conservative delays ensure reliability without significantly slowing test suite
+- 3s timeout allows for worst-case scenarios without excessive waiting
+
+**Impact**: All watcher tests use 200-300ms settling times and 3s receive timeouts
+
+---
+
+### Decision 009: Concurrency Testing with Non-Send Types
+
+**Date**: 2026-02-13
+**Context**: How to test concurrent operations when SqliteGraph is not Send/Sync?
+
+**Options:**
+1. Use tokio::spawn with Send wrappers (complex)
+2. Test internal async queue via rapid operations
+3. Skip concurrency tests entirely
+
+**Decision**: Option 2 - Test internal async queue safety via rapid queuing
+
+**Rationale:**
+- SqliteGraph uses RefCell which is not Send/Sync
+- The indexer uses tokio::spawn internally for queue operations
+- Rapid queuing exercises the same code paths without requiring Send bounds
+- Simpler and more maintainable than wrapper types
+
+**Impact**: test_indexer_concurrent_flush tests rapid queuing instead of spawning tasks
+
+---
+
 ### Decision 006: Runtime Architecture with Placeholder Implementations
 
 **Date**: 2026-02-12
@@ -548,6 +614,41 @@ Test infrastructure foundation established with comprehensive type coverage (40 
 
 ### Next Phase
 Ready for 03-02 (Unit Tests)
+
+---
+
+## Phase 03-03a Execution
+
+**Completed:** 2026-02-13
+**Duration:** ~20 minutes
+**Tasks:** 2/2 complete
+
+### Summary
+Expanded test coverage for file watching and incremental indexing with event detection tests, debouncing verification, recursive watching, and concurrent operations.
+
+### Commits
+- 2f3f0bd: Expand watcher.rs tests with file operations and fix lifetime management
+- 972eaef: Expand indexing.rs tests with edge cases and concurrency
+
+### Test Results
+- Watcher tests: 9 total (3 existing + 6 new)
+- Indexing tests: 11 total (5 existing + 6 new)
+- Total workspace tests: 166
+- All tests passing
+
+### Deviations
+- Fixed bug: Watcher now stores underlying notify watcher to keep it alive (Rule 1 - Bug)
+- Fixed bug: Increased test timing delays for file system settling (Rule 1 - Bug)
+- Fixed bug: Adapted concurrent test for SqliteGraph not being Send (Rule 1 - Bug)
+- Fixed bug: Changed useless >= 0 assertions to > 0 (Rule 1 - Bug)
+
+### Key Decisions
+- Watcher lifetime: Store underlying notify watcher in Arc<Mutex<Option<RecommendedWatcher>>>
+- Test timing: Use 200-300ms delays for file system settling
+- Concurrency testing: Test internal async queue safety due to SqliteGraph limitations
+
+### Next Phase
+Ready for 03-03b (Integration Tests)
 
 ---
 
