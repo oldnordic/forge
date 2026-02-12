@@ -11,9 +11,12 @@
 //!
 //! # Status
 //!
-//! This crate is currently a stub. Full implementation is planned for v0.4.
+//! This crate is under active development. Observation phase is implemented.
 
 use std::path::PathBuf;
+
+// Observation module (Phase 4 - Task 1)
+pub mod observe;
 
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
@@ -41,6 +44,10 @@ pub enum AgentError {
     /// Policy constraint violated
     #[error("Policy violation: {0}")]
     PolicyViolation(String),
+
+    /// Error from Forge SDK
+    #[error("Forge error: {0}")]
+    ForgeError(#[from] forge_core::ForgeError),
 }
 
 /// Result type for agent operations.
@@ -117,7 +124,11 @@ pub mod policy {
 /// 6. Commit: Finalize transaction
 ///
 pub struct Agent {
+    /// Path to the codebase
+    #[allow(dead_code)]
     codebase_path: PathBuf,
+    /// Forge SDK instance for graph queries
+    forge: Option<forge_core::Forge>,
 }
 
 impl Agent {
@@ -127,8 +138,14 @@ impl Agent {
     ///
     /// * `codebase_path` - Path to the codebase
     pub async fn new(codebase_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let path = codebase_path.as_ref().to_path_buf();
+
+        // Try to initialize Forge SDK
+        let forge = forge_core::Forge::open(&path).await.ok();
+
         Ok(Self {
-            codebase_path: codebase_path.as_ref().to_path_buf(),
+            codebase_path: path,
+            forge,
         })
     }
 
@@ -137,11 +154,26 @@ impl Agent {
     /// # Arguments
     ///
     /// * `query` - The natural language query or request
-    pub async fn observe(&self, _query: &str) -> Result<Observation> {
-        // TODO: Implement observation via graph queries
-        Err(AgentError::ObservationFailed(
-            "Observation not yet implemented".to_string()
-        ))
+    pub async fn observe(&self, query: &str) -> Result<Observation> {
+        let forge = self.forge.as_ref()
+            .ok_or_else(|| AgentError::ObservationFailed(
+                "Forge SDK not available".to_string()
+            ))?;
+
+        let observer = observe::Observer::new(forge.clone());
+        let obs = observer.gather(query).await?;
+
+        Ok(Observation {
+            relevant_symbols: obs.symbols.iter()
+                .map(|s| format!("{} at {:?}", s.name, s.location))
+                .collect(),
+            references: obs.references.iter()
+                .map(|r| format!("{:?} -> {:?}", r.from, r.to))
+                .collect(),
+            cfg_data: obs.cfg_data.iter()
+                .map(|c| format!("symbol {:?}: {} paths, complexity {}", c.symbol_id, c.path_count, c.complexity))
+                .collect(),
+        })
     }
 
     /// Applies policy constraints to the observation.
@@ -149,8 +181,8 @@ impl Agent {
     /// # Arguments
     ///
     /// * `_observation` - The observation to constrain
-    /// * `policy` - The policy to apply
-    pub async fn constrain(&self, _observation: Observation, policy: policy::Policy) -> Result<ConstrainedPlan> {
+    /// * `_policy` - The policy to apply
+    pub async fn constrain(&self, _observation: Observation, _policy: policy::Policy) -> Result<ConstrainedPlan> {
         // TODO: Implement policy validation
         Ok(ConstrainedPlan {
             observation: _observation,
