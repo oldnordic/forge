@@ -1,90 +1,344 @@
 # API Reference
 
-**Version**: 0.1.0 (Design Phase)
-**Last Updated**: 2025-12-30
+**Version**: 0.1.0 (Foundation)
+**Last Updated**: 2026-02-12
 
 ---
 
 ## Table of Contents
 
-- [Forge Builder](#forge-builder)
+- [Quick Start](#quick-start)
 - [Graph Operations](#graph-operations)
 - [Search Operations](#search-operations)
 - [CFG Operations](#cfg-operations)
 - [Edit Operations](#edit-operations)
 - [Analysis Operations](#analysis-operations)
-- [Agent API](#agent-api)
-- [Types](#types)
+- [Core Types](#core-types)
+- [Error Handling](#error-handling)
 
 ---
 
-## Forge Builder
+## Quick Start
 
 ### Creating a Forge Instance
 
 ```rust
 use forge::Forge;
 
-// Basic usage
-let forge = Forge::open("./my-project")?;
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Open a codebase
+    let forge = Forge::open("./my-project").await?;
 
-// With builder
-let forge = Forge::builder()
-    .path("./my-project")
-    .backend(ForgeBackend::Sqlite)
-    .cache_config(CacheConfig {
-        symbol_cache_size: 10_000,
-        path_cache_ttl: Duration::from_secs(300),
-    })
-    .build()
-    .await?;
+    // Access modules
+    let graph = forge.graph();
+    let search = forge.search();
+    let cfg = forge.cfg();
+    let edit = forge.edit();
+    let analysis = forge.analysis();
 
-// With explicit database path
-let forge = Forge::builder()
-    .path("./my-project")
-    .database_path(".forge/graph.db")
-    .build()
-    .await?;
+    Ok(())
+}
 ```
 
-### Configuration Options
+### Using the Builder
 
-| Option | Type | Default | Description |
-|---------|--------|----------|-------------|
-| `path` | `&str` | *Required* | Path to codebase |
-| `backend` | `ForgeBackend` | `Sqlite` | Storage backend |
-| `database_path` | `&str` | `.forge/graph.db` | Custom database location |
-| `cache_config` | `CacheConfig` | Default config | Cache settings |
-| `watch_mode` | `bool` | `false` | Enable file watching |
-| `log_level` | `LogLevel` | `Info` | Logging verbosity |
+```rust
+use forge::Forge;
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::builder()
+        .path("./my-project")
+        .database_path(".forge/graph.db")
+        .cache_ttl(Duration::from_secs(300))
+        .build()
+        .await?;
+
+    Ok(())
+}
+```
 
 ---
 
 ## Graph Operations
+
+The graph module provides symbol and reference queries.
 
 ### Finding Symbols
 
 ```rust
 let graph = forge.graph();
 
-// Find by name
-let symbols = graph.find_symbol("main")?;
-// Returns: Vec<Symbol>
-
-// Find by exact name and file
-let symbol = graph.find_symbol_in_file("parse", "src/parser.rs")?;
+// Find symbols by name
+let symbols = graph.find_symbol("main").await?;
 
 // Find by stable ID
-let symbol = graph.find_symbol_by_id(SymbolId(12345))?;
+let symbol = graph.find_symbol_by_id(SymbolId(123)).await?;
+```
 
-// List all symbols in a file
-let symbols = graph.symbols_in_file("src/lib.rs")?;
+### Finding Callers
 
-// With filters
-let symbols = graph.find_symbol("data")?
-    .kind(SymbolKind::Function)?
-    .language(Language::Rust)?
-    .execute()?;
+```rust
+// Find all functions that call a symbol
+let callers = graph.callers_of("process_request").await?;
+
+for caller in callers {
+    println!("Called from {:?}", caller.location);
+}
+```
+
+### Finding All References
+
+```rust
+// Get all references (calls, uses, type refs)
+let refs = graph.references("Database").await?;
+
+for reference in refs {
+    println!("{:?} -> {:?}", reference.from, reference.to);
+}
+```
+
+### Reachability Analysis
+
+```rust
+// Find all symbols reachable from a starting symbol
+let reachable = graph.reachable_from(SymbolId(100)).await?;
+
+println!("Reachable symbols: {}", reachable.len());
+```
+
+### Cycle Detection
+
+```rust
+// Detect cycles in the call graph
+let cycles = graph.cycles().await?;
+
+for cycle in cycles {
+    println!("Cycle: {:?}", cycle.members);
+}
+```
+
+---
+
+## Search Operations
+
+The search module provides semantic code search with builder pattern.
+
+### Basic Search
+
+```rust
+let search = forge.search();
+
+// Search for symbols by name
+let results = search.symbol("Database").execute().await?;
+
+for symbol in results {
+    println!("Found: {}", symbol.name);
+}
+```
+
+### Filtered Search
+
+```rust
+use forge::types::SymbolKind;
+
+// Combine multiple filters
+let results = search
+    .symbol("Database")
+    .kind(SymbolKind::Struct)
+    .file("src/")
+    .limit(10)
+    .execute()
+    .await?;
+```
+
+### Available Filters
+
+| Method | Description |
+|--------|-------------|
+| `kind(SymbolKind)` | Filter by symbol type (Function, Struct, etc.) |
+| `file(&str)` | Filter by file path prefix |
+| `limit(usize)` | Limit number of results |
+
+---
+
+## CFG Operations
+
+The CFG module provides control flow graph analysis.
+
+### Path Enumeration
+
+```rust
+let cfg = forge.cfg();
+
+// Get all execution paths
+let paths = cfg.paths(symbol_id)
+    .execute()
+    .await?;
+
+for path in paths {
+    println!("Path length: {}", path.length);
+}
+```
+
+### Filtered Path Enumeration
+
+```rust
+// Get only successful (non-error) paths
+let normal_paths = cfg.paths(symbol_id)
+    .normal_only()
+    .max_length(10)
+    .limit(100)
+    .execute()
+    .await?;
+```
+
+### Dominance Analysis
+
+```rust
+// Compute dominator tree
+let dominators = cfg.dominators(symbol_id).await?;
+
+println!("Dominator tree: {:?}", dominators.dominators);
+```
+
+### Loop Detection
+
+```rust
+// Find natural loops in function
+let loops = cfg.loops(symbol_id).await?;
+
+for loop_info in loops {
+    println!("Loop at depth {}", loop_info.depth);
+}
+```
+
+---
+
+## Edit Operations
+
+The edit module provides span-safe refactoring operations.
+
+### Rename Symbol
+
+```rust
+let edit = forge.edit();
+
+// Complete rename workflow
+let op = edit.rename_symbol("OldName", "NewName");
+
+// Step 1: Verify
+let op = op.verify()?;
+
+// Step 2: Preview
+let diff = op.preview()?;
+println!("Change: {} -> {}", diff.original, diff.modified);
+
+// Step 3: Apply
+let result = op.apply()?;
+println!("Modified {} files", result.files_modified);
+```
+
+### Delete Symbol
+
+```rust
+let edit = forge.edit();
+
+// Delete workflow
+let op = edit.delete_symbol("unused_function")?
+    .verify()?
+    .apply()?;
+
+println!("Removed {} references", op.references_removed);
+```
+
+### Edit Operation Trait
+
+All edit operations implement the `EditOperation` trait:
+
+```rust
+use forge::edit::EditOperation;
+
+pub trait EditOperation: Sized {
+    type Output;
+
+    // Pre-flight validation
+    fn verify(self) -> Result<Self>;
+
+    // Show changes without applying
+    fn preview(self) -> Result<Diff>;
+
+    // Apply the operation
+    fn apply(self) -> Result<Self::Output>;
+
+    // Undo the operation
+    fn rollback(self) -> Result<()>;
+}
+```
+
+---
+
+## Analysis Operations
+
+The analysis module combines multiple modules for high-level operations.
+
+### Impact Analysis
+
+```rust
+let analysis = forge.analysis();
+
+// Analyze what would be affected by changing a symbol
+let impact = analysis.impact_radius(symbol_id).await?;
+
+println!("Impact radius: {}", impact.radius);
+println!("Affected files: {}", impact.affected_files.len());
+println!("Affected symbols: {}", impact.affected_symbols.len());
+
+for file in &impact.affected_files {
+    println!("  - {}", file.display());
+}
+```
+
+### Dead Code Detection
+
+```rust
+// Find unused functions given entry points
+let entries = &[SymbolId(1), SymbolId(2)]; // main, test_main
+let unused = analysis.unused_functions(entries).await?;
+
+for symbol_id in unused {
+    println!("Unused: {:?}", symbol_id);
+}
+```
+
+### Circular Dependencies
+
+```rust
+// Detect circular dependencies
+let cycles = analysis.circular_dependencies().await?;
+
+for cycle in cycles {
+    println!("Cycle: {:?}", cycle.members);
+}
+```
+
+---
+
+## Core Types
+
+### Symbol Identifiers
+
+```rust
+// Stable symbol identifier (hash-based)
+pub struct SymbolId(pub i64);
+
+// CFG block identifier
+pub struct BlockId(pub i64);
+
+// Path identifier (BLAKE3 hash)
+pub struct PathId(pub [u8; 16]);
 ```
 
 ### Symbol Type
@@ -94,433 +348,59 @@ pub struct Symbol {
     pub id: SymbolId,              // Stable identifier
     pub name: String,              // Display name
     pub fully_qualified_name: String, // Full path
-    pub kind: SymbolKind,           // Function, Struct, etc.
+    pub kind: SymbolKind,          // Function, Struct, etc.
     pub language: Language,          // Rust, Python, etc.
     pub location: Location,          // File and span
-    pub metadata: SymbolMetadata,     // Additional info
-}
-
-pub struct Location {
-    pub file_path: String,
-    pub byte_start: u32,
-    pub byte_end: u32,
-    pub line_number: usize,
+    pub parent_id: Option<SymbolId>, // Parent if nested
+    pub metadata: serde_json::Value, // Additional info
 }
 ```
 
-### Reference Queries
-
-```rust
-// Find all callers
-let callers = graph.callers_of("Database::connect")?;
-// Returns: Vec<Reference>
-
-// Find all callees
-let callees = graph.callees_of("process_request")?;
-
-// Find all references (includes both)
-let refs = graph.references("UserSession")?;
-
-// With context
-let refs = graph.references("UserSession")?
-    .with_context(3)?     // 3 lines of context
-    .include_definitions()?
-    .execute()?;
-```
-
-### Graph Algorithms
-
-```rust
-// Reachability
-let reachable = graph.reachable_from(SymbolId(100))?;
-
-// Dead code detection
-let dead = graph.dead_code(SymbolId(1))?; // entry point
-
-// Cycle detection
-let cycles = graph.cycles()?;
-
-// Strongly connected components
-let sccs = graph.strongly_connected_components()?;
-
-// Call graph condensation
-let condensed = graph.condense()?;
-```
-
----
-
-## Search Operations
-
-### Symbol Search
-
-```rust
-let search = forge.search();
-
-// Basic symbol search
-let results = search.symbol("Database")
-    .kind(SymbolKind::Struct)?
-    .limit(10)
-    .execute()?;
-
-// Pattern search
-let results = search.pattern("impl.*Reader")?
-    .language(Language::Rust)?
-    .execute()?;
-```
-
-### AST Queries
-
-```rust
-// Find AST nodes by kind
-let functions = search.ast_query(AstQuery {
-    kind: AstKind::FunctionDefinition,
-    file: "src/lib.rs",
-})?;
-
-// Find with property filter
-let unsafe_blocks = search.ast_query(AstQuery {
-    kind: AstKind::Block,
-    has_label: "unsafe",
-})?;
-```
-
-### Semantic Search
-
-```rust
-// When embeddings are available
-let similar = search.semantic("handle database connection errors")?
-    .limit(5)
-    .execute()?;
-```
-
----
-
-## CFG Operations
-
-### Path Enumeration
-
-```rust
-let cfg = forge.cfg();
-
-// All execution paths
-let paths = cfg.paths(SymbolId(100))?
-    .execute()?;
-
-// With filters
-let normal_paths = cfg.paths(SymbolId(100))?
-    .normal_only()?
-    .max_length(10)?
-    .limit(100)?
-    .execute()?;
-
-// Error paths only
-let error_paths = cfg.paths(SymbolId(100))?
-    .error_only()?
-    .execute()?;
-```
-
-### Path Type
-
-```rust
-pub struct Path {
-    pub id: PathId,
-    pub kind: PathKind,
-    pub blocks: Vec<BlockId>,
-    pub length: usize,
-}
-
-pub enum PathKind {
-    Normal,      // Successful execution
-    Error,       // Error/panic path
-    Degenerate,   // Unreachable code
-    Infinite,     // Loop without exit
-}
-```
-
-### Dominance Analysis
-
-```rust
-// Dominators
-let dominators = cfg.dominators(SymbolId(100))?;
-// Returns: DominatorTree
-
-// Post-dominators
-let post_doms = cfg.post_dominators(SymbolId(100))?;
-
-// Dominance frontier
-let frontiers = cfg.dominance_frontiers(SymbolId(100))?;
-
-// Immediate dominator
-let idom = cfg.immediate_dominator(block_id)?;
-```
-
-### Loop Analysis
-
-```rust
-// Natural loops
-let loops = cfg.loops(SymbolId(100))?;
-
-// Loop headers
-let headers = cfg.loop_headers(SymbolId(100))?;
-
-// Loop nesting
-let nesting = cfg.loop_nesting_depth(SymbolId(100))?;
-```
-
-### Unreachable Code
-
-```rust
-// Find unreachable blocks
-let unreachable = cfg.unreachable_blocks(SymbolId(100))?;
-
-// Verify block is reachable
-let is_reachable = cfg.is_reachable(SymbolId(100), block_id)?;
-```
-
----
-
-## Edit Operations
-
-### Rename Symbol
-
-```rust
-let edit = forge.edit();
-
-let result = edit.rename_symbol("OldName", "NewName")?
-    .verify()?        // Pre-flight validation
-    .preview()?       // Show diff without applying
-    .apply()?;       // Apply changes
-
-// Result info
-println!("Modified {} files", result.files_modified);
-println!("Updated {} references", result.references_updated);
-```
-
-### Delete Symbol
-
-```rust
-let result = edit.delete_symbol("unused_function")?
-    .verify()?
-    .apply()?;
-```
-
-### Inline Function
-
-```rust
-let result = edit.inline_function("helper_fn")?
-    .verify()?
-    .apply()?;
-```
-
-### Extract Operation
-
-```rust
-// Extract trait
-let result = edit.extract_trait(
-    "DatabaseBackend",
-    vec![
-        SymbolId(100),  // connect method
-        SymbolId(101),  // query method
-    ]
-)?
-    .trait_name("DbOps")
-    .verify()?
-    .apply()?;
-```
-
-### Edit Validation
-
-```rust
-// Custom validation
-let result = edit.rename_symbol("A", "B")?
-    .validate_with(|edit| {
-        // Custom check
-        if edit.touches_unsafe_code() {
-            Err("Cannot rename unsafe code".into())
-        } else {
-            Ok(())
-        })
-    })?
-    .apply()?;
-```
-
----
-
-## Analysis Operations
-
-### Impact Analysis
-
-```rust
-let analysis = forge.analysis();
-
-// Impact radius
-let impact = analysis.impact_radius(SymbolId(100))?;
-println!("Affects {} symbols", impact.affected_symbols.len());
-println!("Affects {} files", impact.affected_files.len());
-
-// Blast zone (affected by change)
-let blast = analysis.blast_zone(SymbolId(100))?;
-```
-
-### Dead Code Analysis
-
-```rust
-// Find all unused functions
-let unused = analysis.unused_functions(entry_points)?;
-
-// Find unreachable code
-let unreachable = analysis.unreachable_code()?;
-
-// Find dead imports
-let dead_imports = analysis.unused_imports()?;
-```
-
-### Dependency Analysis
-
-```rust
-// Find circular dependencies
-let cycles = analysis.circular_dependencies()?;
-
-// Dependency graph
-let deps = analysis.dependencies("src/main.rs")?;
-
-// Reverse dependencies
-let dependents = analysis.reverse_dependencies("src/lib.rs")?;
-```
-
----
-
-## Agent API
-
-### Deterministic Agent Loop
-
-```rust
-use forge::agent::{Agent, Policy};
-
-let result = Agent::new(&forge)
-    .observe("Rename function foo to bar")?
-    .constrain(Policy::NoUnsafeInPublicAPI)?
-    .plan()?
-    .mutate()?
-    .verify()?
-    .commit()?;
-```
-
-### Agent Phases
-
-```rust
-// 1. Observe - Gather context
-let observation = agent.observe(query)?;
-// Returns: Observation { symbols, references, cfg }
-
-// 2. Constrain - Apply policy
-let constrained = agent.constrain(observation, Policy::default())?;
-// Returns: ConstrainedPlan
-
-// 3. Plan - Generate steps
-let plan = agent.plan(constrained)?;
-// Returns: ExecutionPlan { steps }
-
-// 4. Mutate - Apply changes
-let mutation = agent.mutate(plan)?;
-// Returns: MutationResult { files_modified }
-
-// 5. Verify - Validate result
-let verified = agent.verify(mutation)?;
-// Returns: VerificationResult { success, diagnostics }
-
-// 6. Commit - Finalize
-let commit = agent.commit(verified)?;
-// Returns: CommitResult { transaction_id }
-```
-
-### Policy DSL
-
-```rust
-use forge::agent::Policy;
-
-// Built-in policies
-let policy = Policy::NoUnsafeInPublicAPI;
-let policy = Policy::PreserveSemantics;
-let policy = Policy::RequireTests;
-let policy = Policy::MaxComplexity(10);
-
-// Compose policies
-let policy = Policy::all_of(vec![
-    Policy::NoUnsafeInPublicAPI,
-    Policy::MaxComplexity(10),
-]);
-
-// Custom policy
-let policy = Policy::custom(|edit| {
-    if edit.affects_public_api() && !edit.has_tests() {
-        Err("Public API changes require tests".into())
-    } else {
-        Ok(())
-    }
-});
-```
-
----
-
-## Types
-
-### Core Types
-
-```rust
-// Symbol identifier (stable across reindex)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SymbolId(pub i64);
-
-// Block identifier
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BlockId(pub i64);
-
-// Path identifier
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PathId(pub [u8; 16]); // BLAKE3 hash
-```
-
-### Symbol Kind
+### Symbol Kinds
 
 ```rust
 pub enum SymbolKind {
     // Declarations
-    Function,
-    Method,
-    Struct,
-    Enum,
-    Trait,
-    Impl,
-    Module,
-    TypeAlias,
-    Constant,
-    Static,
+    Function, Method, Struct, Enum, Trait, Impl,
+    Module, TypeAlias, Constant, Static,
 
     // Variables
-    Parameter,
-    LocalVariable,
-    Field,
+    Parameter, LocalVariable, Field,
 
     // Other
-    Macro,
-    Use,
+    Macro, Use,
 }
 ```
 
-### Language
+### Location
 
 ```rust
-pub enum Language {
-    Rust,
-    Python,
-    C,
-    Cpp,
-    Java,
-    JavaScript,
-    TypeScript,
-    Go,
-    Unknown(String),
+pub struct Location {
+    pub file_path: PathBuf,  // Path to file
+    pub byte_start: u32,      // UTF-8 byte offset
+    pub byte_end: u32,        // UTF-8 byte offset
+    pub line_number: usize,     // 1-indexed line
+}
+
+impl Location {
+    pub fn span(&self) -> Span;           // Get byte span
+    pub fn len(&self) -> u32;              // Get length in bytes
+}
+```
+
+### Span
+
+```rust
+pub struct Span {
+    pub start: u32,  // Inclusive
+    pub end: u32,    // Exclusive (half-open)
+}
+
+impl Span {
+    pub fn len(&self) -> u32;           // Span length
+    pub fn is_empty(&self) -> bool;       // Zero-length check
+    pub fn contains(&self, offset: u32) -> bool; // Contains check
+    pub fn merge(&self, other: Span) -> Span;     // Merge spans
 }
 ```
 
@@ -528,52 +408,90 @@ pub enum Language {
 
 ```rust
 pub struct Reference {
-    pub from: SymbolId,
-    pub to: SymbolId,
-    pub ref_kind: ReferenceKind,
-    pub location: Location,
+    pub from: SymbolId,      // Referencing symbol
+    pub to: SymbolId,        // Referenced symbol
+    pub kind: ReferenceKind, // Call, Use, etc.
+    pub location: Location,    // Where reference occurs
 }
 
 pub enum ReferenceKind {
-    Call,
-    Use,
-    TypeReference,
-    Inherit,
-    Implementation,
-    Override,
+    Call,            // Function/method call
+    Use,             // Import or use statement
+    TypeReference,    // Type annotation
+    Inherit,         // Inheritance
+    Implementation,  // Trait implementation
+    Override,        // Method override
+}
+```
+
+### Path Types
+
+```rust
+pub struct Path {
+    pub id: PathId,           // Stable identifier
+    pub kind: PathKind,        // Normal, Error, etc.
+    pub blocks: Vec<BlockId>,  // Blocks in order
+    pub length: usize,         // Number of blocks
+}
+
+pub enum PathKind {
+    Normal,      // Successful execution
+    Error,       // Error/panic path
+    Degenerate,  // Unreachable code
+    Infinite,    // Loop without exit
 }
 ```
 
 ---
 
-## Error Types
+## Error Handling
+
+All operations return `Result<T>` which is an alias for:
 
 ```rust
 pub enum ForgeError {
-    // Storage
+    // Storage errors
     DatabaseError(String),
     BackendNotAvailable(String),
 
-    // Query
+    // Query errors
     SymbolNotFound(String),
     InvalidQuery(String),
 
-    // Edit
+    // Edit errors
     EditConflict { file: String, span: Span },
-    VerificationFailed { file: String, reason: String },
+    VerificationFailed(String),
 
-    // CFG
+    // CFG errors
     CfgNotAvailable(SymbolId),
     PathOverflow(SymbolId),
-
-    // Policy
-    PolicyViolation(String),
 }
+```
 
-impl std::error::Error for ForgeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        // ...
+### Error Handling Example
+
+```rust
+use forge::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./my-project").await?;
+
+    match forge.graph().find_symbol("main").await {
+        Ok(symbols) => {
+            for symbol in symbols {
+                println!("Found: {}", symbol.name);
+            }
+        }
+        Err(ForgeError::SymbolNotFound(name)) => {
+            eprintln!("Symbol '{}' not found", name);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+        }
     }
+
+    Ok(())
 }
 ```
 
@@ -581,7 +499,7 @@ impl std::error::Error for ForgeError {
 
 ## Examples
 
-### Complete Refactoring Example
+### Complete Refactoring Workflow
 
 ```rust
 use forge::{Forge, Policy};
@@ -592,54 +510,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Open codebase
     let forge = Forge::open("./my-project").await?;
 
-    // Find symbol to rename
-    let symbol = forge.graph()
-        .find_symbol("old_name")?
-        .into_iter()
-        .find(|s| s.kind == SymbolKind::Function)
-        .ok_or("Symbol not found")?;
+    // Find symbol to analyze
+    let graph = forge.graph();
+    let symbols = graph.find_symbol("old_function_name").await?;
 
-    // Check impact
-    let impact = forge.analysis().impact_radius(symbol.id)?;
-    println!("This will affect {} files", impact.affected_files.len());
+    if symbols.is_empty() {
+        println!("Symbol not found");
+        return Ok(());
+    }
 
-    // Execute with agent
-    let result = Agent::new(&forge)
-        .observe(format!("Rename function {} to {}", symbol.name, "new_name"))?
-        .constrain(Policy::NoUnsafeInPublicAPI)?
-        .plan()?
-        .mutate()?
-        .verify()?
-        .commit()?;
+    let symbol = &symbols[0];
 
-    println!("Successfully renamed in {} files", result.files_modified);
+    // Analyze impact before making changes
+    let analysis = forge.analysis();
+    let impact = analysis.impact_radius(symbol.id).await?;
+
+    println!("Impact Analysis:");
+    println!("  Radius: {}", impact.radius);
+    println!("  Files: {}", impact.affected_files.len());
+    println!("  Symbols: {}", impact.affected_symbols.len());
+
+    // Preview changes
+    let edit = forge.edit();
+    let op = edit.rename_symbol("old_function_name", "new_function_name")?
+        .verify()?;
+
+    let diff = op.preview()?;
+    println!("Preview:");
+    println!("  {} -> {}", diff.original, diff.modified);
+
+    // Apply changes
+    let result = op.apply()?;
+    println!("Result:");
+    println!("  Files modified: {}", result.files_modified);
+    println!("  References updated: {}", result.references_updated);
 
     Ok(())
 }
 ```
 
-### Analysis Example
-
-```rust
-// Find all dead code
-let analysis = forge.analysis();
-
-let unused_functions = analysis.unused_functions(&["main", "test_main"])?;
-for fn in &unused_functions {
-    println!("Unused: {} at {:?}", fn.name, fn.location);
-}
-
-// Find circular dependencies
-let cycles = analysis.circular_dependencies()?;
-for cycle in &cycles {
-    println!("Cycle: {}", cycle.join(" -> "));
-}
-
-// Find hot paths (most executed)
-let hot_paths = forge.cfg().hot_paths(SymbolId(100))?;
-println!("Hottest path has {} blocks", hot_paths[0].length);
-```
-
 ---
 
-*Last updated: 2025-12-30*
+*Last updated: 2026-02-12*

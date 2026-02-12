@@ -35,7 +35,7 @@
 //! - [`storage`]: Storage abstraction layer
 //! - [`graph`]: Symbol and reference queries
 //! - [`search`]: Semantic search operations
-//! - [`cfg`]: Control flow graph analysis
+//! - [`mod@cfg`]: Control flow graph analysis
 //! - [`edit`]: Span-safe code editing
 //! - [`analysis`]: Combined analysis operations
 
