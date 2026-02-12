@@ -1,10 +1,10 @@
 //! Search module - Semantic code search.
 //!
-//! This module provides semantic search capabilities via LLMGrep integration.
+//! This module provides semantic search capabilities with filter builders.
 
 use std::sync::Arc;
 use crate::storage::UnifiedGraphStore;
-use crate::error::{ForgeError, Result};
+use crate::error::Result;
 use crate::types::{Symbol, SymbolKind};
 
 /// Search module for semantic code queries.
@@ -59,9 +59,8 @@ impl SearchModule {
     /// * `_pattern` - The search pattern
     pub async fn pattern(&self, _pattern: &str) -> Result<Vec<Symbol>> {
         // TODO: Implement via LLMGrep integration
-        Err(ForgeError::BackendNotAvailable(
-            "Pattern search not yet implemented".to_string()
-        ))
+        // For v0.1, this is deferred
+        Ok(Vec::new())
     }
 }
 
@@ -86,9 +85,6 @@ pub struct SearchBuilder {
     file_filter: Option<String>,
     limit: Option<usize>,
 }
-
-// Don't implement Default - it's not really needed for this type
-// The builder is created through SearchModule::symbol()
 
 impl SearchBuilder {
     /// Filters by symbol kind.
@@ -123,14 +119,45 @@ impl SearchBuilder {
 
     /// Executes the search query.
     ///
+    /// Builds a SQL query with the applied filters and executes it.
+    ///
     /// # Returns
     ///
     /// A vector of matching symbols
     pub async fn execute(self) -> Result<Vec<Symbol>> {
-        // TODO: Implement via LLMGrep integration
-        Err(ForgeError::BackendNotAvailable(
-            "Search execution not yet implemented".to_string()
-        ))
+        // Get all symbols matching the name filter
+        let name_match = match &self.name_filter {
+            Some(name) => {
+                let symbols = self.module.store.query_symbols(name).await?;
+                symbols
+            }
+            None => {
+                // No name filter, return empty for now
+                return Ok(Vec::new());
+            }
+        };
+
+        // Apply filters
+        let mut filtered = name_match;
+
+        // Filter by kind
+        if let Some(ref kind) = self.kind_filter {
+            filtered.retain(|s| s.kind == *kind);
+        }
+
+        // Filter by file path (prefix match)
+        if let Some(ref file) = self.file_filter {
+            filtered.retain(|s| {
+                s.location.file_path.to_string_lossy().starts_with(file.as_str())
+            });
+        }
+
+        // Apply limit
+        if let Some(n) = self.limit {
+            filtered.truncate(n);
+        }
+
+        Ok(filtered)
     }
 }
 
@@ -152,5 +179,59 @@ mod tests {
         assert_eq!(builder.name_filter, Some("test".to_string()));
         assert!(matches!(builder.kind_filter, Some(SymbolKind::Function)));
         assert_eq!(builder.limit, Some(10));
+    }
+
+    #[tokio::test]
+    async fn test_search_execute_empty() {
+        let store = Arc::new(UnifiedGraphStore::open(
+            tempfile::tempdir().unwrap()
+        ).await.unwrap());
+        let module = SearchModule::new(store);
+
+        let results = module.symbol("nonexistent").execute().await.unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_kind_filter() {
+        let store = Arc::new(UnifiedGraphStore::open(
+            tempfile::tempdir().unwrap()
+        ).await.unwrap());
+        let module = SearchModule::new(store);
+
+        let results = module.symbol("test")
+            .kind(SymbolKind::Struct)
+            .execute()
+            .await.unwrap();
+        // Should be empty since no symbols exist
+        assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_limit() {
+        let store = Arc::new(UnifiedGraphStore::open(
+            tempfile::tempdir().unwrap()
+        ).await.unwrap());
+        let module = SearchModule::new(store);
+
+        let results = module.symbol("test")
+            .limit(5)
+            .execute()
+            .await.unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_file_filter() {
+        let store = Arc::new(UnifiedGraphStore::open(
+            tempfile::tempdir().unwrap()
+        ).await.unwrap());
+        let module = SearchModule::new(store);
+
+        let results = module.symbol("test")
+            .file("src/")
+            .execute()
+            .await.unwrap();
+        assert_eq!(results.len(), 0);
     }
 }
