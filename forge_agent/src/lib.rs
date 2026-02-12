@@ -18,6 +18,9 @@ use std::path::PathBuf;
 // Observation module (Phase 4 - Task 1)
 pub mod observe;
 
+// Policy module (Phase 4 - Task 2)
+pub mod policy;
+
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
@@ -53,65 +56,8 @@ pub enum AgentError {
 /// Result type for agent operations.
 pub type Result<T> = std::result::Result<T, AgentError>;
 
-/// Policy module for constraint validation.
-pub mod policy {
-    //! Policy DSL and validation for agent operations.
-
-    /// Policy constraint for agent operations.
-    ///
-    /// Policies are enforced before mutations are applied.
-    #[derive(Clone, Debug)]
-    pub enum Policy {
-        /// No unsafe code in public API
-        NoUnsafeInPublicAPI,
-
-        /// Preserve test coverage
-        PreserveTests,
-
-        /// Maximum cyclomatic complexity
-        MaxComplexity(usize),
-
-        /// Custom policy with validation function
-        Custom {
-            name: String,
-            validate: String,
-        },
-    }
-
-    impl Policy {
-        /// Validates an edit operation against this policy.
-        pub fn validate(&self, _diff: &str) -> super::Result<()> {
-            match self {
-                Policy::NoUnsafeInPublicAPI => {
-                    // TODO: Check for unsafe in public API
-                    Ok(())
-                }
-                Policy::PreserveTests => {
-                    // TODO: Check for test preservation
-                    Ok(())
-                }
-                Policy::MaxComplexity(_) => {
-                    // TODO: Check complexity limit
-                    Ok(())
-                }
-                Policy::Custom { .. } => {
-                    // TODO: Implement custom validation
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    /// Creates a custom policy.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Policy name
-    /// * `validate_fn` - Validation rule description
-    pub fn custom(name: String, validate_fn: String) -> Policy {
-        Policy::Custom { name, validate: validate_fn }
-    }
-}
+// Re-export policy module
+pub use policy::{Policy, PolicyValidator, PolicyReport, PolicyViolation};
 
 /// Agent for deterministic AI-driven code operations.
 ///
@@ -180,13 +126,32 @@ impl Agent {
     ///
     /// # Arguments
     ///
-    /// * `_observation` - The observation to constrain
-    /// * `_policy` - The policy to apply
-    pub async fn constrain(&self, _observation: Observation, _policy: policy::Policy) -> Result<ConstrainedPlan> {
-        // TODO: Implement policy validation
+    /// * `observation` - The observation to constrain
+    /// * `policies` - The policies to validate
+    pub async fn constrain(&self, observation: Observation, policies: Vec<policy::Policy>) -> Result<ConstrainedPlan> {
+        let forge = self.forge.as_ref()
+            .ok_or_else(|| AgentError::ObservationFailed(
+                "Forge SDK not available for policy validation".to_string()
+            ))?;
+
+        // Create a validator
+        let validator = policy::PolicyValidator::new(forge.clone());
+
+        // For observation, create a placeholder diff
+        // In production, this would be the actual planned diff
+        let diff = policy::Diff {
+            file_path: std::path::PathBuf::from(""),
+            original: String::new(),
+            modified: String::new(),
+            changes: Vec::new(),
+        };
+
+        // Validate policies
+        let report = validator.validate(&diff, &policies).await?;
+
         Ok(ConstrainedPlan {
-            observation: _observation,
-            policy_violations: Vec::new(),
+            observation,
+            policy_violations: report.violations,
         })
     }
 
@@ -240,7 +205,7 @@ pub struct ConstrainedPlan {
     /// The original observation
     pub observation: Observation,
     /// Any policy violations detected
-    pub policy_violations: Vec<String>,
+    pub policy_violations: Vec<policy::PolicyViolation>,
 }
 
 /// Execution plan for the mutation phase.
