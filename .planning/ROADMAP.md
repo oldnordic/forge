@@ -98,15 +98,19 @@ This roadmap defines the phased development plan for ForgeKit from foundation (v
 
 ### Phase 03: Test Infrastructure
 
-**Status**: In Progress (3 plans created)
+**Status**: In Progress (5 plans created)
 
 **Goal:** Build comprehensive test infrastructure for forge_core with 80%+ coverage targeting ~100 new tests.
 
 #### Plans
 
-- [ ] 03-01-PLAN.md — Core types and common utilities (25 tests, Wave 1)
-- [ ] 03-02-PLAN.md — Forge/ForgeBuilder tests and integration infrastructure (17 tests, Wave 1)
-- [ ] 03-03-PLAN.md — Runtime layer expanded tests and integration (25 tests, Wave 2)
+- [ ] 03-01-PLAN.md — Core types and common utilities (40 tests, Wave 1)
+- [ ] 03-02-PLAN.md — Forge/ForgeBuilder tests and integration infrastructure (28 tests, Wave 1)
+- [ ] 03-03a-PLAN.md — Watcher and Indexing tests (12 tests, Wave 2)
+- [ ] 03-03b-PLAN.md — Cache and Pool tests (12 tests, Wave 2)
+- [ ] 03-03c-PLAN.md — Runtime orchestration and integration tests (10 tests, Wave 3)
+
+**Total: 102 tests planned**
 
 #### Tasks (Legacy - superseded by plans above)
 
