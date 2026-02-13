@@ -4,6 +4,7 @@
 
 mod builder_tests;
 mod accessor_tests;
+mod runtime_tests;
 
 #[cfg(test)]
 mod tests {
