@@ -18,9 +18,11 @@ This roadmap defines the phased development plan for ForgeKit from foundation (v
 | v0.1 Foundation | Project scaffolding and API design | 1 week | In Progress |
 | v0.2 Core SDK | SQLiteGraph integration and tool bindings | 4 weeks | Planned |
 | v0.3 Runtime | Indexing, caching, file watching | 3 weeks | Planned |
-| v0.4 Agent | Deterministic AI loop and policies | 3 weeks | Planned |
+| v0.4 Agent | Deterministic AI loop and policies | 3 weeks | Complete |
 | v0.5 Polish | Performance, documentation, examples | 2 weeks | Planned |
 | v1.0 Stable | Production-ready release | - | Planned |
+| v2.0 OdinCode | Deterministic code reasoning engine | 3-4 weeks | Planned |
+| v3.0 Long-term | Multi-language support, distributed analysis | - | Planned |
 
 ---
 
@@ -36,8 +38,8 @@ This roadmap defines the phased development plan for ForgeKit from foundation (v
 |--------|---------|----------|
 | 01 | Project Organization | 1 day | Complete |
 | 02 | Core SDK Stubs | 2 days | Complete |
-| 03 | Test Infrastructure | 1 day | Pending |
-| 04 | Documentation Review | Complete    | 2026-02-12 |
+| 03 | Test Infrastructure | 1 day | Complete    | 2026-02-13 |
+| 04 | Documentation Review | Pending    | - | Week 1 |
 
 ### Phase 01: Project Organization
 
@@ -292,6 +294,11 @@ Milestone complete when:
 | 12 | Agent Core | 1 week | v0.3 complete |
 | 13 | Policy System | 1 week | Phase 12 |
 | 14 | LLM Integration (Optional) | 1 week | Phase 12 |
+| 15 | Provider Adapters | 2 weeks | v0.4 complete |
+| 16 | Runtime Expansion | 1 week | v0.4 complete |
+| 17 | ForgeTesting Harness | 1 week | v0.4 complete |
+| 18 | OdinCode Integration | 2 weeks | v0.5 complete |
+| 19 | Production Hardening | 2 weeks | v1.0 complete |
 
 ### Phase 12: Agent Core
 
@@ -315,6 +322,13 @@ Milestone complete when:
 ### Phase 14: LLM Integration
 
 **Tasks:**
+- [ ] Design pluggable LLM backend
+- [ ] Implement prompt generator
+- [ ] Add response parser
+- [ ] Create fallback logic
+- [ ] Add safety validation
+
+### Phase 15: Provider Adapters
 - [ ] Design pluggable LLM backend
 - [ ] Implement prompt generator
 - [ ] Add response parser
