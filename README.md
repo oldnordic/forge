@@ -28,6 +28,14 @@ ForgeKit provides an intermediate representation (the graph) with deterministic 
 - **IS**: Local-first, single binary, auditable
 - **IS**: The cognition layer for ANY agent framework (LangGraph, LangChain, OdinCode, custom)
 
+### Ecosystem
+
+ForgeKit is built on top of [sqlitegraph](https://github.com/oldnordic/sqlitegraph), the embedded graph database:
+
+- **GitHub**: [github.com/oldnordic/sqlitegraph](https://github.com/oldnordic/sqlitegraph)
+- **Crates.io**: [crates.io/crates/sqlitegraph](https://crates.io/crates/sqlitegraph)
+- **Version Used**: v2.0.1 with native V3 backend
+
 ### Usage Modes
 
 **1. Tool Mode (Direct API)**
@@ -203,8 +211,8 @@ if needs_planning {
          └────────────────┬─────────────────┘
                           │
 ┌─────────────────────────────┴───────────────────────────────────┐
-│                  Native V3 Backend                         │
-│         (High-performance binary graph storage)            │
+│                  sqlitegraph V3 Backend                    │
+│     github.com/oldnordic/sqlitegraph | crates.io/sqlitegraph    │
 └───────────────────────────────────────────────────────────────┘
 ```
 

@@ -51,7 +51,7 @@ use std::time::Duration;
 async fn main() -> anyhow::Result<()> {
     let forge = Forge::builder()
         .path("./my-project")
-        .database_path(".forge/graph.db")
+        .database_path(".forge/graph.v3")
         .cache_ttl(Duration::from_secs(300))
         .build()
         .await?;

@@ -18,6 +18,7 @@ Cargo.lock
 *.db
 *.db-shm
 *.db-wal
+*.v3
 
 # Test data
 tests/fixtures/temp/
@@ -29,3 +30,14 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Internal planning documents (not for public repo)
+/.planning/
+
+# CI/CD (not used in this repo)
+/.github/
+/.ci/
+/.travis.yml
+/.gitlab-ci.yml
+/azure-pipelines.yml
+/appveyor.yml

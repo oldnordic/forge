@@ -46,21 +46,24 @@ forge.edit()
 - Rollback is always available
 - No silent failures
 
-### 3. Backend Agnosticism
+### 3. Backend: sqlitegraph V3
 
-The SDK works with any SQLiteGraph backend.
+ForgeKit is built on [sqlitegraph](https://github.com/oldnordic/sqlitegraph), the embedded graph database with native V3 backend.
+
+**Repository**: [github.com/oldnordic/sqlitegraph](https://github.com/oldnordic/sqlitegraph)  
+**Crate**: [crates.io/crates/sqlitegraph](https://crates.io/crates/sqlitegraph)
 
 ```rust
-Forge::builder()
-    .backend(ForgeBackend::Sqlite)    // Current
-    // .backend(ForgeBackend::NativeV3)  // Future
-    .build()?
+// V3 backend is the default
+let forge = Forge::open("./repo").await?;
+
+// Database stored at .forge/graph.v3
 ```
 
 **Invariants:**
-- Backend selection is runtime configuration
-- API is identical across backends
-- Features may vary by backend capability
+- V3 backend provides high-performance binary graph storage
+- API is backend-agnostic
+- SQLite backend available as alternative
 
 ---
 
@@ -225,10 +228,8 @@ forge.graph().find_symbol("main")
 GraphModule -> UnifiedGraphStore
     │
     ▼
-sqlitegraph::BackendClient
-    │
-    ▼
-SQLite / Native V3 Backend
+sqlitegraph V3 Backend
+(github.com/oldnordic/sqlitegraph)
     │
     ▼
 Structured Result
