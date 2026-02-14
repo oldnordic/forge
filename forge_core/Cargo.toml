@@ -28,6 +28,7 @@ blake3 = "1"
 notify = "6"
 parking_lot = "0.12"
 tempfile = "3"
+regex = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }

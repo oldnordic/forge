@@ -214,7 +214,7 @@ mod tests {
 
         let runtime = Runtime::new(path).await.unwrap();
 
-        runtime.indexer.queue(WatchEvent::Modified(PathBuf::from("test.rs")));
+        runtime.indexer.queue(WatchEvent::Modified(PathBuf::from("src/lib.rs")));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert_eq!(runtime.pending_changes().await, 1);
@@ -283,13 +283,13 @@ mod tests {
         runtime.start_watching().await.unwrap();
         assert!(runtime.is_watching());
 
-        // Queue a file change event manually
-        runtime.indexer.queue(WatchEvent::Created(PathBuf::from("test.rs")));
+        // Queue a file change event manually (use src/ path to pass filter)
+        runtime.indexer.queue(WatchEvent::Created(PathBuf::from("src/main.rs")));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Verify indexer has pending change
         let pending = runtime.pending_changes().await;
-        assert!(pending >= 1);
+        assert!(pending >= 1, "Expected pending changes but got {}", pending);
 
         // Process events
         let stats = runtime.process_events().await.unwrap();
