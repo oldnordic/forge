@@ -1,7 +1,7 @@
 # API Reference
 
-**Version**: 0.1.0 (Foundation)
-**Last Updated**: 2026-02-12
+**Version**: 0.2.0 (V3 Backend)
+**Last Updated**: 2026-02-13
 
 ---
 

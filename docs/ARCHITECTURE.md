@@ -1,8 +1,9 @@
 # Architecture
 
-**Version**: 0.1.0 (Design Phase)
+**Version**: 0.2.0 (V3 Backend)
 **Created**: 2025-12-30
-**Status**: DRAFT
+**Last Updated**: 2026-02-13
+**Status**: ACTIVE
 
 ---
 
@@ -16,7 +17,7 @@ ForgeKit is a layered SDK that provides deterministic code intelligence through 
 
 ### 1. Graph-First Design
 
-The SQLiteGraph database is the authoritative source of truth.
+The sqlitegraph V3 database (`.forge/graph.v3`) is the authoritative source of truth.
 
 ```rust
 // All operations flow through the graph
@@ -102,8 +103,8 @@ Forge::builder()
 │  ┌─────────────────────────────────────────────────────┐        │
 │  │         GraphBackend (trait)                    │        │
 │  │  ┌────────────┐  ┌──────────────────┐       │        │
-│  │  │  SQLite     │  │  Native V3      │       │        │
-│  │  │  Backend    │  │  Backend (WIP)  │       │        │
+│  │  │  Native     │  │  SQLite         │       │        │
+│  │  │  V3 Backend │  │  Backend        │       │        │
 │  │  └────────────┘  └──────────────────┘       │        │
 │  └─────────────────────────────────────────────────────┘        │
 └───────────────────────────────────────────────────────────────┘

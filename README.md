@@ -1,8 +1,9 @@
 # ForgeKit - Deterministic Code Intelligence SDK
 
-**Version**: 0.1.0 (Design Phase)
+**Version**: 0.2.0 (Active Development)
 **Created**: 2025-12-30
-**Status**: Active Development
+**Status**: V3 Backend Integrated
+**Last Updated**: 2026-02-13
 
 ---
 
@@ -50,9 +51,9 @@ kernel.step.execute(step_id).await?;
 **3. CI/CD Mode**
 ```bash
 # Direct tool usage in pipelines
-magellan --db .forge/graph.db find --name "main"
-llmgrep --db .forge/graph.db search --query "TODO"
-mirage --db .forge/graph.db cfg --function "process"
+magellan --db .forge/graph.v3 find --name "main"
+llmgrep --db .forge/graph.v3 search --query "TODO"
+mirage --db .forge/graph.v3 cfg --function "process"
 ```
 
 **ForgeKit is library-first.** Use it with:
@@ -202,8 +203,8 @@ if needs_planning {
          └────────────────┬─────────────────┘
                           │
 ┌─────────────────────────────┴───────────────────────────────────┐
-│                  SQLiteGraph Backend                       │
-│  (SQLite today, Native V3 binary file in progress)        │
+│                  Native V3 Backend                         │
+│         (High-performance binary graph storage)            │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -307,32 +308,35 @@ cargo install forge-agent   # Optional
 ### Basic Usage
 
 ```rust
-use forge::Forge;
+use forge_core::Forge;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    // Open a codebase
-    let forge = Forge::builder()
-        .path("./my-project")
-        .backend(ForgeBackend::Sqlite)
-        .build()
-        .await?;
+async fn main() -> anyhow::Result<()> {
+    // Open a codebase - creates .forge/graph.v3
+    let forge = Forge::open("./my-project").await?;
 
     // Query the code graph
-    let main_fn = forge.graph()
-        .find_symbol("main")?
-        .expect("main function not found");
+    let symbols = forge.graph()
+        .find_symbol("main")
+        .await?;
 
-    println!("Found main at {:?}", main_fn.location);
+    for symbol in &symbols {
+        println!("Found {} at {:?}", symbol.name, symbol.location);
+    }
 
-    // Analyze control flow
-    let paths = forge.cfg()
-        .enumerate_paths(&main_fn.id)?
-        .normal_only()?
-        .limit(10)?
-        .execute()?;
+    // Search for symbols by pattern
+    let results = forge.search()
+        .pattern_search("async fn")
+        .await?;
 
-    println!("Found {} execution paths", paths.len());
+    println!("Found {} async functions", results.len());
+
+    // Find callers of a function
+    let callers = forge.graph()
+        .callers_of("process_data")
+        .await?;
+
+    println!("Found {} callers", callers.len());
 
     Ok(())
 }
@@ -344,15 +348,61 @@ async fn main() -> Result<()> {
 
 | Component | Status | Notes |
 |-----------|----------|--------|
-| forge_core | 🚧 Design | API design in progress |
-| forge_runtime | 📋 Planned | Indexing layer |
+| forge_core | ✅ Active | V3 backend integrated |
+| forge_runtime | 🚧 In Progress | Indexing with path filtering |
 | forge_agent | 📋 Planned | Optional AI loop |
-| SQLiteGraph | ✅ Stable | Production-ready |
-| Native V3 Backend | 🚧 In Progress | See sqlitegraph project |
-| Magellan | ✅ Stable | v2.2.1 |
-| LLMGrep | ✅ Stable | Semantic search |
-| Mirage | ✅ Stable | CFG analysis |
-| Splice | ✅ Stable | v2.5.0 |
+| sqlitegraph V3 | ✅ Stable | v2.0.1 - Production-ready |
+| Magellan | ✅ Stable | Graph module |
+| LLMGrep | ✅ Stable | Search module |
+| Mirage | 📋 Planned | CFG module |
+| Splice | 📋 Planned | Edit module |
+
+### What's Working Now
+- ✅ **V3 Backend**: Native binary graph storage (`.forge/graph.v3`)
+- ✅ **Symbol Storage**: Insert/query symbols with metadata
+- ✅ **Reference Tracking**: Store and query symbol references
+- ✅ **Path Filtering**: Only indexes `src/` and `tests/` by default
+- ✅ **Large Data Support**: Symbols with >64 bytes of metadata work correctly
+- 🚧 **Incremental Indexing**: File watching with filtered events
+- 📋 **CFG Analysis**: Planned for v0.3.0
+- 📋 **Span-safe Editing**: Planned for v0.4.0
+
+---
+
+## Path Filtering
+
+By default, ForgeKit only indexes source code in `src/` and `tests/` directories. This prevents indexing build artifacts, dependencies, and generated files.
+
+### Default Behavior
+
+**Indexed:**
+- `src/**/*.rs` (Rust source)
+- `tests/**/*.rs` (Test files)
+- Similar patterns for `.py`, `.js`, `.ts`, `.go`, `.java`, etc.
+
+**Ignored:**
+- `target/**` (Rust build artifacts)
+- `node_modules/**` (Node dependencies)
+- `.git/**` (Git internals)
+- `.forge/**` (ForgeKit's own data)
+- `Cargo.lock`, `package-lock.json` (Lock files)
+- Binary files (`.png`, `.bin`, etc.)
+
+### Custom Path Filters
+
+```rust
+use forge_core::indexing::{IncrementalIndexer, PathFilter};
+
+// Create a custom filter
+let mut filter = PathFilter::new();
+filter.add_include("**/lib/**");
+filter.add_include("**/src/**");
+filter.add_extension("rs");
+filter.add_extension("go");
+
+// Use with the indexer
+let indexer = IncrementalIndexer::with_filter(store, filter);
+```
 
 ---
 
@@ -375,4 +425,4 @@ See [LICENSE](LICENSE) for details.
 
 ---
 
-*Last updated: 2025-12-30*
+*Last updated: 2026-02-13*

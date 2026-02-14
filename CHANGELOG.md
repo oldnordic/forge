@@ -17,6 +17,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-02-13
+
+### Added
+- **sqlitegraph V3 Backend Integration**
+  - Native V3 backend for high-performance graph storage
+  - Uses `.forge/graph.v3` database format (not SQLite)
+  - Full CRUD operations for symbols and references
+  - Supports large node data (>64 bytes) via external storage
+  - Battle-tested with sqlitegraph v2.0.1
+
+- **Path Filtering for Indexing**
+  - `PathFilter` struct with glob pattern support (`*`, `**`)
+  - Default filter only indexes `src/` and `tests/` directories
+  - Automatic exclusion of `target/`, `node_modules/`, `.git/`, `.forge/`
+  - File extension filtering (.rs, .py, .js, .ts, .go, .java, .c, .cpp, etc.)
+  - Custom include/exclude patterns supported
+
+- **IncrementalIndexer Enhancements**
+  - Path-aware event queuing (filtered at queue time)
+  - `full_rescan()` with directory tree walking
+  - Respects path filters during rescan
+
+### Changed
+- **Storage Backend**: Migrated from placeholder storage to actual V3 backend
+  - `UnifiedGraphStore` now holds `V3Backend` instance
+  - All storage operations use native graph API
+  - Default database path changed from `graph.db` to `graph.v3`
+
+### Dependencies
+- Updated `sqlitegraph` to v2.0.1 (includes large node data fix)
+- Added `parking_lot` for synchronization
+- Added `regex` for glob pattern matching
+
+---
+
 ## [0.1.0] - TBD
 
 ### Added
