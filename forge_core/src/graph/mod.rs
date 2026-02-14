@@ -167,6 +167,11 @@ impl GraphModule {
         // or implement Tarjan's SCC algorithm ourselves
         Ok(Vec::new())
     }
+
+    /// Returns the number of symbols in the graph.
+    pub async fn symbol_count(&self) -> Result<usize> {
+        self.store.symbol_count().await
+    }
 }
 
 #[cfg(test)]
