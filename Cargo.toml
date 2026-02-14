@@ -1,25 +1,13 @@
 [workspace]
-resolver = "3"
+resolver = "2"
 members = [
     "forge_core",
     "forge_runtime",
     "forge_agent",
 ]
 
-# Build profile for all workspace members
-[profile.release]
-opt-level = 3
-codegen-units = 1
-lto = "thin"
-debug = false
-panic = "abort"
-
-[profile.bench]
-inherits = "release"
-opt-level = 3
-codegen-units = 1
-lto = "thin"
-debug = true
-
-[profile.test]
-opt-level = 2
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

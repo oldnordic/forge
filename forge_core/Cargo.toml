@@ -13,11 +13,11 @@ path = "src/lib.rs"
 
 [features]
 default = ["sqlite"]
-sqlite = ["sqlitegraph/sqlite-backend"]
-native-v2 = ["sqlitegraph/native-v2"]
+sqlite = ["sqlitegraph/sqlite-backend", "sqlitegraph/native-v3", "dep:sqlitegraph"]
+native-v2 = ["sqlitegraph/native-v2", "dep:sqlitegraph"]
 
 [dependencies]
-sqlitegraph = { version = "1.6", default-features = false, optional = true }
+sqlitegraph = { version = "2.0.1", features = ["native-v3"], default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
@@ -26,7 +26,10 @@ thiserror = "1"
 similar = "2"
 blake3 = "1"
 notify = "6"
+parking_lot = "0.12"
+tempfile = "3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }
 tempfile = "3"
+parking_lot = "0.12"

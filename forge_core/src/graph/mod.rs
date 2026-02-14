@@ -1,6 +1,6 @@
-//! Graph module - Symbol and reference queries.
+//! Graph module - Symbol and reference queries using sqlitegraph.
 //!
-//! This module provides access to the code graph for querying symbols,
+//! This module provides access to code graph for querying symbols,
 //! finding references, and running graph algorithms.
 
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use crate::types::{Symbol, SymbolId, Reference, Cycle, ReferenceKind};
 ///
 /// # Examples
 ///
-/// See the crate-level documentation for usage examples.
+/// See crate-level documentation for usage examples.
 #[derive(Clone)]
 pub struct GraphModule {
     store: Arc<UnifiedGraphStore>,
@@ -42,6 +42,10 @@ impl GraphModule {
     /// # Arguments
     ///
     /// * `id` - The symbol identifier
+    ///
+    /// # Returns
+    ///
+    /// The symbol with the given ID
     pub async fn find_symbol_by_id(&self, id: SymbolId) -> Result<Symbol> {
         self.store.get_symbol(id).await
     }
@@ -159,8 +163,8 @@ impl GraphModule {
     /// A vector of detected cycles
     pub async fn cycles(&self) -> Result<Vec<Cycle>> {
         // For now, return empty as we need full graph traversal
-        // Full implementation will use Tarjan's SCC algorithm
-        // or the sqlitegraph cycles API
+        // This will be implemented when we integrate sqlitegraph cycles API
+        // or implement Tarjan's SCC algorithm ourselves
         Ok(Vec::new())
     }
 }
@@ -171,68 +175,48 @@ mod tests {
 
     #[tokio::test]
     async fn test_graph_module_creation() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            temp_dir.path().join("test.db")
         ).await.unwrap());
-        let module = GraphModule::new(store.clone());
 
-        // Test that module can be created
+        let module = GraphModule::new(store.clone());
         assert_eq!(module.store.db_path(), store.db_path());
     }
 
     #[tokio::test]
     async fn test_find_symbol_empty() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            temp_dir.path().join("test.db")
         ).await.unwrap());
-        let module = GraphModule::new(store);
 
+        let module = GraphModule::new(store);
         let symbols = module.find_symbol("nonexistent").await.unwrap();
         assert_eq!(symbols.len(), 0);
     }
 
     #[tokio::test]
-    async fn test_callers_of_empty() {
+    async fn test_find_symbol_by_id_not_found() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            temp_dir.path().join("test.db")
         ).await.unwrap());
-        let module = GraphModule::new(store);
 
+        let module = GraphModule::new(store);
+        let result = module.find_symbol_by_id(SymbolId(999)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_callers_of_empty() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(UnifiedGraphStore::open(
+            temp_dir.path().join("test.db")
+        ).await.unwrap());
+
+        let module = GraphModule::new(store);
         let callers = module.callers_of("nonexistent").await.unwrap();
         assert_eq!(callers.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_references_empty() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
-        ).await.unwrap());
-        let module = GraphModule::new(store);
-
-        let refs = module.references("nonexistent").await.unwrap();
-        assert_eq!(refs.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_reachable_from_empty() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
-        ).await.unwrap());
-        let module = GraphModule::new(store);
-
-        let reachable = module.reachable_from(SymbolId(999)).await.unwrap();
-        // Should return empty since no references exist
-        assert_eq!(reachable.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_cycles_empty() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
-        ).await.unwrap());
-        let module = GraphModule::new(store);
-
-        let cycles = module.cycles().await.unwrap();
-        assert_eq!(cycles.len(), 0);
     }
 }

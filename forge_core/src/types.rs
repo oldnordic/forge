@@ -175,6 +175,8 @@ pub enum PathKind {
     Degenerate,
     /// Infinite path (loop without exit)
     Infinite,
+    /// Switch pattern (match/switch)
+    Switch,
 }
 
 /// Reference type between symbols.
@@ -688,4 +690,26 @@ mod tests {
         };
         assert!(symbol.metadata.as_object().unwrap().is_empty());
     }
+}
+
+/// CFG block kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CfgBlockKind {
+    /// Entry block
+    Entry,
+    /// Basic block
+    Basic,
+    /// Loop header
+    LoopHeader,
+    /// Condition block
+    Condition,
+}
+
+/// CFG block representation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CfgBlock {
+    /// Unique block identifier
+    pub id: BlockId,
+    /// Block kind
+    pub kind: CfgBlockKind,
 }

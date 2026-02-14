@@ -60,6 +60,10 @@ pub enum ForgeError {
     /// Error from underlying sqlitegraph.
     #[error("Graph error: {0}")]
     Graph(#[from] anyhow::Error),
+
+    /// External tool execution error (Magellan, LLMGrep, etc.).
+    #[error("Tool error: {0}")]
+    ToolError(String),
 }
 
 /// Type alias for Result with ForgeError.

@@ -6,7 +6,7 @@
 //!
 //! ForgeKit unifies several code intelligence tools into a single API:
 //!
-//! - **Graph Module**: Symbol and reference queries (via Magellan)
+//! - **Graph Module**: Symbol and reference queries (native implementation)
 //! - **Search Module**: Semantic code search (via LLMGrep)
 //! - **CFG Module**: Control flow analysis (via Mirage)
 //! - **Edit Module**: Span-safe refactoring (via Splice)
@@ -64,7 +64,7 @@ pub mod runtime;
 
 // Re-export commonly used types
 pub use error::{ForgeError, Result};
-pub use types::{SymbolId, BlockId, Location, Span};
+pub use types::{SymbolId, BlockId, CfgBlock, CfgBlockKind, Location, Span};
 
 use storage::UnifiedGraphStore;
 
@@ -145,7 +145,7 @@ impl Forge {
 
     /// Returns the edit module for span-safe refactoring.
     pub fn edit(&self) -> edit::EditModule {
-        edit::EditModule::new(self.store.clone())
+        edit::EditModule::new((*self.store).clone())
     }
 
     /// Returns the analysis module for combined operations.
@@ -242,15 +242,15 @@ mod tests {
     #[tokio::test]
     async fn test_forge_open_creates_database() {
         let temp = tempfile::tempdir().unwrap();
-        let db_path = temp.path().join(".forge").join("graph.db");
+        let db_path = temp.path().join(".forge").join("graph.v3");
 
         // Verify database doesn't exist initially
         assert!(!db_path.exists());
 
-        // Open Forge
+        // Open Forge - this creates the database directory and file
         let forge = Forge::open(temp.path()).await.unwrap();
 
-        // Verify database was created
+        // Verify database was created (V3 backend creates immediately)
         assert!(db_path.exists());
 
         // Verify Forge instance is valid

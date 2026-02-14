@@ -18,8 +18,8 @@ async fn test_builder_custom_db_path() {
 
     let forge = Forge::open(temp.path()).await.unwrap();
 
-    // Default database path should be .forge/graph.db
-    let default_db = temp.path().join(".forge").join("graph.db");
+    // Default database path should be .forge/graph.v3
+    let default_db = temp.path().join(".forge").join("graph.v3");
     assert!(default_db.exists());
 
     // Note: After Phase 05, we'll test custom paths
@@ -41,7 +41,7 @@ async fn test_builder_requires_path() {
 #[tokio::test]
 async fn test_forge_creates_database_file() {
     let temp = tempfile::tempdir().unwrap();
-    let db_path = temp.path().join(".forge").join("graph.db");
+    let db_path = temp.path().join(".forge").join("graph.v3");
 
     // Verify database doesn't exist initially
     assert!(!db_path.exists());

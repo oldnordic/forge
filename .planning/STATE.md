@@ -2,33 +2,35 @@
 
 **Project**: ForgeKit
 **Version**: 0.4.0
-**Last Updated**: 2026-02-13
-**Current Phase**: v0.3 Runtime Layer (Test Infrastructure)
+**Last Updated**: 2026-02-12
+**Current Phase**: Milestone v0.1 Foundation Complete
 
 ---
 
 ## Project Status
 
-### Overall Status: Agent Layer (100% Complete)
+### Overall Status: Milestone v0.1 Foundation (100% Complete)
 
 | Component | Status | Completion | Notes |
 |-----------|----------|-------------|--------|
-| Phase 1: Core SDK | Complete | 100% | All modules functional |
-| Phase 2: Runtime Layer | Complete | 100% | File watching, incremental indexing, query caching, connection pooling all working |
-| Phase 3: Agent Layer | Complete | 100% | All 8 tasks completed including CLI |
-| Observation Phase | Complete | 100% | Graph-based context gathering implemented |
+| Phase 1: Project Organization | Complete | 100% | Workspace structure established |
+| Phase 2: Core SDK Stubs | Complete | 100% | All modules stubbed |
+| Phase 3: Test Infrastructure | Complete | 100% | 233 tests passing |
+| Phase 4: Documentation Review | Complete | 100% | All docs validated |
+| Phase 04: Agent Layer | Complete | 100% | Deterministic AI loop implemented |
+| Phase 05: Storage Layer | Complete | 100% | SQLiteGraph backend via sqlitegraph crate |
+| Observation Phase | Complete | 100% | Graph-based context gathering (using UnifiedGraphStore) |
 | Policy Engine | Complete | 100% | Built-in policies with composition |
 | Planning Engine | Complete | 100% | Step generation with conflict detection |
 | Mutation Engine | Complete | 100% | Transaction-based mutations with rollback |
 | Verification Engine | Complete | 100% | Post-mutation validation |
 | Commit Engine | Complete | 100% | Transaction finalization with version control |
-| Agent Loop | Complete | 100% | Full integrate observe→commit pipeline |
+| Agent Loop | Complete | 100% | Full observe→commit pipeline |
 | CLI Integration | Complete | 100% | clap v4 CLI with run/plan/status commands |
-| Documentation | Pending | 0% | Not started |
 
 ---
 
-## Current Sprint: v0.1 Foundation
+## Current Sprint: v0.5 Storage Layer (Implementation)
 
 ### Sprint Goal
 

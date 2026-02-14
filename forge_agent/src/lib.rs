@@ -222,8 +222,6 @@ impl Agent {
         let obs = observe::Observation {
             query: constrained.observation.query.clone(),
             symbols: vec![],
-            references: vec![],
-            cfg_data: vec![],
         };
 
         // Generate steps

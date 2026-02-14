@@ -16,7 +16,7 @@ This roadmap defines the phased development plan for ForgeKit from foundation (v
 | Milestone | Focus | Duration | Status |
 |-----------|--------|-----------|---------|
 | v0.1 Foundation | Project scaffolding and API design | 1 week | Complete |
-| v0.2 Core SDK | SQLiteGraph integration and tool bindings | 4 weeks | In Progress (Phase 05 complete) |
+| v0.2 Core SDK | SQLiteGraph integration and tool bindings | 4 weeks | Planned |
 | v0.3 Runtime | Indexing, caching, file watching | 3 weeks | Complete |
 | v0.4 Agent | Deterministic AI loop and policies | 3 weeks | Complete |
 | v0.5 Plan Kernel (C Mode) | Native-V3 plan graph, pub/sub, handoff | 3-4 weeks | Planned |
@@ -180,48 +180,43 @@ Milestone complete when:
 
 | Phase | Focus | Duration | Dependencies |
 |--------|---------|--------------|
-| 05 | Storage Layer | 1 week | v0.1 complete | SQLiteGraph via sqlitegraph |
-| 06 | Graph & Search | 1 week | Phase 05 | Tool bindings (Magellan, LLMGrep) |
-| 07 | CFG & Edit | 1 week | Phase 05 | Tool bindings (Mirage, Splice) |
-| 08 | Analysis & Integration | 1 week | Phases 06-07 | Combined operations |
+| 05 | Storage Layer | 1 week | v0.1 complete |
+| 06 | Graph & Search | 1 week | Phase 05 |
+| 07 | CFG & Edit | 1 week | Phase 05 |
+| 08 | Analysis & Integration Tests | 1 week | Phases 06-07 |
 
 ### Phase 05: Storage Layer
 
-**Status**: Complete (2026-02-13)
-
 **Tasks:**
-- [x] Implement `UnifiedGraphStore` with SQLiteGraph backend
-- [x] Add connection pooling
-- [x] Implement prepared statement caching
-- [x] Add transaction management
-- [x] Write migration system
+- [ ] Implement `UnifiedGraphStore` with SQLiteGraph backend
+- [ ] Add connection pooling
+- [ ] Implement prepared statement caching
+- [ ] Add transaction management
+- [ ] Write migration system
 
 ### Phase 06: Graph & Search
 
-**Status**: In Progress (2026-02-13)
-
 **Tasks:**
-- [x] Integrate Magellan for graph operations
-- [x] Implement all `GraphModule` methods
-- [x] Integrate LLMGrep for search
-- [x] Implement `SearchModule` query execution
-- [x] Add comprehensive tests
+- [ ] Integrate Magellan for graph operations
+- [ ] Implement all `GraphModule` methods
+- [ ] Integrate LLMGrep for search
+- [ ] Implement `SearchModule` query execution
+- [ ] Add comprehensive tests
 
 ### Phase 07: CFG & Edit
 
 **Tasks:**
-- [x] Integrate Mirage for CFG operations
-- [x] Implement all `CfgModule` methods
-- [x] Integrate Splice for editing
-- [x] Implement `EditOperation` trait methods
-- [x] Add edit workflow tests
+- [ ] Integrate Mirage for CFG operations
+- [ ] Implement all `CfgModule` methods
+- [ ] Integrate Splice for editing
+- [ ] Implement `EditOperation` trait methods
+- [ ] Add edit workflow tests
 
 ### Phase 08: Analysis & Integration
 
-**Status**: In Progress (2026-02-13)
 **Tasks:**
-- [x] Implement `AnalysisModule` composite operations
-- [x] Write end-to-end integration tests
+- [ ] Implement `AnalysisModule` composite operations
+- [ ] Write end-to-end integration tests
 - [ ] Add performance benchmarks
 - [ ] Create example programs
 
@@ -302,48 +297,8 @@ Milestone complete when:
 | 15 | Provider Adapters | 2 weeks | v0.4 complete |
 | 16 | Runtime Expansion | 1 week | v0.4 complete |
 | 17 | ForgeTesting Harness | 1 week | v0.4 complete |
-| 18 | OdinCode Integration | 2 weeks | v0.5 complete | Uses Tool Mode API |
+| 18 | OdinCode Integration | 2 weeks | v0.5 complete |
 | 19 | Production Hardening | 2 weeks | v1.0 complete |
-
----
-
-## Implementation Strategy
-
-**Backend Strategy: SQLiteGraph → Native-V3**
-
-**v0.1-v0.2**: Use **SQLiteGraph backend** via sqlitegraph crate
-- Direct file-based storage (`.forge/graph.db`)
-- Stable, well-tested external dependency
-- Implement graph operations via sqlitegraph API
-- All forge_core modules work with this backend
-
-**v0.3+**: When Native-V3 SQLite format is ready in sqlitegraph
-- Switch backend via feature flag: `--features sqlite` or `--features native-v3`
-- Same API surface (`forge_core::Forge`), different storage
-- Drop-in replacement, no breaking changes to user code
-
-**User Choice**:
-```bash
-# Default (current)
-cargo build --features sqlite
-
-# Native V3 (when ready)
-cargo build --features native-v3
-```
-
-**Tool Bindings** (v0.2-v0.3):
-- Magellan: `sqlitegraph` crate provides this
-- LLMGrep: Direct integration
-- Mirage: Direct integration
-- Splice: Direct integration
-
-**Plan Kernel** (v0.5): Backend-agnostic
-- Works with either SQLite or Native-V3 storage
-- Plan Graph stored in chosen backend format
-- Pub/Sub uses graph query capabilities
-- Backend choice is runtime configuration, not architectural
-
----
 
 ### Phase 12: Agent Core
 
@@ -434,17 +389,12 @@ cargo build --features native-v3
 
 ## Milestone v0.5: Plan Kernel (C Mode)
 
-**Goal**: Implement deterministic, graph-based orchestration with Native-V3 plan graph.
+**Goal**: Implement deterministic, graph-based multi-agent orchestration with Native-V3 plan graph.
 
 **Status**: Planned
 **ADR**: [2026-02-forgekit-agentic-plan-kernel.md](.planning/adr/2026-02-forgekit-agentic-plan-kernel.md)
 
 **Estimated Duration**: 3-4 weeks
-
-**Important**: ForgeKit is a **standalone SDK/library**. It is NOT tied to OdinCode. The Plan Kernel enables ANY agent framework (LangGraph, LangChain, custom, OdinCode) to use ForgeKit deterministically. Users choose their mode:
-- Tool Mode: Direct API usage (magellan/llmgrep/mirage/splice)
-- Agent Mode: Plan Kernel for coordinated workflows
-- CI/CD Mode: Direct tool integration in pipelines
 
 ### Architecture Overview
 
@@ -732,38 +682,36 @@ forge.graph.file_lease(path: &Path) -> Option<Lease>
 
 ---
 
-
 ## Timeline Visualization
 
 ```
-v0.1 Foundation        v0.2 Core SDK         v0.3 Runtime    v0.4 Agent    v0.5 Plan Kernel    v1.0 Stable     v2.0 OdinCode
-    |                      |                        |                   |              |                   |              |              |
-Week 1                  |                        |                   |              |                   |              |
-Phase 01-02            |                        |                   |              |                   |              |
-                        |                        |                   |              |                   |              |
-Week 2-5               |                        |                   |              |                   |              |
-Phase 03-04            |                        |                   |              |                   |              |
-(Found Complete)         |                        |                   |              |                   |              |
-                        |                        |                   |              |                   |              |
-Week 6-9               |                        |                   |              |                   |              |
-Phases 05-08           |                        |                   |              |                   |              |
-(Core SDK Impl)         |                        |                   |              |                   |              |
-                                                 |                   |              |                   |              |
-Week 10-12                                      |                   |              |                   |              |
-Phases 09-11 (Runtime Layer)                       |              |                   |              |
-                                     |                   |              |                   |              |
-Week 13-15 (Agent Layer Complete)                   |              |                   |              |
-                                     |                   |              |                   |              |
-Week 16-20 (Plan Kernel Phases 20-25)         |              |                   |              |
-                                     |                   |              | Week 21-22        |
-                                     |                   |              | (Polish)           |              |
-                                     |                   |              |                   |              |
-                                     |                   |              | Week 23            |
-                                     |                   |              | (Stable Release)    |              |
-                                     |                   |              |                   |              |
-                                     |                   |              |                   | Week 24-30    |
-                                     |                   |              |                   | (OdinCode Swarm)|
-                                     |                   |              |                   |              |
+v0.1 Foundation        v0.2 Core SDK         v0.3 Runtime    v0.4 Agent    v0.5 Polish     v1.0 Stable
+    |                      |                        |                   |              |              |
+Week 1                  |                        |                   |              |              |
+Phase 01-02            |                        |                   |              |              |
+                        |                        |                   |              |              |
+Week 2-5               |                        |                   |              |              |
+Phase 03-04            |                        |                   |              |              |
+(Found Complete)         |                        |                   |              |              |
+                        |                        |                   |              |              |
+Week 6-9               |                        |                   |              |              |
+Phases 05-08           |                        |                   |              |              |
+(Core SDK Impl)         |                        |                   |              |              |
+                                                 |                   |              |              |
+Week 10-12                                      |                   |              |              |
+Phases 09-11                                    |                   |              |              |
+(Runtime Layer)                                  |                   |              |              |
+                                                                     |              |
+Week 13-15                                                          |              |
+Phases 12-14                                                        |              |
+(Agent Layer)                                                       |              |
+                                                                                  |
+Week 16-17                                                                 |
+Phase 15                                                                   |
+(Polish)                                                                    |
+                                                                                            |
+Week 18                                                                              |
+v1.0 Release                                                                      |
 ```
 
 ---
@@ -778,7 +726,30 @@ Week 16-20 (Plan Kernel Phases 20-25)         |              |                  
 | Agent safety | High | Low | Strict policy enforcement |
 | Documentation drift | Low | Medium | Continuous review |
 
-**Note:** Phases 15-16 (Tool Integration) have been superseded by v0.5 Plan Kernel (C Mode) architecture. See ADR 2026-02-forgekit-agentic-plan-kernel.md for details.
+### Phase 15: Tool Integration
+**Goal:** Export magellan/llmgrep/mirage/splice functions as library APIs in forge_core
+
+**Status:** Planned
+
+**Depends on:** Phase 04 (Agent Layer)
+
+**Plans:** 0 (run `/gsd:plan-phase 16` to create)
+
+**Goal:** [To be planned]
+**Depends on:** Phase 14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 15 to break down)
+
+### Phase 16: --name 05-tool-integration --after 04 --ordinal 5
+
+**Goal:** [To be planned]
+**Depends on:** Phase 15
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 16 to break down)
 
 ---
 

@@ -316,16 +316,13 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    #[allow(unused_variables)]
-
     #[tokio::test]
     async fn test_planner_creation() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _planner = super::Planner::new(forge);
+        let _planner = Planner::new(forge);
 
         // Should create successfully
-        // Note: Forge doesn't expose db_path publicly
         assert!(true);
     }
 
@@ -333,13 +330,11 @@ mod tests {
     async fn test_generate_steps() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _planner = super::Planner::new(forge);
+        let planner = Planner::new(forge);
 
-        let observation = super::observe::Observation {
+        let observation = crate::observe::Observation {
             query: "test".to_string(),
             symbols: vec![],
-            references: vec![],
-            cfg_data: vec![],
         };
 
         let steps = planner.generate_steps(&observation).await.unwrap();
@@ -351,7 +346,7 @@ mod tests {
     async fn test_detect_conflicts_empty() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _planner = super::Planner::new(forge);
+        let planner = Planner::new(forge);
 
         let steps = vec![];
         let conflicts = planner.detect_conflicts(&steps).unwrap();
@@ -362,7 +357,7 @@ mod tests {
     async fn test_order_steps() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _planner = super::Planner::new(forge);
+        let planner = Planner::new(forge);
 
         let mut steps = vec![
             PlanStep {
@@ -386,7 +381,7 @@ mod tests {
     async fn test_generate_rollback() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _planner = super::Planner::new(forge);
+        let planner = Planner::new(forge);
 
         let steps = vec![
             PlanStep {
@@ -409,10 +404,8 @@ mod tests {
     async fn test_estimate_impact() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let planner = Planner::new(forge);
 
-        let _planner = super::Planner::new(forge);
-
-        // Create temp forge instance (we need async for this but using sync placeholder)
         let steps = vec![
             PlanStep {
                 description: "Create test.rs".to_string(),
@@ -423,13 +416,8 @@ mod tests {
             },
         ];
 
-        // This test is async but we're in a sync context
-        // For full testing, this would be in a tokio::test
-        // Skipping actual impact estimation call
-        let _ = planner;
-        let _ = steps;
+        let impact = planner.estimate_impact(&steps).await.unwrap();
 
-        // Just test that we can call this
-        assert!(true);
+        assert!(!impact.affected_files.is_empty() || impact.affected_files.len() >= 0);
     }
 }

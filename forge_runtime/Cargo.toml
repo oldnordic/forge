@@ -18,7 +18,7 @@ native-v2 = ["sqlitegraph/native-v2", "forge-core/native-v2"]
 
 [dependencies]
 forge-core = { path = "../forge_core", default-features = false }
-sqlitegraph = { version = "1.5", default-features = false, optional = true }
+sqlitegraph = { version = "2.0.1", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 notify = "8"
 anyhow = "1"

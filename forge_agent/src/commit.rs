@@ -92,7 +92,7 @@ mod tests {
     async fn test_generate_summary() {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _committer = Committer::new(forge);
+        let committer = Committer::new(forge);
 
         let steps = vec![
             crate::planner::PlanStep {
