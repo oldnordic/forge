@@ -19,13 +19,17 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
+blake3 = "1.5"
+regex = "1"
 
 # Graph database
-sqlitegraph = { version = "2.0.2", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
+sqlitegraph = { version = "2.0.5", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
 
 # Tool integrations - these are the crates published from individual tool repos
-magellan = { version = "2.1", optional = true }
-llmgrep = { version = "2.1", optional = true }
+magellan = { version = "2.4.5", optional = true }
+llmgrep = { version = "3.0.8", optional = true }
+mirage-analyzer = { version = "1.0", optional = true }
+splice = { version = "2.5", optional = true }
 
 # For CLI fallback when crates aren't available
 which = { version = "6.0", optional = true }
@@ -40,5 +44,5 @@ sqlite = ["sqlitegraph/sqlite-backend", "sqlitegraph/native-v3"]
 native-v3 = ["sqlitegraph/native-v3"]
 
 # Tool integrations
-tools = ["magellan", "llmgrep", "which"]
+tools = ["magellan", "llmgrep", "mirage-analyzer", "splice", "which"]
 full = ["tools", "sqlite", "native-v3"]

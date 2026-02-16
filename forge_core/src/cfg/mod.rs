@@ -36,6 +36,20 @@ impl CfgModule {
         Self { store }
     }
 
+    /// Indexes the codebase for CFG analysis.
+    ///
+    /// This prepares the module for control flow analysis by
+    /// extracting CFG data from the codebase.
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) on success, or an error if indexing fails.
+    pub async fn index(&self) -> Result<()> {
+        // Placeholder - would use mirage to analyze functions
+        // and populate CFG data in the graph
+        Ok(())
+    }
+
     /// Creates a new path enumeration builder.
     ///
     /// # Arguments
@@ -60,12 +74,14 @@ impl CfgModule {
     ///
     /// * `function` - The function symbol ID
     pub async fn dominators(&self, function: SymbolId) -> Result<DominatorTree> {
-        // For v0.1, return empty dominator tree
+        // For v0.1, return a basic dominator tree with just the entry block
         // Full implementation requires CFG data from Mirage
         let _ = function;
+        let mut dominators = HashMap::new();
+        dominators.insert(BlockId(0), BlockId(0));
         Ok(DominatorTree {
             root: BlockId(0),
-            dominators: HashMap::new(),
+            dominators,
         })
     }
 
@@ -136,17 +152,17 @@ impl PathBuilder {
 
     /// Executes the path enumeration.
     ///
-    /// Returns an empty list for v0.1 since full CFG
+    /// Returns a placeholder path for v0.1 since full CFG
     /// enumeration requires Mirage integration.
     ///
     /// # Returns
     ///
     /// A vector of execution paths
     pub async fn execute(self) -> Result<Vec<Path>> {
-        let _ = (self.function_id, self.normal_only, self.error_only);
-        // For v0.1, return empty path list
+        // For v0.1, return a single placeholder path
         // Full implementation requires CFG data from Mirage
-        Ok(Vec::new())
+        let path = Path::new(vec![BlockId(0)]);
+        Ok(vec![path])
     }
 }
 
@@ -577,11 +593,12 @@ impl TestCfg {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::BackendKind;
 
     #[tokio::test]
     async fn test_cfg_module_creation() {
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
         ).await.unwrap());
         let module = CfgModule::new(store.clone());
 
@@ -591,7 +608,8 @@ mod tests {
     #[tokio::test]
     async fn test_path_builder_filters() {
         let store = Arc::new(UnifiedGraphStore::open(
-            std::env::current_dir().unwrap()
+            std::env::current_dir().unwrap(),
+            BackendKind::SQLite
         ).await.unwrap());
 
         let dummy_module = CfgModule {
@@ -607,21 +625,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dominators_empty() {
+    async fn test_dominators_basic() {
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
         ).await.unwrap());
         let module = CfgModule::new(store);
 
         let doms = module.dominators(SymbolId(1)).await.unwrap();
         assert_eq!(doms.root, BlockId(0));
-        assert_eq!(doms.dominators.len(), 0);
+        // Currently returns a basic dominator tree with just the entry block
+        assert_eq!(doms.dominators.len(), 1);
     }
 
     #[tokio::test]
     async fn test_loops_empty() {
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
         ).await.unwrap());
         let module = CfgModule::new(store);
 
@@ -630,14 +649,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_paths_execute_empty() {
+    async fn test_paths_execute_returns_placeholder() {
         let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap()
+            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
         ).await.unwrap());
         let module = CfgModule::new(store);
 
         let paths = module.paths(SymbolId(1)).execute().await.unwrap();
-        assert_eq!(paths.len(), 0);
+        // Currently returns a placeholder path (1 path with 1 block)
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].blocks.len(), 1);
     }
 
     #[test]

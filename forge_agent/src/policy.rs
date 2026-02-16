@@ -22,10 +22,7 @@ pub enum Policy {
     MaxComplexity(usize),
 
     /// Custom policy with validation function
-    Custom {
-        name: String,
-        description: String,
-    },
+    Custom { name: String, description: String },
 }
 
 impl Policy {
@@ -218,7 +215,11 @@ impl AnyPolicy {
                 name: "Any".to_string(),
                 description: format!("At least one of {} policies must pass", self.policies.len()),
             },
-            violations: if any_passed { Vec::new() } else { all_violations.clone() },
+            violations: if any_passed {
+                Vec::new()
+            } else {
+                all_violations.clone()
+            },
             passed: any_passed,
         })
     }
@@ -298,7 +299,10 @@ async fn check_no_unsafe_in_public_api(diff: &Diff) -> Result<Option<PolicyViola
     } else {
         Some(PolicyViolation::new(
             "NoUnsafeInPublicAPI",
-            format!("Found {} violations of unsafe in public API", violations.len()),
+            format!(
+                "Found {} violations of unsafe in public API",
+                violations.len()
+            ),
         ))
     })
 }
@@ -431,8 +435,8 @@ fn estimate_complexity(lines: &[&str]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_policy_no_unsafe_in_public_api() {
@@ -502,10 +506,7 @@ mod tests {
             changes: vec![],
         };
 
-        let policies = vec![
-            Policy::NoUnsafeInPublicAPI,
-            Policy::PreserveTests,
-        ];
+        let policies = vec![Policy::NoUnsafeInPublicAPI, Policy::PreserveTests];
 
         let all = AllPolicies::new(policies);
         let report = all.validate(&forge, &diff).await.unwrap();
@@ -560,11 +561,7 @@ mod tests {
 
     #[test]
     fn test_estimate_complexity() {
-        let lines = vec![
-            "fn simple() {",
-            "    let x = 1;",
-            "}",
-        ];
+        let lines = vec!["fn simple() {", "    let x = 1;", "}"];
 
         let complexity = estimate_complexity(&lines);
         assert_eq!(complexity, 1);

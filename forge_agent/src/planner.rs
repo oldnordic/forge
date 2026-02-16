@@ -30,7 +30,10 @@ impl Planner {
     /// # Arguments
     ///
     /// * `observation` - The observation data
-    pub async fn generate_steps(&self, observation: &super::observe::Observation) -> Result<Vec<PlanStep>> {
+    pub async fn generate_steps(
+        &self,
+        observation: &super::observe::Observation,
+    ) -> Result<Vec<PlanStep>> {
         let mut steps = Vec::new();
 
         // For each symbol in the observation, create appropriate steps
@@ -96,7 +99,8 @@ impl Planner {
     /// * `steps` - The planned steps
     pub fn detect_conflicts(&self, steps: &[PlanStep]) -> Result<Vec<Conflict>> {
         let mut conflicts = Vec::new();
-        let mut file_regions: std::collections::HashMap<String, Vec<(usize, usize, usize)>> = std::collections::HashMap::new();
+        let mut file_regions: std::collections::HashMap<String, Vec<(usize, usize, usize)>> =
+            std::collections::HashMap::new();
 
         // Track regions in each file
         for (idx, step) in steps.iter().enumerate() {
@@ -187,11 +191,19 @@ impl Planner {
             .map(|step| RollbackStep {
                 description: format!("Rollback: {}", step.description),
                 operation: match &step.operation {
-                    PlanOperation::Rename { old, .. } => RollbackOperation::Rename { new_name: old.clone() },
-                    PlanOperation::Delete { name } => RollbackOperation::Restore { name: name.clone() },
-                    PlanOperation::Create { path, .. } => RollbackOperation::Delete { path: path.clone() },
+                    PlanOperation::Rename { old, .. } => RollbackOperation::Rename {
+                        new_name: old.clone(),
+                    },
+                    PlanOperation::Delete { name } => {
+                        RollbackOperation::Restore { name: name.clone() }
+                    }
+                    PlanOperation::Create { path, .. } => {
+                        RollbackOperation::Delete { path: path.clone() }
+                    }
                     PlanOperation::Inspect { .. } => RollbackOperation::None,
-                    PlanOperation::Modify { file, .. } => RollbackOperation::Restore { name: file.clone() },
+                    PlanOperation::Modify { file, .. } => {
+                        RollbackOperation::Restore { name: file.clone() }
+                    }
                 },
             })
             .collect()
@@ -242,9 +254,16 @@ pub enum PlanOperation {
     /// Create new code
     Create { path: String, content: String },
     /// Inspect a symbol (read-only)
-    Inspect { symbol_id: forge_core::types::SymbolId, symbol_name: String },
+    Inspect {
+        symbol_id: forge_core::types::SymbolId,
+        symbol_name: String,
+    },
     /// Modify existing code
-    Modify { file: String, start: usize, end: usize },
+    Modify {
+        file: String,
+        start: usize,
+        end: usize,
+    },
 }
 
 /// Estimated impact of a plan.
@@ -362,11 +381,16 @@ mod tests {
         let mut steps = vec![
             PlanStep {
                 description: "Delete foo".to_string(),
-                operation: PlanOperation::Delete { name: "foo".to_string() },
+                operation: PlanOperation::Delete {
+                    name: "foo".to_string(),
+                },
             },
             PlanStep {
                 description: "Rename foo to bar".to_string(),
-                operation: PlanOperation::Rename { old: "foo".to_string(), new: "bar".to_string() },
+                operation: PlanOperation::Rename {
+                    old: "foo".to_string(),
+                    new: "bar".to_string(),
+                },
             },
         ];
 
@@ -383,21 +407,22 @@ mod tests {
         let forge = Forge::open(temp_dir.path()).await.unwrap();
         let planner = Planner::new(forge);
 
-        let steps = vec![
-            PlanStep {
-                description: "Create file".to_string(),
-                operation: PlanOperation::Create {
-                    path: "/tmp/test.rs".to_string(),
-                    content: "fn test() {}".to_string(),
-                },
+        let steps = vec![PlanStep {
+            description: "Create file".to_string(),
+            operation: PlanOperation::Create {
+                path: "/tmp/test.rs".to_string(),
+                content: "fn test() {}".to_string(),
             },
-        ];
+        }];
 
         let rollback = planner.generate_rollback(&steps);
 
         assert_eq!(rollback.len(), 1);
         assert_eq!(rollback[0].description, "Rollback: Create file");
-        assert!(matches!(rollback[0].operation, RollbackOperation::Delete { .. }));
+        assert!(matches!(
+            rollback[0].operation,
+            RollbackOperation::Delete { .. }
+        ));
     }
 
     #[tokio::test]
@@ -406,15 +431,13 @@ mod tests {
         let forge = Forge::open(temp_dir.path()).await.unwrap();
         let planner = Planner::new(forge);
 
-        let steps = vec![
-            PlanStep {
-                description: "Create test.rs".to_string(),
-                operation: PlanOperation::Create {
-                    path: "/tmp/test.rs".to_string(),
-                    content: "fn test() {}".to_string(),
-                },
+        let steps = vec![PlanStep {
+            description: "Create test.rs".to_string(),
+            operation: PlanOperation::Create {
+                path: "/tmp/test.rs".to_string(),
+                content: "fn test() {}".to_string(),
             },
-        ];
+        }];
 
         let impact = planner.estimate_impact(&steps).await.unwrap();
 

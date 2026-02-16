@@ -50,7 +50,7 @@ impl Mutator {
     pub async fn begin_transaction(&mut self) -> Result<()> {
         if self.transaction.is_some() {
             return Err(AgentError::MutationFailed(
-                "Transaction already in progress".to_string()
+                "Transaction already in progress".to_string(),
             ));
         }
 
@@ -64,15 +64,17 @@ impl Mutator {
 
     /// Applies a single step in the current transaction.
     pub async fn apply_step(&mut self, step: &crate::planner::PlanStep) -> Result<()> {
-        let transaction = self.transaction.as_mut()
-            .ok_or_else(|| AgentError::MutationFailed(
-                "No active transaction".to_string()
-            ))?;
+        let transaction = self
+            .transaction
+            .as_mut()
+            .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))?;
 
         match &step.operation {
             crate::planner::PlanOperation::Rename { old, new } => {
                 // Record for rollback
-                transaction.applied_steps.push(format!("Rename {} to {}", old, new));
+                transaction
+                    .applied_steps
+                    .push(format!("Rename {} to {}", old, new));
             }
             crate::planner::PlanOperation::Delete { name } => {
                 transaction.applied_steps.push(format!("Delete {}", name));
@@ -87,10 +89,9 @@ impl Mutator {
                 }
 
                 // Write new content
-                fs::write(path, content).await
-                    .map_err(|e| AgentError::MutationFailed(
-                        format!("Failed to write {}: {}", path, e)
-                    ))?;
+                fs::write(path, content).await.map_err(|e| {
+                    AgentError::MutationFailed(format!("Failed to write {}: {}", path, e))
+                })?;
 
                 transaction.applied_steps.push(format!("Create {}", path));
             }
@@ -113,17 +114,16 @@ impl Mutator {
 
     /// Rolls back the current transaction.
     pub async fn rollback(&mut self) -> Result<()> {
-        let transaction = self.transaction.take()
-            .ok_or_else(|| AgentError::MutationFailed(
-                "No active transaction".to_string()
-            ))?;
+        let transaction = self
+            .transaction
+            .take()
+            .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))?;
 
         // Rollback in reverse order
         for state in transaction.rollback_state.iter().rev() {
-            std::fs::write(&state.file, &state.original_content)
-                .map_err(|e| AgentError::MutationFailed(
-                    format!("Rollback failed for {}: {}", state.file, e)
-                ))?;
+            std::fs::write(&state.file, &state.original_content).map_err(|e| {
+                AgentError::MutationFailed(format!("Rollback failed for {}: {}", state.file, e))
+            })?;
         }
 
         Ok(())

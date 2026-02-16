@@ -5,8 +5,8 @@
 
 use crate::{AgentError, Result};
 use forge_core::Forge;
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
 
 /// Verifier for post-mutation validation.
 ///
@@ -35,9 +35,7 @@ impl Verifier {
             .args(["check", "--message-format=short"])
             .current_dir(working_dir)
             .output()
-            .map_err(|e| AgentError::VerificationFailed(
-                format!("Cargo check failed: {}", e)
-            ))?;
+            .map_err(|e| AgentError::VerificationFailed(format!("Cargo check failed: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -70,9 +68,7 @@ impl Verifier {
             .args(["test", "--message-format=short"])
             .current_dir(working_dir)
             .output()
-            .map_err(|e| AgentError::VerificationFailed(
-                format!("Cargo test failed: {}", e)
-            ))?;
+            .map_err(|e| AgentError::VerificationFailed(format!("Cargo test failed: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

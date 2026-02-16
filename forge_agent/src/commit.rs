@@ -30,7 +30,11 @@ impl Committer {
     ///
     /// * `working_dir` - Directory for the operation
     /// * `modified_files` - Files that were modified
-    pub async fn finalize(&self, _working_dir: &std::path::Path, modified_files: &[std::path::PathBuf]) -> Result<CommitReport> {
+    pub async fn finalize(
+        &self,
+        _working_dir: &std::path::Path,
+        modified_files: &[std::path::PathBuf],
+    ) -> Result<CommitReport> {
         // Generate transaction ID using timestamp
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -123,7 +127,10 @@ mod tests {
         let forge = Forge::open(temp_dir.path()).await.unwrap();
         let committer = Committer::new(forge);
 
-        let result = committer.finalize(&std::path::PathBuf::new(), &[]).await.unwrap();
+        let result = committer
+            .finalize(&std::path::PathBuf::new(), &[])
+            .await
+            .unwrap();
 
         assert!(!result.transaction_id.is_empty());
         assert!(result.files_committed.is_empty());

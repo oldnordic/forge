@@ -13,12 +13,12 @@ path = "src/lib.rs"
 
 [features]
 default = ["sqlite"]
-sqlite = ["sqlitegraph/sqlite-backend", "forge-core/sqlite"]
-native-v2 = ["sqlitegraph/native-v2", "forge-core/native-v2"]
+sqlite = ["sqlitegraph/sqlite-backend", "sqlitegraph/native-v3"]
+native-v3 = ["sqlitegraph/native-v3"]
 
 [dependencies]
-forge-core = { path = "../forge_core", default-features = false }
-sqlitegraph = { version = "2.0.1", default-features = false, optional = true }
+forge_core = { path = "../forge_core", default-features = false }
+sqlitegraph = { version = "2.0.5", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 notify = "8"
 anyhow = "1"

@@ -69,7 +69,7 @@ pub enum AgentError {
 pub type Result<T> = std::result::Result<T, AgentError>;
 
 // Re-export policy module
-pub use policy::{Policy, PolicyValidator, PolicyReport, PolicyViolation};
+pub use policy::{Policy, PolicyReport, PolicyValidator, PolicyViolation};
 
 // Re-export observation types
 pub use observe::Observation;
@@ -163,10 +163,10 @@ impl Agent {
     ///
     /// * `query` - The natural language query or request
     pub async fn observe(&self, query: &str) -> Result<Observation> {
-        let forge = self.forge.as_ref()
-            .ok_or_else(|| AgentError::ObservationFailed(
-                "Forge SDK not available".to_string()
-            ))?;
+        let forge = self
+            .forge
+            .as_ref()
+            .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
 
         let observer = observe::Observer::new(forge.clone());
         let obs = observer.gather(query).await?;
@@ -181,11 +181,16 @@ impl Agent {
     ///
     /// * `observation` - The observation to constrain
     /// * `policies` - The policies to validate
-    pub async fn constrain(&self, observation: Observation, policies: Vec<policy::Policy>) -> Result<ConstrainedPlan> {
-        let forge = self.forge.as_ref()
-            .ok_or_else(|| AgentError::ObservationFailed(
-                "Forge SDK not available for policy validation".to_string()
-            ))?;
+    pub async fn constrain(
+        &self,
+        observation: Observation,
+        policies: Vec<policy::Policy>,
+    ) -> Result<ConstrainedPlan> {
+        let forge = self.forge.as_ref().ok_or_else(|| {
+            AgentError::ObservationFailed(
+                "Forge SDK not available for policy validation".to_string(),
+            )
+        })?;
 
         // Create a validator
         let validator = policy::PolicyValidator::new(forge.clone());
@@ -210,10 +215,9 @@ impl Agent {
 
     /// Generates an execution plan from the constrained observation.
     pub async fn plan(&self, constrained: ConstrainedPlan) -> Result<ExecutionPlan> {
-        let forge = self.forge.as_ref()
-            .ok_or_else(|| AgentError::PlanningFailed(
-                "Forge SDK not available for planning".to_string()
-            ))?;
+        let forge = self.forge.as_ref().ok_or_else(|| {
+            AgentError::PlanningFailed("Forge SDK not available for planning".to_string())
+        })?;
 
         // Create planner
         let planner_instance = planner::Planner::new(forge.clone());
@@ -234,9 +238,10 @@ impl Agent {
         let conflicts = planner_instance.detect_conflicts(&steps)?;
 
         if !conflicts.is_empty() {
-            return Err(AgentError::PlanningFailed(
-                format!("Found {} conflicts in plan", conflicts.len())
-            ));
+            return Err(AgentError::PlanningFailed(format!(
+                "Found {} conflicts in plan",
+                conflicts.len()
+            )));
         }
 
         // Order steps based on dependencies
@@ -258,10 +263,10 @@ impl Agent {
 
     /// Executes the mutation phase of the plan.
     pub async fn mutate(&self, plan: ExecutionPlan) -> Result<MutationResult> {
-        let forge = self.forge.as_ref()
-            .ok_or_else(|| AgentError::MutationFailed(
-                "Forge SDK not available".to_string()
-            ))?;
+        let forge = self
+            .forge
+            .as_ref()
+            .ok_or_else(|| AgentError::MutationFailed("Forge SDK not available".to_string()))?;
 
         let mut mutator = mutate::Mutator::new(forge.clone());
         mutator.begin_transaction().await?;
@@ -278,17 +283,19 @@ impl Agent {
 
     /// Verifies the mutation result.
     pub async fn verify(&self, _result: MutationResult) -> Result<VerificationResult> {
-        let forge = self.forge.as_ref()
-            .ok_or_else(|| AgentError::VerificationFailed(
-                "Forge SDK not available".to_string()
-            ))?;
+        let forge = self
+            .forge
+            .as_ref()
+            .ok_or_else(|| AgentError::VerificationFailed("Forge SDK not available".to_string()))?;
 
         let verifier = verify::Verifier::new(forge.clone());
         let report = verifier.verify(&self.codebase_path).await?;
 
         Ok(VerificationResult {
             passed: report.passed,
-            diagnostics: report.diagnostics.iter()
+            diagnostics: report
+                .diagnostics
+                .iter()
                 .map(|d| d.message.clone())
                 .collect(),
         })
@@ -296,17 +303,21 @@ impl Agent {
 
     /// Commits the verified mutation.
     pub async fn commit(&self, result: VerificationResult) -> Result<CommitResult> {
-        let forge = self.forge.as_ref()
-            .ok_or_else(|| AgentError::CommitFailed(
-                "Forge SDK not available".to_string()
-            ))?;
+        let forge = self
+            .forge
+            .as_ref()
+            .ok_or_else(|| AgentError::CommitFailed("Forge SDK not available".to_string()))?;
 
         let committer = commit::Committer::new(forge.clone());
-        let files: Vec<std::path::PathBuf> = result.diagnostics.iter()
+        let files: Vec<std::path::PathBuf> = result
+            .diagnostics
+            .iter()
             .filter_map(|d| {
                 // Parse diagnostics to extract file paths
                 // Format: "file:line:col: message"
-                d.split(':').next().map(|s| std::path::PathBuf::from(s.trim()))
+                d.split(':')
+                    .next()
+                    .map(|s| std::path::PathBuf::from(s.trim()))
             })
             .collect();
 

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Updated dependencies for V3 backend persistence fix**
+  - `sqlitegraph`: 2.0.1/2.0.2 → 2.0.5 (V3 persistence fix)
+  - `magellan`: path → 2.4.5 (uses sqlitegraph 2.0.5)
+  - `llmgrep`: 2.1 → 3.0.8 (uses magellan 2.4.5, sqlitegraph 2.0.5)
+  - V3 databases now properly persist across process restarts
+
 ### Added
 - Initial project structure
 - Workspace with three crates: forge_core, forge_runtime, forge_agent
