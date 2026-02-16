@@ -40,9 +40,39 @@ tempfile = "3"
 
 [features]
 default = ["sqlite", "tools"]
-sqlite = ["sqlitegraph/sqlite-backend", "sqlitegraph/native-v3"]
-native-v3 = ["sqlitegraph/native-v3"]
 
-# Tool integrations
-tools = ["magellan", "llmgrep", "mirage-analyzer", "splice", "which"]
+# Storage backends
+# Note: Both backends require sqlitegraph dependency
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "sqlitegraph/native-v3"]
+native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3"]
+
+# Tool integrations with backend selection
+# Each tool can use either SQLite or V3 backend
+
+# Magellan (code indexing)
+magellan = ["dep:magellan"]
+magellan-sqlite = ["magellan"]
+magellan-v3 = ["magellan"]
+
+# LLMGrep (semantic search)
+llmgrep = ["dep:llmgrep"]
+llmgrep-sqlite = ["llmgrep"]
+llmgrep-v3 = ["llmgrep", "native-v3"]
+
+# Mirage (CFG analysis)
+mirage = ["dep:mirage-analyzer"]
+mirage-sqlite = ["mirage"]
+mirage-v3 = ["mirage", "native-v3"]
+
+# Splice (code editing)
+splice = ["dep:splice"]
+splice-sqlite = ["splice"]
+splice-v3 = ["splice", "native-v3"]
+
+# Convenience feature groups
+tools = ["magellan", "llmgrep", "mirage", "splice", "which"]
+tools-sqlite = ["magellan-sqlite", "llmgrep-sqlite", "mirage-sqlite", "splice-sqlite", "which"]
+tools-v3 = ["magellan-v3", "llmgrep-v3", "mirage-v3", "splice-v3", "native-v3", "which"]
 full = ["tools", "sqlite", "native-v3"]
+full-sqlite = ["tools-sqlite", "sqlite"]
+full-v3 = ["tools-v3", "native-v3"]

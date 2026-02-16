@@ -13,8 +13,17 @@ path = "src/lib.rs"
 
 [features]
 default = ["sqlite"]
-sqlite = ["sqlitegraph/sqlite-backend", "sqlitegraph/native-v3"]
-native-v3 = ["sqlitegraph/native-v3"]
+
+# Storage backends (passed to forge_core)
+sqlite = ["forge_core/sqlite", "dep:sqlitegraph"]
+native-v3 = ["forge_core/native-v3", "dep:sqlitegraph"]
+
+# Backend-specific runtime features
+runtime-sqlite = ["sqlite"]
+runtime-v3 = ["native-v3"]
+full = ["sqlite", "native-v3"]
+full-sqlite = ["runtime-sqlite", "sqlite"]
+full-v3 = ["runtime-v3", "native-v3"]
 
 [dependencies]
 forge_core = { path = "../forge_core", default-features = false }

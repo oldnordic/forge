@@ -9,15 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Individual tool backend selection**
+  - New features for choosing backend per tool:
+    - `magellan-sqlite` / `magellan-v3` - Magellan with SQLite or V3 backend
+    - `llmgrep-sqlite` / `llmgrep-v3` - LLMGrep with SQLite or V3 backend  
+    - `mirage-sqlite` / `mirage-v3` - Mirage with SQLite or V3 backend
+    - `splice-sqlite` / `splice-v3` - Splice with SQLite or V3 backend
+  - Convenience groups:
+    - `tools-sqlite` - All tools with SQLite backend
+    - `tools-v3` - All tools with V3 backend
+    - `full-sqlite` / `full-v3` - Everything with specific backend
+
 ### Changed
 - **Updated dependencies for V3 backend persistence fix**
   - `sqlitegraph`: 2.0.1/2.0.2 → 2.0.5 (V3 persistence fix)
   - `magellan`: path → 2.4.5 (uses sqlitegraph 2.0.5)
   - `llmgrep`: 2.1 → 3.0.8 (uses magellan 2.4.5, sqlitegraph 2.0.5)
   - V3 databases now properly persist across process restarts
-
-### Added
-- Initial project structure
 - Workspace with three crates: forge_core, forge_runtime, forge_agent
 - Comprehensive documentation set
 - API design specifications

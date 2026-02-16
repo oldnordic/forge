@@ -13,10 +13,20 @@ path = "src/lib.rs"
 
 [features]
 default = ["sqlite"]
-sqlite = ["sqlitegraph/sqlite-backend", "forge_core/sqlite"]
+
+# Storage backends (inherited from forge_core)
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge_core/sqlite"]
+native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3", "forge_core/native-v3"]
+
+# Agent operation modes
+agent-sqlite = ["sqlite"]
+agent-v3 = ["native-v3"]
+full = ["sqlite", "native-v3"]
+full-sqlite = ["agent-sqlite", "sqlite"]
+full-v3 = ["agent-v3", "native-v3"]
 
 [dependencies]
-forge_core = { path = "../forge_core", features = ["sqlite"], default-features = false }
+forge_core = { path = "../forge_core", default-features = false }
 sqlitegraph = { version = "2.0.5", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
