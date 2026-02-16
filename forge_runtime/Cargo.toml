@@ -1,5 +1,5 @@
 [package]
-name = "forge-runtime"
+name = "forgekit-runtime"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
@@ -15,8 +15,8 @@ path = "src/lib.rs"
 default = ["sqlite"]
 
 # Storage backends (passed to forge_core)
-sqlite = ["forge_core/sqlite", "dep:sqlitegraph"]
-native-v3 = ["forge_core/native-v3", "dep:sqlitegraph"]
+sqlite = ["forgekit-core/sqlite", "dep:sqlitegraph"]
+native-v3 = ["forgekit-core/native-v3", "dep:sqlitegraph"]
 
 # Backend-specific runtime features
 runtime-sqlite = ["sqlite"]
@@ -26,7 +26,7 @@ full-sqlite = ["runtime-sqlite", "sqlite"]
 full-v3 = ["runtime-v3", "native-v3"]
 
 [dependencies]
-forge_core = { path = "../forge_core", default-features = false }
+forgekit-core = { path = "../forge_core", default-features = false }
 sqlitegraph = { version = "2.0.5", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 notify = "8"

@@ -1,5 +1,5 @@
 [package]
-name = "forge-agent"
+name = "forgekit-agent"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
@@ -15,8 +15,8 @@ path = "src/lib.rs"
 default = ["sqlite"]
 
 # Storage backends (inherited from forge_core)
-sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge_core/sqlite"]
-native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3", "forge_core/native-v3"]
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forgekit-core/sqlite"]
+native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3", "forgekit-core/native-v3"]
 
 # Agent operation modes
 agent-sqlite = ["sqlite"]
@@ -26,7 +26,7 @@ full-sqlite = ["agent-sqlite", "sqlite"]
 full-v3 = ["agent-v3", "native-v3"]
 
 [dependencies]
-forge_core = { path = "../forge_core", default-features = false }
+forgekit-core = { path = "../forge_core", default-features = false }
 sqlitegraph = { version = "2.0.5", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
