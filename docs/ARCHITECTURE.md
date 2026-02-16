@@ -1,537 +1,415 @@
-# Architecture
+# ForgeKit Architecture
 
-**Version**: 0.2.0 (V3 Backend)
-**Created**: 2025-12-30
-**Last Updated**: 2026-02-13
-**Status**: ACTIVE
+System design and architecture documentation for ForgeKit.
 
----
+## Table of Contents
+
+1. [Overview](#overview)
+2. [System Architecture](#system-architecture)
+3. [Crate Organization](#crate-organization)
+4. [Backend Design](#backend-design)
+5. [Pub/Sub System](#pubsub-system)
+6. [Data Flow](#data-flow)
+7. [Feature Flag System](#feature-flag-system)
 
 ## Overview
 
-ForgeKit is a layered SDK that provides deterministic code intelligence through a unified API. The architecture follows strict separation of concerns with clear boundaries between components.
+ForgeKit is a code intelligence SDK that unifies multiple tools (magellan, llmgrep, mirage, splice) under a single API with support for dual backends (SQLite and Native V3).
 
----
+### Design Principles
 
-## Design Principles
-
-### 1. Graph-First Design
-
-The sqlitegraph V3 database (`.forge/graph.v3`) is the authoritative source of truth.
-
-```rust
-// All operations flow through the graph
-let forge = Forge::open("./repo")?;
-let graph = forge.graph();  // Direct graph access
-```
-
-**Invariants:**
-- Never assume code structure without querying
-- All symbol locations are exact spans
-- All references are graph-verified
-
-### 2. Deterministic Operations
-
-Every operation is verifiable and auditable.
-
-```rust
-forge.edit()
-    .rename_symbol("OldName", "NewName")?
-    .verify()?      // Pre-commit validation
-    .apply()?       // Atomic mutation
-```
-
-**Invariants:**
-- Span-safety is mandatory
-- Rollback is always available
-- No silent failures
-
-### 3. Backend: sqlitegraph V3
-
-ForgeKit is built on [sqlitegraph](https://github.com/oldnordic/sqlitegraph), the embedded graph database with native V3 backend.
-
-**Repository**: [github.com/oldnordic/sqlitegraph](https://github.com/oldnordic/sqlitegraph)  
-**Crate**: [crates.io/crates/sqlitegraph](https://crates.io/crates/sqlitegraph)
-
-```rust
-// V3 backend is the default
-let forge = Forge::open("./repo").await?;
-
-// Database stored at .forge/graph.v3
-```
-
-**Invariants:**
-- V3 backend provides high-performance binary graph storage
-- API is backend-agnostic
-- SQLite backend available as alternative
-
----
+1. **Unified API**: Single interface for all code intelligence operations
+2. **Backend Agnostic**: Switch between SQLite and Native V3 without code changes
+3. **Modular Tools**: Enable only the tools you need
+4. **Async-First**: Built on Tokio for async/await
+5. **Type Safety**: Leverage Rust's type system for correctness
 
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Application Layer                         │
-│  (IDE, CLI, Agent, Custom Tool)                               │
-└────────────────────────────┬───────────────────────────────────────────┘
-                         │
-┌────────────────────────────┴───────────────────────────────────────────┐
-│                       forge_core API                            │
-│                                                                  │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌─────────┐ │
-│  │   Graph    │  │  Search    │  │    CFG     │  │  Edit    │ │
-│  │  Module    │  │  Module     │  │  Module    │  │  Module  │ │
-│  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘  └────┬────┘ │
-│        │                 │                 │               │         │
-└────────┼─────────────────┼─────────────────┼───────────────┼─────┘
-         │                 │                 │               │
-┌────────┼─────────────────┼─────────────────┼───────────────┼─────┐
-│        ▼                 ▼                 ▼               ▼       │
-│                    forge_core Internals                           │
-│  ┌─────────────────────────────────────────────────────────┐        │
-│  │              Unified Graph Store                    │        │
-│  │  (wraps sqlitegraph with convenience methods)        │        │
-│  └─────────────────────────────────────────────────────────┘        │
-└──────────────────────────────┬────────────────────────────────────┘
-                               │
-┌──────────────────────────────┴────────────────────────────────────┐
-│                     forge_runtime                         │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐       │
-│  │  Indexer   │  │   Cache    │  │  Watcher   │       │
-│  └────────────┘  └────────────┘  └────────────┘       │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │
-┌──────────────────────────────┴───────────────────────────────────┐
-│                   sqlitegraph                             │
-│  ┌─────────────────────────────────────────────────────┐        │
-│  │         GraphBackend (trait)                    │        │
-│  │  ┌────────────┐  ┌──────────────────┐       │        │
-│  │  │  Native     │  │  SQLite         │       │        │
-│  │  │  V3 Backend │  │  Backend        │       │        │
-│  │  └────────────┘  └──────────────────┘       │        │
-│  └─────────────────────────────────────────────────────┘        │
-└───────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                         ForgeKit                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │   forge_core │  │forge_runtime│  │    forge_agent      │  │
+│  │  (Core SDK)  │  │(Indexing)   │  │   (AI Agent Loop)   │  │
+│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
+└─────────┼────────────────┼────────────────────┼─────────────┘
+          │                │                    │
+          └────────────────┴────────────────────┘
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+   ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+   │   Magellan   │ │   LLMGrep    │ │   Mirage     │
+   │   (Graph)    │ │   (Search)   │ │   (CFG)      │
+   └──────────────┘ └──────────────┘ └──────────────┘
+          │                │                │
+          └────────────────┼────────────────┘
+                           │
+          ┌────────────────┴────────────────┐
+          ▼                                 ▼
+   ┌──────────────┐                ┌──────────────┐
+   │ SQLiteGraph  │                │    Splice    │
+   │   SQLite     │                │   (Edit)     │
+   │   Backend    │                └──────────────┘
+   └──────────────┘
+          │
+          │ (uses)
+          ▼
+   ┌──────────────┐
+   │  V3 Backend  │
+   │  (Native)    │
+   └──────────────┘
 ```
 
----
+## Crate Organization
 
-## Module Structure
+### forge_core
+
+Core SDK providing the main API.
 
 ```
-forge/
-├── Cargo.toml                    # Workspace configuration
-├── README.md                     # Project overview
-├── LICENSE                       # GPL-3.0-or-later
-│
-├── forge_core/                   # Core library (required)
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── lib.rs              # Public API, Forge type
-│   │   ├── graph/              # Graph operations (Magellan)
-│   │   │   ├── mod.rs
-│   │   │   ├── symbols.rs       # Symbol queries
-│   │   │   ├── references.rs    # Reference queries
-│   │   │   ├── algorithms.rs    # Graph algorithms
-│   │   │   └── types.rs       # Core types
-│   │   ├── search/             # Semantic search (LLMGrep)
-│   │   │   ├── mod.rs
-│   │   │   ├── query.rs        # Search queries
-│   │   │   ├── semantic.rs     # Semantic search
-│   │   │   └── ast.rs          # AST queries
-│   │   ├── cfg/                # CFG analysis (Mirage)
-│   │   │   ├── mod.rs
-│   │   │   ├── paths.rs        # Path enumeration
-│   │   │   ├── dominators.rs   # Dominance analysis
-│   │   │   ├── loops.rs        # Loop detection
-│   │   │   └── types.rs       # CFG types
-│   │   ├── edit/               # Span-safe editing (Splice)
-│   │   │   ├── mod.rs
-│   │   │   ├── patch.rs        # Patch operations
-│   │   │   ├── rename.rs       # Rename operations
-│   │   │   ├── delete.rs       # Delete operations
-│   │   │   └── validation.rs   # Edit validation
-│   │   ├── analysis/           # Combined operations
-│   │   │   ├── mod.rs
-│   │   │   ├── impact.rs       # Impact analysis
-│   │   │   ├── dead_code.rs    # Dead code detection
-│   │   │   └── cycles.rs       # Cycle detection
-│   │   ├── storage/            # Storage abstraction
-│   │   │   ├── mod.rs
-│   │   │   ├── backend.rs      # Backend trait wrapper
-│   │   │   └── transaction.rs  # Transaction management
-│   │   └── error.rs           # Error types
-│   └── tests/
-│
-├── forge_runtime/               # Runtime layer (optional)
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── indexer.rs          # Indexing orchestration
-│   │   ├── watcher.rs         # File watching
-│   │   ├── cache.rs           # Query caching
-│   │   └── metrics.rs         # Performance metrics
-│   └── tests/
-│
-├── forge_agent/                 # Agent layer (optional)
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── agent.rs           # Deterministic agent loop
-│   │   ├── policy.rs          # Policy DSL and validation
-│   │   ├── observe.rs         # Observation phase
-│   │   ├── plan.rs           # Planning phase
-│   │   ├── mutate.rs          # Mutation phase
-│   │   ├── verify.rs          # Verification phase
-│   │   └── commit.rs          # Commit phase
-│   └── tests/
-│
-├── docs/
-│   ├── ARCHITECTURE.md          # This document
-│   ├── API.md                 # API reference
-│   ├── PHILOSOPHY.md          # Design philosophy
-│   ├── CONTRIBUTING.md         # Contribution guide
-│   ├── DEVELOPMENT_WORKFLOW.md  # Development workflow
-│   └── ROADMAP.md            # Project roadmap
-│
-├── tests/
-│   ├── integration/
-│   │   ├── graph_tests.rs
-│   │   ├── search_tests.rs
-│   │   ├── cfg_tests.rs
-│   │   └── edit_tests.rs
-│   └── fixtures/
-│
-└── .planning/
-    ├── milestones/
-    │   ├── v0.1-ROADMAP.md
-    │   └── v0.1-REQUIREMENTS.md
-    └── phases/
-        ├── 01-project-organization/
-        ├── 02-core-sdk/
-        ├── 03-runtime-layer/
-        └── 04-agent-layer/
+forge_core/src/
+├── lib.rs           # Main Forge type, re-exports
+├── types.rs         # Core types (Symbol, Location, etc.)
+├── error.rs         # Error types
+├── storage/         # Storage abstraction
+│   └── mod.rs       # UnifiedGraphStore, BackendKind
+├── graph/           # Graph module (magellan integration)
+│   └── mod.rs       # GraphModule, symbol queries
+├── search/          # Search module (llmgrep integration)
+│   └── mod.rs       # SearchModule, pattern search
+├── cfg/             # CFG module (mirage integration)
+│   └── mod.rs       # CfgModule, control flow
+├── edit/            # Edit module (splice integration)
+│   └── mod.rs       # EditModule, safe editing
+└── analysis/        # Analysis module (composite ops)
+    └── mod.rs       # AnalysisModule
 ```
 
----
+### forge_runtime
+
+Runtime layer for indexing and caching.
+
+```
+forge_runtime/src/
+└── lib.rs           # ForgeRuntime, indexing, caching
+```
+
+### forge_agent
+
+AI agent layer for deterministic code operations.
+
+```
+forge_agent/src/
+├── lib.rs           # Agent types
+├── planner.rs       # Plan generation
+├── mutate.rs        # Mutation operations
+├── verify.rs        # Verification
+├── commit.rs        # Committing changes
+├── policy.rs        # Policy enforcement
+└── observe.rs       # Observation/logging
+```
+
+## Backend Design
+
+### UnifiedGraphStore
+
+Abstraction over both backends with a unified API.
+
+```rust
+pub struct UnifiedGraphStore {
+    codebase_path: PathBuf,
+    db_path: PathBuf,
+    backend_kind: BackendKind,
+    references: Mutex<Vec<StoredReference>>,
+}
+
+impl UnifiedGraphStore {
+    pub async fn open(path: &Path, kind: BackendKind) -> Result<Self>;
+    pub fn is_connected(&self) -> bool;
+    pub fn backend_kind(&self) -> BackendKind;
+}
+```
+
+### BackendKind
+
+Enum for backend selection:
+
+```rust
+pub enum BackendKind {
+    SQLite,     // Uses sqlitegraph SQLite backend
+    NativeV3,   // Uses sqlitegraph V3 backend
+}
+```
+
+### SQLite Backend
+
+- **Format**: SQLite database (.forge/graph.db)
+- **Transactions**: Full ACID via SQLite
+- **Access**: SQL queries supported
+- **Dependencies**: libsqlite3
+
+### Native V3 Backend
+
+- **Format**: Binary format (.forge/graph.v3)
+- **Transactions**: WAL-based
+- **Access**: API-only (no SQL)
+- **Dependencies**: Pure Rust
+- **Performance**: 10-20x faster than SQLite
+
+### Backend Selection Matrix
+
+| Feature | SQLite | Native V3 |
+|---------|--------|-----------|
+| Graph queries | ✅ | ✅ |
+| Pub/Sub | ✅ | ✅ |
+| Raw SQL | ✅ | ❌ |
+| Performance | Baseline | 10-20x |
+| Memory | Higher | Lower |
+| Dependencies | libsqlite3 | None |
+
+## Pub/Sub System
+
+Real-time event notification system.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────┐
+│           Publisher (V3)                 │
+│  ┌─────────────────────────────────┐    │
+│  │  Mutex<Vec<(SubscriberId,       │    │
+│  │            Sender, Filter)>>    │    │
+│  └─────────────────────────────────┘    │
+│                   │                     │
+│         ┌────────┼────────┐             │
+│         ▼        ▼        ▼             │
+│      ┌────┐  ┌────┐  ┌────┐            │
+│      │RX 1│  │RX 2│  │RX 3│            │
+│      └────┘  └────┘  └────┘            │
+└─────────────────────────────────────────┘
+```
+
+### Event Flow
+
+1. **Mutation** occurs (node/edge/KV change)
+2. **Transaction commits** (snapshot created)
+3. **Events emitted** to Publisher
+4. **Filter matching** determines recipients
+5. **Best-effort delivery** to subscribers
+
+### Event Types
+
+```rust
+pub enum PubSubEvent {
+    NodeChanged { node_id: i64, snapshot_id: u64 },
+    EdgeChanged { edge_id: i64, from_node: i64, to_node: i64, snapshot_id: u64 },
+    KVChanged { key_hash: u64, snapshot_id: u64 },
+    SnapshotCommitted { snapshot_id: u64 },
+}
+```
+
+### Subscription Filter
+
+```rust
+pub struct SubscriptionFilter {
+    pub node_changes: bool,
+    pub edge_changes: bool,
+    pub kv_changes: bool,
+    pub snapshot_commits: bool,
+}
+```
+
+### Lazy Initialization
+
+V3 Publisher is created on first subscription:
+
+```rust
+fn get_or_init_publisher(&self) -> MappedRwLockReadGuard<'_, Publisher> {
+    if self.publisher.read().is_none() {
+        *self.publisher.write() = Some(Publisher::new());
+    }
+    // Return guard to publisher
+}
+```
 
 ## Data Flow
 
-### Graph Query Flow
+### Indexing Flow
 
 ```
-Application
-    │
-    ▼
-forge.graph().find_symbol("main")
-    │
-    ▼
-GraphModule -> UnifiedGraphStore
-    │
-    ▼
-sqlitegraph V3 Backend
-(github.com/oldnordic/sqlitegraph)
-    │
-    ▼
-Structured Result
-    │
-    ▼
-Application
+1. File Change Detected
+         │
+         ▼
+2. Magellan Indexer
+   - Parse AST
+   - Extract symbols
+   - Build references
+         │
+         ▼
+3. Store in Backend
+   - SQLite: INSERT statements
+   - V3: Page writes + WAL
+         │
+         ▼
+4. Emit Pub/Sub Events
+   - NodeChanged
+   - EdgeChanged
+   - SnapshotCommitted
+         │
+         ▼
+5. Notify Subscribers
 ```
 
-### Edit Operation Flow
+### Query Flow
 
 ```
-Application
-    │
-    ▼
-forge.edit().rename_symbol("A", "B")
-    │
-    ├─► GraphModule: Find all references
-    │         │
-    │         ▼
-    │    sqlitegraph: Query all refs
-    │         │
-    │         ▼
-    │    Return: [(file, span), ...]
-    │
-    ├─► EditModule: Validate each edit
-    │         │
-    │         ▼
-    │    tree-sitter: Parse and verify
-    │         │
-    │         ▼
-    │    All valid? Continue / Abort
-    │
-    ├─► EditModule: Apply patches
-    │         │
-    │         ▼
-    │    ropey: Apply text edits
-    │         │
-    │         ▼
-    │    Write files
-    │
-    └─► Storage: Update graph
-              │
-              ▼
-         sqlitegraph: Re-index affected files
-              │
-              ▼
-         Transaction commit
+1. User Query
+   (find_symbol, search, etc.)
+         │
+         ▼
+2. Module Router
+   - graph → GraphModule
+   - search → SearchModule
+         │
+         ▼
+3. Backend Adapter
+   - SQLite: SQL queries
+   - V3: API calls
+         │
+         ▼
+4. Return Results
 ```
 
----
+## Feature Flag System
 
-## Component Interfaces
+ForgeKit uses extensive feature flags for flexibility.
 
-### Graph Module (Magellan Integration)
+### Storage Features
 
-```rust
-pub struct GraphModule {
-    store: Arc<UnifiedGraphStore>,
-}
-
-impl GraphModule {
-    // Symbol queries
-    pub fn find_symbol(&self, name: &str) -> Result<Vec<Symbol>>;
-    pub fn find_symbol_by_id(&self, id: SymbolId) -> Result<Symbol>;
-    pub fn symbols_in_file(&self, path: &str) -> Result<Vec<Symbol>>;
-
-    // Reference queries
-    pub fn callers_of(&self, symbol: &str) -> Result<Vec<Reference>>;
-    pub fn callees_of(&self, symbol: &str) -> Result<Vec<Reference>>;
-    pub fn references(&self, symbol: &str) -> Result<Vec<Reference>>;
-
-    // Graph algorithms
-    pub fn reachable_from(&self, id: SymbolId) -> Result<Vec<SymbolId>>;
-    pub fn cycles(&self) -> Result<Vec<Cycle>>;
-    pub fn dead_code(&self, entry: SymbolId) -> Result<Vec<SymbolId>>;
-}
+```toml
+[features]
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend"]
+native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3"]
 ```
 
-### Search Module (LLMGrep Integration)
+### Tool Features (Per-Backend)
 
-```rust
-pub struct SearchModule {
-    store: Arc<UnifiedGraphStore>,
-}
+```toml
+# Magellan
+magellan-sqlite = ["dep:magellan"]
+magellan-v3 = ["dep:magellan"]
 
-impl SearchModule {
-    // Symbol search
-    pub fn symbol(&self, name: &str) -> SearchBuilder;
-    pub fn pattern(&self, pattern: &str) -> SearchBuilder;
+# LLMGrep
+llmgrep-sqlite = ["dep:llmgrep"]
+llmgrep-v3 = ["dep:llmgrep", "native-v3"]
 
-    // AST queries
-    pub fn ast_query(&self, query: AstQuery) -> Result<Vec<AstNode>>;
+# Mirage
+mirage-sqlite = ["dep:mirage-analyzer"]
+mirage-v3 = ["dep:mirage-analyzer", "native-v3"]
 
-    // Semantic search
-    pub fn embedding_query(&self, query: &str) -> Result<Vec<Symbol>>;
-}
-
-pub struct SearchBuilder {
-    // Filters
-    pub fn kind(self, kind: SymbolKind) -> Self;
-    pub fn file(self, path: &str) -> Self;
-    pub fn limit(self, n: usize) -> Self;
-
-    // Execution
-    pub fn execute(self) -> Result<Vec<Symbol>>;
-}
+# Splice
+splice-sqlite = ["dep:splice"]
+splice-v3 = ["dep:splice", "native-v3"]
 ```
 
-### CFG Module (Mirage Integration)
+### Convenience Groups
 
-```rust
-pub struct CfgModule {
-    store: Arc<UnifiedGraphStore>,
-}
+```toml
+tools = ["magellan", "llmgrep", "mirage", "splice"]
+tools-sqlite = ["magellan-sqlite", "llmgrep-sqlite", ...]
+tools-v3 = ["magellan-v3", "llmgrep-v3", ...]
 
-impl CfgModule {
-    // Path enumeration
-    pub fn paths(&self, function: SymbolId) -> PathBuilder;
-    pub fn path_count(&self, function: SymbolId) -> Result<usize>;
-
-    // Dominance
-    pub fn dominators(&self, function: SymbolId) -> Result<DominatorTree>;
-    pub fn post_dominators(&self, function: SymbolId) -> Result<DominatorTree>;
-
-    // Analysis
-    pub fn loops(&self, function: SymbolId) -> Result<Vec<Loop>>;
-    pub fn unreachable_blocks(&self, function: SymbolId) -> Result<Vec<BlockId>>;
-}
-
-pub struct PathBuilder {
-    pub fn normal_only(self) -> Self;
-    pub fn error_only(self) -> Self;
-    pub fn max_length(self, n: usize) -> Self;
-    pub fn execute(self) -> Result<Vec<Path>>;
-}
+full = ["tools", "sqlite", "native-v3"]
+full-sqlite = ["tools-sqlite", "sqlite"]
+full-v3 = ["tools-v3", "native-v3"]
 ```
 
-### Edit Module (Splice Integration)
+### Feature Resolution
 
-```rust
-pub struct EditModule {
-    store: Arc<UnifiedGraphStore>,
-}
+Dependencies are resolved as:
 
-impl EditModule {
-    // High-level operations
-    pub fn rename_symbol(&self, old: &str, new: &str) -> RenameOperation;
-    pub fn delete_symbol(&self, name: &str) -> DeleteOperation;
-    pub fn inline_function(&self, name: &str) -> InlineOperation;
-    pub fn extract_trait(&self, methods: Vec<SymbolId>) -> ExtractOperation;
-}
+1. **Explicit features** win (e.g., `magellan-v3`)
+2. **Default features** apply if not disabled
+3. **Tool features** enable the crate dependency
+4. **Backend suffix** determines which backend the tool uses
 
-pub trait EditOperation {
-    type Output;
+### Example Feature Combinations
 
-    fn verify(mut self) -> Result<Self>;
-    fn preview(mut self) -> Result<Diff>;
-    fn apply(mut self) -> Result<Self::Output>;
-    fn rollback(mut self) -> Result<()>;
-}
+| Use Case | Features |
+|----------|----------|
+| Minimal SQLite | `sqlite`, `magellan-sqlite` |
+| Full V3 | `full-v3` |
+| Mixed | `magellan-v3`, `llmgrep-sqlite` |
+| All tools, SQLite default | `tools-sqlite`, `sqlite` |
+
+## Testing Architecture
+
+### Test Organization
+
+```
+forge_core/tests/
+├── accessor_tests.rs          # Module accessors
+├── builder_tests.rs           # Builder pattern
+├── pubsub_integration_tests.rs # Pub/Sub + backends
+└── tool_integration_tests.rs   # Tool integrations
 ```
 
----
+### Backend Testing
 
-## Error Handling
-
-### Error Hierarchy
-
-```rust
-pub enum ForgeError {
-    // Storage errors
-    DatabaseError(String),
-    BackendNotAvailable(String),
-    MigrationError(String),
-
-    // Query errors
-    SymbolNotFound(String),
-    InvalidQuery(String),
-    Timeout(Duration),
-
-    // Edit errors
-    EditConflict { file: String, span: Span },
-    VerificationFailed { file: String, reason: String },
-    RollbackFailed(String),
-
-    // CFG errors
-    CfgNotAvailable(SymbolId),
-    PathOverflow(SymbolId),
-    CycleDetected(Vec<SymbolId>),
-
-    // Policy/Agent errors
-    PolicyViolation(String),
-    PreconditionFailed(String),
-    PostconditionFailed(String),
-}
-```
-
-### Error Recovery
-
-| Error Type | Recovery Strategy |
-|-------------|------------------|
-| `DatabaseError` | Retry with exponential backoff |
-| `SymbolNotFound` | Return empty result, not error |
-| `EditConflict` | Abort transaction, suggest reindex |
-| `VerificationFailed` | Rollback, return detailed diagnostics |
-| `PolicyViolation` | Abort, return policy details |
-
----
-
-## Performance Considerations
-
-### Caching Strategy
-
-```rust
-pub struct CacheConfig {
-    // Symbol query cache
-    pub symbol_cache_size: usize,        // Default: 10,000
-
-    // CFG path cache
-    pub path_cache_size: usize,          // Default: 1,000
-
-    // Search result cache
-    pub search_cache_ttl: Duration,       // Default: 5 minutes
-
-    // Cache invalidation
-    pub invalidate_on_write: bool,        // Default: true
-}
-```
-
-### Incremental Indexing
-
-On file change:
-1. Detect modified files (watcher)
-2. Invalidate affected graph regions
-3. Re-parse only changed files
-4. Update adjacency relationships
-5. Clear affected cache entries
-
-### Query Optimization
-
-- Use prepared statements for all queries
-- Leverage SQLite indexes (edges_from, edges_to)
-- Batch multi-hop traversals
-- Cache frequently accessed symbols
-
----
-
-## Testing Strategy
-
-### Unit Tests
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_find_symbol() {
-        let forge = test_forge().await;
-        let symbols = forge.graph().find_symbol("main").unwrap();
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "main");
-    }
-}
-```
-
-### Integration Tests
+Each test file tests both backends:
 
 ```rust
 #[tokio::test]
-async fn test_rename_cross_file() {
-    let temp = TempRepo::new_with_files(vec![
-        ("src/lib.rs", "pub fn foo() {}"),
-        ("src/main.rs", "use crate::foo; fn main() { foo(); }"),
-    ]);
+async fn test_sqlite_backend() { /* ... */ }
 
-    let forge = Forge::open(temp.path()).await.unwrap();
-    forge.edit()
-        .rename_symbol("foo", "bar")
-        .verify()
-        .unwrap()
-        .apply()
-        .unwrap();
-
-    assert!(temp.contains("src/lib.rs", "pub fn bar()"));
-    assert!(temp.contains("src/main.rs", "use crate::bar;"));
-}
+#[tokio::test]
+async fn test_native_v3_backend() { /* ... */ }
 ```
 
-### Benchmark Tests
+### Integration Test Categories
 
-```rust
-fn bench_find_symbol(c: &mut Criterion) {
-    let forge = setup_large_repo().await;
-    c.bench_function("find_symbol", |b| {
-        b.iter(|| {
-            forge.graph().find_symbol("target_function").unwrap()
-        });
-    });
-}
-```
+1. **Backend Tests**: SQLite vs V3 parity
+2. **Pub/Sub Tests**: Event subscription/delivery
+3. **Tool Tests**: Magellan, LLMGrep integration
+4. **Persistence Tests**: Database survive restarts
+
+## Performance Considerations
+
+### Backend Performance
+
+| Operation | SQLite | Native V3 | Speedup |
+|-----------|--------|-----------|---------|
+| Graph traversal | Baseline | 10-20x | ✅ |
+| Node lookup | Baseline | 5-10x | ✅ |
+| Edge scan | Baseline | 15-20x | ✅ |
+| Startup | Fast | Faster | ✅ |
+| Memory | Higher | Lower | ✅ |
+
+### Optimization Strategies
+
+1. **Use Native V3** for large codebases
+2. **Enable caching** with `cache_ttl`
+3. **Specific filters** instead of broad queries
+4. **Batch operations** when possible
+
+## Security Considerations
+
+1. **Database files** stored in `.forge/` (user-controlled)
+2. **No network access** in core library
+3. **Best-effort pub/sub** prevents DoS from slow subscribers
+4. **Path validation** on all file operations
+
+## Future Architecture
+
+### Planned Enhancements
+
+1. **Distributed mode**: Multiple Forge instances
+2. **Remote backends**: Client/server architecture
+3. **Plugin system**: Custom tool integrations
+4. **Incremental indexing**: Smarter change detection
 
 ---
 
-*Last updated: 2025-12-30*
+For implementation details, see [API Reference](API.md).

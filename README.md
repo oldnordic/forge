@@ -1,436 +1,173 @@
 # ForgeKit - Deterministic Code Intelligence SDK
 
-**Version**: 0.2.0 (Active Development)
-**Created**: 2025-12-30
-**Status**: V3 Backend Integrated
-**Last Updated**: 2026-02-13
-
----
-
-## Overview
-
-ForgeKit is a unified Rust SDK that exposes deterministic code intelligence capabilities through a single programmable interface. It combines Magellan, LLMGrep, Mirage, and Splice into a cohesive cognition layer for building AI-native developer tools.
-
-### Vision
-
-> **"LLVM for AI Code Agents"**
-
-ForgeKit provides an intermediate representation (the graph) with deterministic transformations and verified mutations. It is infrastructure, not another wrapper around LLMs.
-
-### What ForgeKit Becomes
-
-- **NOT**: Another AI wrapper
-- **NOT**: Another CLI tool
-- **NOT**: Another code search tool
-- **NOT**: Tied to any specific agent framework
-
-- **IS**: A deterministic, graph-backed reasoning SDK
-- **IS**: Local-first, single binary, auditable
-- **IS**: The cognition layer for ANY agent framework (LangGraph, LangChain, OdinCode, custom)
-
-### Ecosystem
-
-ForgeKit is built on top of [sqlitegraph](https://github.com/oldnordic/sqlitegraph), the embedded graph database:
-
-- **GitHub**: [github.com/oldnordic/sqlitegraph](https://github.com/oldnordic/sqlitegraph)
-- **Crates.io**: [crates.io/crates/sqlitegraph](https://crates.io/crates/sqlitegraph)
-- **Version Used**: v2.0.1 with native V3 backend
-
-### Usage Modes
-
-**1. Tool Mode (Direct API)**
-```rust
-use forge_core::{Forge, GraphModule, SearchModule};
-
-let forge = Forge::open("./repo").await?;
-let symbols = forge.graph().find_symbol("main")?;
-let results = forge.search().pattern("async fn").execute()?;
-```
-
-**2. Agent Mode (Plan Kernel)**
-```rust
-use forge_runtime::{PlanKernel, Agent};
-
-let kernel = PlanKernel::new("./repo").await?;
-let plan_id = kernel.plan.create("Refactor to async", constraints).await?;
-kernel.step.execute(step_id).await?;
-```
-
-**3. CI/CD Mode**
-```bash
-# Direct tool usage in pipelines
-magellan --db .forge/graph.v3 find --name "main"
-llmgrep --db .forge/graph.v3 search --query "TODO"
-mirage --db .forge/graph.v3 cfg --function "process"
-```
-
-**ForgeKit is library-first.** Use it with:
-- OdinCode (multi-agent swarm)
-- LangGraph (Python/JS agents)
-- LangChain (Python agents)
-- Custom agent frameworks
-- Direct CLI tools (magellan, llmgrep, mirage, splice)
-- CI/CD pipelines
-
----
-
-## Usage Modes (Menu Approach)
-
-ForgeKit provides multiple usage modes. **You choose** based on your needs:
-
-### 1. Tool Mode (Direct API)
-
-**For**: Simple refactors, scripts, CI/CD pipelines, direct tool usage
-
-```rust
-use forge_core::{Forge, GraphModule, SearchModule};
-
-let forge = Forge::open("./repo").await?;
-let symbols = forge.graph().find_symbol("main")?;
-let results = forge.search().pattern("async fn").execute()?;
-```
-
-**Characteristics**:
-- Direct calls to graph/search/cfg/edit modules
-- No planning overhead
-- Suitable for single-file operations
-- Works with any toolchain
-
-### 2. Agent Mode (Plan Kernel C Mode)
-
-**For**: Multi-step operations requiring coordination, handoffs, parallel agents
-
-```rust
-use forge_runtime::{PlanKernel, Agent};
-
-let kernel = PlanKernel::new("./repo").await?;
-let plan_id = kernel.plan.create("Refactor to async", constraints).await?;
-kernel.step.execute(step_id).await?;
-```
-
-**Characteristics**:
-- Plan Graph stores all operations (append-only)
-- Pub/Sub coordinates multiple agents
-- Handoff protocol for token budgets
-- File lease system prevents conflicts
-
-### 3. Hybrid Mode
-
-**For**: Complex workflows mixing both approaches
-
-```rust
-// Mix direct API and Plan Kernel as needed
-let forge = Forge::open("./repo").await?;
-let kernel = PlanKernel::new(&forge).await?;  // Optional!
-
-// Use direct API for simple queries
-let symbols = forge.graph().find_symbol("main")?;
-
-// Use Plan Kernel for complex multi-file refactors
-if needs_planning {
-    let plan_id = kernel.plan.create("Complex task", constraints).await?;
-    kernel.step.execute(plan_id).await?;
-}
-```
-
-**Mode Selection Guide**:
-
-| Use Case | Recommended Mode | Reason |
-|-----------|-----------------|--------|
-| Single-file refactor | Tool Mode | No planning overhead |
-| Multi-file project | Agent Mode | Coordination needed |
-| CI/CD pipeline | Tool Mode | Deterministic, reproducible |
-| One-shot query | Tool Mode | Fast, direct |
-| Multi-agent swarm | Agent Mode | Handoff, scaling |
-| Custom orchestrator | Agent Mode | Framework integration |
-
-**Key Point**: ForgeKit is a **library**, not a framework. You choose your mode.
-
----
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         forge_core                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Graph      │  │    Search    │  │     CFG      │  │
-│  │  (Magellan)  │  │  (LLMGrep)   │  │   (Mirage)   │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
-│         │                   │                   │            │
-│         └───────────────────┴───────────────────┘            │
-│                            │                                │
-│                    ┌───────┴────────┐                   │
-│                    │     Edit       │                   │
-│                    │   (Splice)     │                   │
-│                    └────────────────┘                   │
-└─────────────────────────────┬────────────────────────────────────┘
-                          │
-         ┌────────────────┴────────────────┐
-         │                                  │
-┌────────┴────────┐            ┌───────────┴──────────┐
-│  forge_runtime  │            │    forge_agent        │
-│  (Indexing +    │            │  (Deterministic      │
-│   Caching)      │            │   AI Loop)          │
-└─────────────────┘            └──────────────────────┘
-         │                                  │
-         └────────────────┬─────────────────┘
-                          │
-┌─────────────────────────────┴───────────────────────────────────┐
-│                  SQLiteGraph Backend                       │
-│  (SQLite today, Native V3 binary file in progress)        │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         forge_core                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Graph      │  │    Search    │  │     CFG      │  │
-│  │  (Magellan)  │  │  (LLMGrep)   │  │   (Mirage)   │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
-│         │                   │                   │            │
-│         └───────────────────┴───────────────────┘            │
-│                            │                                │
-│                    ┌───────┴────────┐                   │
-│                    │     Edit       │                   │
-│                    │   (Splice)     │                   │
-│                    └────────────────┘                   │
-└─────────────────────────────┬────────────────────────────────────┘
-                          │
-         ┌────────────────┴────────────────┐
-         │                                  │
-┌────────┴────────┐            ┌───────────┴──────────┐
-│  forge_runtime  │            │    forge_agent (Optional) │
-│  (Indexing +    │            │  (Deterministic      │
-│   Caching)      │            │   AI Loop)          │
-└─────────────────┘            └──────────────────────┘
-         │                                  │
-         └────────────────┬─────────────────┘
-                          │
-┌─────────────────────────────┴───────────────────────────────────┐
-│                  sqlitegraph V3 Backend                    │
-│     github.com/oldnordic/sqlitegraph | crates.io/sqlitegraph    │
-└───────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Components
-
-Pure Rust library providing the unified API.
-
-```rust
-use forge::Forge;
-
-let forge = Forge::open("./repo")?;
-
-// Code graph operations
-let graph = forge.graph();
-let symbols = graph.find_symbols("main")?;
-let refs = graph.references("main")?;
-
-// Semantic search
-let search = forge.search();
-let results = search.symbol("Database")
-    .kind("Struct")?
-
-// CFG analysis
-let cfg = forge.cfg();
-let paths = cfg.paths("process_data")?;
-let dominators = cfg.dominators("parse")?;
-
-// Span-safe editing
-let edit = forge.edit();
-edit.rename_symbol("OldName", "NewName")?
-    .verify()?
-    .apply()?;
-```
-
-### forge_runtime (Optional)
-
-Indexing and caching layer. **Optional** — see forge_core for direct storage access.
-
-**Note**: The Plan Kernel (C Mode) provides its own event-based coordination. Use forge_runtime only if you need custom event handling beyond the Plan Kernel.
-
-- Watch mode for continuous reindexing
-- Query result caching
-- Backend-agnostic storage interface
-
-### forge_agent (Optional)
-
-Deterministic AI orchestration loop with Plan Kernel (C Mode).
-
-**Note**: This is an **optional** component. Use Tool Mode (direct API) for simple operations. Use Agent Mode only when you need multi-agent coordination, handoffs, or parallel execution.
-
-```rust
-// Agent Mode - Plan Kernel coordinates work
-use forge_runtime::PlanKernel;
-
-let kernel = PlanKernel::new(&forge).await?;
-let plan_id = kernel.plan.create("My goal", constraints).await?;
-```
-
-```rust
-use forge::agent::Agent;
-
-let result = Agent::new(&forge)
-    .observe("Rename function foo to bar")
-    .constrain(Policy::NoUnsafeInPublicAPI)
-    .plan()?
-    .mutate()?
-    .verify()?
-    .commit()?;
-```
-
----
-
-## Deterministic Loop
-
-Unlike most AI coding tools (Prompt → Guess → Rewrite → Hope), ForgeKit enforces:
-
-```
-Query → Graph Reason → Validate → Safe Patch → Re-index
-```
-
-Every operation is:
-- **Span-verified**: Edits target exact byte ranges
-- **Validated**: Compiler/LSP gatekeeper confirms correctness
-- **Atomic**: All-or-nothing mutations
-- **Auditable**: Full history with rollback capability
-
----
+[![Crates.io](https://img.shields.io/crates/v/forge-core)](https://crates.io/crates/forge-core)
+[![Documentation](https://docs.rs/forge-core/badge.svg)](https://docs.rs/forge-core)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
+
+ForgeKit provides a unified SDK for code intelligence operations, integrating multiple tools into a single API with support for both SQLite and Native V3 backends.
+
+## Features
+
+- **🔍 Graph Queries**: Symbol lookup, reference tracking, call graph navigation
+- **🔎 Semantic Search**: Pattern-based code search via LLMGrep integration  
+- **🌳 Control Flow Analysis**: CFG construction and analysis via Mirage
+- **✏️ Safe Code Editing**: Span-safe refactoring via Splice
+- **📊 Dual Backend Support**: SQLite (stable) or Native V3 (high performance)
+- **📡 Pub/Sub Events**: Real-time notifications for code changes
+- **⚡ Async-First**: Built on Tokio for async/await support
 
 ## Quick Start
 
-### Installation
-
-```bash
-cargo install forge-core
-cargo install forge-runtime  # Optional
-cargo install forge-agent   # Optional
-```
-
-### Basic Usage
-
 ```rust
-use forge_core::Forge;
+use forge_core::{Forge, BackendKind};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Open a codebase - creates .forge/graph.v3
+    // Open a codebase with default backend (SQLite)
     let forge = Forge::open("./my-project").await?;
-
-    // Query the code graph
-    let symbols = forge.graph()
-        .find_symbol("main")
-        .await?;
-
-    for symbol in &symbols {
-        println!("Found {} at {:?}", symbol.name, symbol.location);
-    }
-
-    // Search for symbols by pattern
-    let results = forge.search()
-        .pattern_search("async fn")
-        .await?;
-
-    println!("Found {} async functions", results.len());
-
-    // Find callers of a function
-    let callers = forge.graph()
-        .callers_of("process_data")
-        .await?;
-
-    println!("Found {} callers", callers.len());
-
+    
+    // Or use Native V3 backend for better performance
+    let forge = Forge::open_with_backend("./my-project", BackendKind::NativeV3).await?;
+    
+    // Find symbols
+    let symbols = forge.graph().find_symbol("main").await?;
+    println!("Found: {:?}", symbols);
+    
+    // Search code
+    let results = forge.search().pattern("fn.*test").await?;
+    
     Ok(())
 }
 ```
 
----
+## Installation
 
-## Development Status
+Add to your `Cargo.toml`:
 
-| Component | Status | Notes |
-|-----------|----------|--------|
-| forge_core | ✅ Active | V3 backend integrated |
-| forge_runtime | 🚧 In Progress | Indexing with path filtering |
-| forge_agent | 📋 Planned | Optional AI loop |
-| sqlitegraph V3 | ✅ Stable | v2.0.1 - Production-ready |
-| Magellan | ✅ Stable | Graph module |
-| LLMGrep | ✅ Stable | Search module |
-| Mirage | 📋 Planned | CFG module |
-| Splice | 📋 Planned | Edit module |
-
-### What's Working Now
-- ✅ **V3 Backend**: Native binary graph storage (`.forge/graph.v3`)
-- ✅ **Symbol Storage**: Insert/query symbols with metadata
-- ✅ **Reference Tracking**: Store and query symbol references
-- ✅ **Path Filtering**: Only indexes `src/` and `tests/` by default
-- ✅ **Large Data Support**: Symbols with >64 bytes of metadata work correctly
-- 🚧 **Incremental Indexing**: File watching with filtered events
-- 📋 **CFG Analysis**: Planned for v0.3.0
-- 📋 **Span-safe Editing**: Planned for v0.4.0
-
----
-
-## Path Filtering
-
-By default, ForgeKit only indexes source code in `src/` and `tests/` directories. This prevents indexing build artifacts, dependencies, and generated files.
-
-### Default Behavior
-
-**Indexed:**
-- `src/**/*.rs` (Rust source)
-- `tests/**/*.rs` (Test files)
-- Similar patterns for `.py`, `.js`, `.ts`, `.go`, `.java`, etc.
-
-**Ignored:**
-- `target/**` (Rust build artifacts)
-- `node_modules/**` (Node dependencies)
-- `.git/**` (Git internals)
-- `.forge/**` (ForgeKit's own data)
-- `Cargo.lock`, `package-lock.json` (Lock files)
-- Binary files (`.png`, `.bin`, etc.)
-
-### Custom Path Filters
-
-```rust
-use forge_core::indexing::{IncrementalIndexer, PathFilter};
-
-// Create a custom filter
-let mut filter = PathFilter::new();
-filter.add_include("**/lib/**");
-filter.add_include("**/src/**");
-filter.add_extension("rs");
-filter.add_extension("go");
-
-// Use with the indexer
-let indexer = IncrementalIndexer::with_filter(store, filter);
+```toml
+[dependencies]
+forge-core = "0.2"
 ```
 
----
+### Feature Flags
+
+ForgeKit uses feature flags for flexible backend and tool selection:
+
+**Storage Backends:**
+- `sqlite` - SQLite backend (default)
+- `native-v3` - Native V3 high-performance backend
+
+**Tool Integrations (per-backend):**
+- `magellan-sqlite` / `magellan-v3` - Code indexing
+- `llmgrep-sqlite` / `llmgrep-v3` - Semantic search
+- `mirage-sqlite` / `mirage-v3` - CFG analysis
+- `splice-sqlite` / `splice-v3` - Code editing
+
+**Convenience Groups:**
+- `tools-sqlite` - All tools with SQLite
+- `tools-v3` - All tools with V3
+- `full-sqlite` - Everything with SQLite
+- `full-v3` - Everything with V3
+
+### Examples
+
+```toml
+# Default: SQLite backend with all tools
+forge-core = "0.2"
+
+# Native V3 backend with all tools
+forge-core = { version = "0.2", features = ["full-v3"] }
+
+# Mix and match: Magellan with V3, LLMGrep with SQLite
+forge-core = { version = "0.2", features = ["magellan-v3", "llmgrep-sqlite"] }
+```
+
+## Workspace Structure
+
+ForgeKit is organized as a workspace with three crates:
+
+| Crate | Purpose | Documentation |
+|-------|---------|---------------|
+| `forge_core` | Core SDK with graph, search, CFG, and edit APIs | [API Docs](docs/API.md) |
+| `forge_runtime` | Indexing, caching, and file watching | [Architecture](docs/ARCHITECTURE.md) |
+| `forge_agent` | Deterministic AI agent loop | [Manual](docs/MANUAL.md) |
+
+## Backend Comparison
+
+| Feature | SQLite | Native V3 |
+|---------|--------|-----------|
+| ACID Transactions | ✅ Full | ✅ WAL-based |
+| Raw SQL Access | ✅ Yes | ❌ No |
+| Dependencies | libsqlite3 | Pure Rust |
+| Performance | Fast | **10-20x faster** |
+| Pub/Sub | ✅ Yes | ✅ Yes |
+| Tool Compatibility | All tools | All tools (v2.0.5+) |
+
+**Recommendation:** Use Native V3 for new projects. Use SQLite if you need raw SQL access.
+
+## Pub/Sub (Real-time Events)
+
+ForgeKit supports real-time event notifications for code changes:
+
+```rust
+use forge_core::{Forge, BackendKind};
+use std::sync::mpsc;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open_with_backend("./project", BackendKind::NativeV3).await?;
+    
+    // Subscribe to node changes
+    let (id, rx) = forge.subscribe(
+        SubscriptionFilter::nodes_only()
+    ).await?;
+    
+    // Receive events in a separate task
+    tokio::spawn(async move {
+        while let Ok(event) = rx.recv() {
+            println!("Code changed: {:?}", event);
+        }
+    });
+    
+    Ok(())
+}
+```
+
+### Event Types
+
+- `NodeChanged` - Symbol created or modified
+- `EdgeChanged` - Reference/call created or modified
+- `KVChanged` - Key-value store entry changed
+- `SnapshotCommitted` - Transaction committed
 
 ## Documentation
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture and design
-- [API.md](docs/API.md) - API reference
-- [PHILOSOPHY.md](docs/PHILOSOPHY.md) - Design philosophy
-- [CONTRIBUTING.md](docs/CONTRIBUTING.md) - Contribution guidelines
-- [DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) - Development workflow
-- [ROADMAP.md](docs/ROADMAP.md) - Project roadmap
+- **[API Reference](docs/API.md)** - Complete API documentation
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and internals
+- **[Manual](docs/MANUAL.md)** - User guide and tutorials
+- **[Contributing](docs/CONTRIBUTING.md)** - Contribution guidelines
+- **[Changelog](CHANGELOG.md)** - Version history
 
----
+## Tool Integrations
+
+ForgeKit integrates with these code intelligence tools:
+
+| Tool | Purpose | Backend Support |
+|------|---------|-----------------|
+| [magellan](https://github.com/oldnordic/magellan) | Code indexing and graph queries | SQLite, V3 |
+| [llmgrep](https://github.com/oldnordic/llmgrep) | Semantic code search | SQLite, V3 |
+| [mirage-analyzer](https://crates.io/crates/mirage-analyzer) | CFG analysis | SQLite, V3 |
+| [splice](https://github.com/oldnordic/splice) | Span-safe editing | SQLite, V3 |
 
 ## License
 
-GPL-3.0-or-later
+This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
 
-See [LICENSE](LICENSE) for details.
+## Support
+
+- Issues: [GitHub Issues](https://github.com/oldnordic/forge/issues)
+- Discussions: [GitHub Discussions](https://github.com/oldnordic/forge/discussions)
 
 ---
 
-*Last updated: 2026-02-13*
+**Note:** This is an early-stage project. APIs may change until v1.0.
