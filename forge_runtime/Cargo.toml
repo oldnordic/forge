@@ -26,7 +26,7 @@ full-sqlite = ["runtime-sqlite", "sqlite"]
 full-v3 = ["runtime-v3", "native-v3"]
 
 [dependencies]
-forgekit-core = { path = "../forge_core", default-features = false }
+forgekit-core = { version = "0.2.0", path = "../forge_core", default-features = false }
 sqlitegraph = { version = "2.0.5", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 notify = "8"
