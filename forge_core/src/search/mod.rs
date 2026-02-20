@@ -33,7 +33,7 @@ impl SearchModule {
     /// Scans source files for patterns like "fn \w+\(" and returns matching symbols.
     pub async fn pattern_search(&self, pattern: &str) -> ForgeResult<Vec<Symbol>> {
         use regex::Regex;
-        use tokio::fs;
+        
         
         // Compile the regex pattern
         let regex = Regex::new(pattern)

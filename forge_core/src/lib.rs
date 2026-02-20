@@ -39,6 +39,7 @@ pub mod search;
 pub mod cfg;
 pub mod edit;
 pub mod analysis;
+pub mod treesitter;
 
 // Runtime layer modules (Phase 2)
 // TODO: Re-enable when dependencies are available
@@ -157,7 +158,7 @@ impl ForgeBuilder {
     }
 
     /// Sets the path to the codebase.
-    pub fn path(mut self, path: impl AsRef<std::path::Path>) -> Self {
+    pub fn path(self, path: impl AsRef<std::path::Path>) -> Self {
         Self {
             path: Some(path.as_ref().to_path_buf()),
             ..self
@@ -165,7 +166,7 @@ impl ForgeBuilder {
     }
 
     /// Sets a custom path for the graph database file.
-    pub fn database_path(mut self, db_path: impl AsRef<std::path::Path>) -> Self {
+    pub fn database_path(self, db_path: impl AsRef<std::path::Path>) -> Self {
         Self {
             database_path: Some(db_path.as_ref().to_path_buf()),
             ..self
@@ -173,7 +174,7 @@ impl ForgeBuilder {
     }
 
     /// Sets the backend kind (SQLite or Native V3).
-    pub fn backend_kind(mut self, kind: BackendKind) -> Self {
+    pub fn backend_kind(self, kind: BackendKind) -> Self {
         Self {
             backend_kind: Some(kind),
             ..self
@@ -181,7 +182,7 @@ impl ForgeBuilder {
     }
 
     /// Sets the cache TTL for query results.
-    pub fn cache_ttl(mut self, ttl: std::time::Duration) -> Self {
+    pub fn cache_ttl(self, ttl: std::time::Duration) -> Self {
         Self {
             cache_ttl: Some(ttl),
             ..self

@@ -3,7 +3,7 @@
 //! This module provides span-safe refactoring operations via Splice integration.
 
 use crate::error::{ForgeError, Result};
-use crate::types::{Span, SymbolId};
+use crate::types::Span;
 use std::path::PathBuf;
 
 /// Result of an edit operation.
@@ -70,7 +70,7 @@ impl EditModule {
         symbol: &str,
         replacement: &str
     ) -> Result<EditResult> {
-        use tokio::fs;
+        
         
         // Find the symbol in the codebase
         let codebase_path = &self.store.codebase_path;
@@ -172,7 +172,7 @@ impl EditModule {
         old_name: &str,
         new_name: &str
     ) -> Result<EditResult> {
-        use tokio::fs;
+        
         
         let codebase_path = &self.store.codebase_path;
         let mut changed_files = Vec::new();

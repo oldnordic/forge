@@ -1,0 +1,42 @@
+[package]
+name = "forge-reasoning"
+version = "0.1.0"
+edition = "2021"
+authors = ["Forge Contributors"]
+description = "Reasoning tools for LLM debugging - checkpointing, hypotheses, contradictions"
+license = "GPL-3.0"
+
+[dependencies]
+# Core dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+tokio = { workspace = true }
+tracing = "0.1"
+thiserror = "1.0"
+
+# SQLiteGraph - storage backend
+sqlitegraph = { path = "/home/feanor/Projects/sqlitegraph/sqlitegraph-core" }
+
+# Cryptographic hashing for data integrity
+sha2 = "0.10"
+
+# WebSocket support (optional)
+tokio-tungstenite = { version = "0.21", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3.9"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[features]
+default = ["sqlite-backend", "websocket"]
+sqlite-backend = []  # Use SQLiteGraph's SQLite backend
+native-v3 = []       # Use SQLiteGraph's Native V3 backend (future)
+websocket = ["tokio-tungstenite", "futures-util"]  # Enable WebSocket API
+
+[[bench]]
+name = "checkpoint_bench"
+harness = false

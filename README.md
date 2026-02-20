@@ -9,11 +9,13 @@ ForgeKit provides a unified SDK for code intelligence operations, integrating mu
 ## Features
 
 - **🔍 Graph Queries**: Symbol lookup, reference tracking, call graph navigation
+- **📊 Impact Analysis**: k-hop traversal to find affected symbols
 - **🔎 Semantic Search**: Pattern-based code search via LLMGrep integration  
 - **🌳 Control Flow Analysis**: CFG construction and analysis via Mirage
+- **🗑️ Dead Code Detection**: Find unused functions and methods
+- **📈 Complexity Metrics**: Cyclomatic complexity and risk analysis
 - **✏️ Safe Code Editing**: Span-safe refactoring via Splice
 - **📊 Dual Backend Support**: SQLite (stable) or Native V3 (high performance)
-- **📡 Pub/Sub Events**: Real-time notifications for code changes
 - **⚡ Async-First**: Built on Tokio for async/await support
 
 ## Quick Start
@@ -26,15 +28,19 @@ async fn main() -> anyhow::Result<()> {
     // Open a codebase with default backend (SQLite)
     let forge = Forge::open("./my-project").await?;
     
-    // Or use Native V3 backend for better performance
-    let forge = Forge::open_with_backend("./my-project", BackendKind::NativeV3).await?;
-    
     // Find symbols
     let symbols = forge.graph().find_symbol("main").await?;
     println!("Found: {:?}", symbols);
     
-    // Search code
-    let results = forge.search().pattern("fn.*test").await?;
+    // Find all callers of a function
+    let callers = forge.graph().callers_of("my_function").await?;
+    println!("Callers: {}", callers.len());
+    
+    // Impact analysis - what would break if we change this?
+    let impact = forge.graph()
+        .impact_analysis("critical_function", Some(2))
+        .await?;
+    println!("Affected symbols: {}", impact.len());
     
     Ok(())
 }
@@ -51,13 +57,11 @@ forge-core = "0.2"
 
 ### Feature Flags
 
-ForgeKit uses feature flags for flexible backend and tool selection:
-
 **Storage Backends:**
 - `sqlite` - SQLite backend (default)
 - `native-v3` - Native V3 high-performance backend
 
-**Tool Integrations (per-backend):**
+**Tool Integrations:**
 - `magellan-sqlite` / `magellan-v3` - Code indexing
 - `llmgrep-sqlite` / `llmgrep-v3` - Semantic search
 - `mirage-sqlite` / `mirage-v3` - CFG analysis
@@ -66,8 +70,7 @@ ForgeKit uses feature flags for flexible backend and tool selection:
 **Convenience Groups:**
 - `tools-sqlite` - All tools with SQLite
 - `tools-v3` - All tools with V3
-- `full-sqlite` - Everything with SQLite
-- `full-v3` - Everything with V3
+- `full-sqlite` / `full-v3` - Everything
 
 ### Examples
 
@@ -78,13 +81,11 @@ forge-core = "0.2"
 # Native V3 backend with all tools
 forge-core = { version = "0.2", features = ["full-v3"] }
 
-# Mix and match: Magellan with V3, LLMGrep with SQLite
-forge-core = { version = "0.2", features = ["magellan-v3", "llmgrep-sqlite"] }
+# Minimal: Just storage backends
+forge-core = { version = "0.2", default-features = false, features = ["sqlite"] }
 ```
 
 ## Workspace Structure
-
-ForgeKit is organized as a workspace with three crates:
 
 | Crate | Purpose | Documentation |
 |-------|---------|---------------|
@@ -100,45 +101,91 @@ ForgeKit is organized as a workspace with three crates:
 | Raw SQL Access | ✅ Yes | ❌ No |
 | Dependencies | libsqlite3 | Pure Rust |
 | Performance | Fast | **10-20x faster** |
-| Pub/Sub | ✅ Yes | ✅ Yes |
 | Tool Compatibility | All tools | All tools (v2.0.5+) |
 
 **Recommendation:** Use Native V3 for new projects. Use SQLite if you need raw SQL access.
 
-## Pub/Sub (Real-time Events)
+## Working Examples
 
-ForgeKit supports real-time event notifications for code changes:
+### Impact Analysis
+
+Find all symbols that would be affected by changing a function:
 
 ```rust
-use forge_core::{Forge, BackendKind};
-use std::sync::mpsc;
+let forge = Forge::open("./project").await?;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let forge = Forge::open_with_backend("./project", BackendKind::NativeV3).await?;
-    
-    // Subscribe to node changes
-    let (id, rx) = forge.subscribe(
-        SubscriptionFilter::nodes_only()
-    ).await?;
-    
-    // Receive events in a separate task
-    tokio::spawn(async move {
-        while let Ok(event) = rx.recv() {
-            println!("Code changed: {:?}", event);
-        }
-    });
-    
-    Ok(())
+// Find all symbols within 2 hops of "process_request"
+let impacted = forge.graph()
+    .impact_analysis("process_request", Some(2))
+    .await?;
+
+for symbol in impacted {
+    println!("{} ({} hops): {}", 
+        symbol.name, 
+        symbol.hop_distance,
+        symbol.file_path
+    );
 }
 ```
 
-### Event Types
+### Dead Code Detection
 
-- `NodeChanged` - Symbol created or modified
-- `EdgeChanged` - Reference/call created or modified
-- `KVChanged` - Key-value store entry changed
-- `SnapshotCommitted` - Transaction committed
+Find unused functions in your codebase:
+
+```rust
+let analysis = forge.analysis();
+
+let dead_code = analysis.find_dead_code().await?;
+for symbol in dead_code {
+    println!("Unused: {} in {}", symbol.name, symbol.location.file);
+}
+```
+
+### Complexity Analysis
+
+Calculate cyclomatic complexity:
+
+```rust
+let analysis = forge.analysis();
+
+// From source code
+let metrics = analysis.analyze_source_complexity(source_code);
+println!("Complexity: {} ({})", 
+    metrics.cyclomatic_complexity,
+    metrics.risk_level().as_str()
+);
+```
+
+### Control Flow Analysis
+
+```rust
+let cfg = forge.cfg();
+
+// Get dominator tree for a function
+let dominators = cfg.dominators(symbol_id).await?;
+
+// Find loops
+let loops = cfg.loops(symbol_id).await?;
+
+// Enumerate paths
+let paths = cfg.paths(symbol_id)
+    .normal_only()
+    .max_length(10)
+    .execute()
+    .await?;
+```
+
+### Pattern Search
+
+```rust
+let search = forge.search();
+
+// Regex pattern search
+let results = search.pattern(r"fn.*test.*\(").await?;
+
+// Semantic search
+let results = search.semantic("authentication logic").await?;
+```
 
 ## Documentation
 

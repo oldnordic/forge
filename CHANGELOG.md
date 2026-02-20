@@ -10,6 +10,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Graph Analysis Module** (`AnalysisModule`)
+  - `impact_analysis()` - k-hop traversal to find affected symbols
+  - `find_dead_code()` - Detect unused functions/methods
+  - `complexity_metrics()` - Calculate cyclomatic complexity
+  - `cross_references()` - Find callers and callees
+  - `module_dependencies()` - Analyze cross-module imports
+  - `find_dependency_cycles()` - Detect circular dependencies
+
+- **Graph Query Engine** using sqlitegraph high-level API
+  - `find_callers()` - Find all callers of a symbol
+  - `find_references()` - Find all references to a symbol
+  - `find_impacted_symbols()` - k-hop traversal for impact analysis
+  - Removed direct `rusqlite` dependency (uses sqlitegraph instead)
+
+- **Complexity Analysis** (`analysis::complexity`)
+  - Cyclomatic complexity calculation from CFG
+  - Decision point counting
+  - Nesting depth analysis
+  - Risk level classification (Low/Medium/High/VeryHigh)
+
+- **Dead Code Detection** (`analysis::dead_code`)
+  - Detects symbols with no incoming references
+  - Filters public API and entry points
+  - Exports test functions
+
+- **Module Dependency Analysis** (`analysis::modules`)
+  - Cross-file dependency graph construction
+  - Circular dependency detection
+  - Depth analysis
+
+### Changed
+- **Refactored graph queries** to use sqlitegraph's high-level API
+  - Uses `GraphBackend::fetch_incoming()` instead of raw SQL
+  - Uses `GraphBackend::k_hop()` for impact analysis
+  - Uses `SnapshotId::current()` for MVCC reads
+  - Removed `rusqlite` dependency
+
+### Fixed
+- **Complexity calculation** now correctly handles single-node CFGs
+- **Test expectations** updated for dominator and loop detection
+
+---
+
+## [0.2.0] - 2026-02-13
+
+### Added
 - **Individual tool backend selection**
   - New features for choosing backend per tool:
     - `magellan-sqlite` / `magellan-v3` - Magellan with SQLite or V3 backend
@@ -21,48 +67,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `tools-v3` - All tools with V3 backend
     - `full-sqlite` / `full-v3` - Everything with specific backend
 
+- **sqlitegraph V3 Backend Integration**
+  - Native V3 backend for high-performance graph storage
+  - Uses `.forge/graph.v3` database format (not SQLite)
+  - Full CRUD operations for symbols and references
+
+- **Path Filtering for Indexing**
+  - `PathFilter` struct with glob pattern support (`*`, `**`)
+  - Default filter only indexes `src/` and `tests/` directories
+  - Automatic exclusion of `target/`, `node_modules/`, `.git/`, `.forge/`
+
+- **Control Flow Graph (CFG) Module**
+  - Dominator tree computation
+  - Natural loop detection
+  - Path enumeration with filters
+  - Test CFG builder for unit tests
+
 ### Changed
 - **Updated dependencies for V3 backend persistence fix**
   - `sqlitegraph`: 2.0.1/2.0.2 → 2.0.5 (V3 persistence fix)
   - `magellan`: path → 2.4.5 (uses sqlitegraph 2.0.5)
   - `llmgrep`: 2.1 → 3.0.8 (uses magellan 2.4.5, sqlitegraph 2.0.5)
   - V3 databases now properly persist across process restarts
-- Workspace with three crates: forge_core, forge_runtime, forge_agent
-- Comprehensive documentation set
-- API design specifications
-
----
-
-## [0.2.0] - 2026-02-13
-
-### Added
-- **sqlitegraph V3 Backend Integration**
-  - Native V3 backend for high-performance graph storage
-  - Uses `.forge/graph.v3` database format (not SQLite)
-  - Full CRUD operations for symbols and references
-  - Supports large node data (>64 bytes) via external storage
-  - Battle-tested with sqlitegraph v2.0.1
-
-- **Path Filtering for Indexing**
-  - `PathFilter` struct with glob pattern support (`*`, `**`)
-  - Default filter only indexes `src/` and `tests/` directories
-  - Automatic exclusion of `target/`, `node_modules/`, `.git/`, `.forge/`
-  - File extension filtering (.rs, .py, .js, .ts, .go, .java, .c, .cpp, etc.)
-  - Custom include/exclude patterns supported
-
-- **IncrementalIndexer Enhancements**
-  - Path-aware event queuing (filtered at queue time)
-  - `full_rescan()` with directory tree walking
-  - Respects path filters during rescan
-
-### Changed
-- **Storage Backend**: Migrated from placeholder storage to actual V3 backend
-  - `UnifiedGraphStore` now holds `V3Backend` instance
-  - All storage operations use native graph API
-  - Default database path changed from `graph.db` to `graph.v3`
 
 ### Dependencies
-- Updated `sqlitegraph` to v2.0.1 (includes large node data fix)
+- Updated `sqlitegraph` to v2.0.5
 - Added `parking_lot` for synchronization
 - Added `regex` for glob pattern matching
 
@@ -118,4 +147,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-*Last updated: 2025-12-30*
+*Last updated: 2026-02-18*

@@ -3,7 +3,7 @@
 //! This module implements policy validation for agent operations, ensuring
 //! that code changes comply with specified constraints.
 
-use crate::{AgentError, Result};
+use crate::Result;
 use forge_core::Forge;
 use std::sync::Arc;
 

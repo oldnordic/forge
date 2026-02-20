@@ -30,7 +30,6 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use crate::error::{ForgeError, Result};
 use crate::types::{Symbol, SymbolId, Reference, SymbolKind, ReferenceKind, Language, Location};
@@ -467,7 +466,7 @@ impl UnifiedGraphStore {
         
         let reference_pattern = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(").unwrap();
         
-        for (symbol_name, (file_path, _)) in &symbols {
+        for (symbol_name, (_file_path, _)) in &symbols {
             // Scan all files for references to this symbol
             for (target_file, _) in symbols.values() {
                 if let Ok(content) = fs::read_to_string(target_file).await {

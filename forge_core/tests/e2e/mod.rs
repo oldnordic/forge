@@ -9,7 +9,4 @@ pub mod wave_04_edit;
 pub mod wave_05_cfg;
 pub mod wave_06_analysis;
 pub mod wave_07_workflow;
-
-// Tree-sitter CFG tests require the treesitter-cfg feature
-#[cfg(feature = "treesitter-cfg")]
 pub mod wave_08_treesitter_cfg;

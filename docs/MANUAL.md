@@ -5,11 +5,13 @@ Complete guide to using ForgeKit for code intelligence operations.
 ## Table of Contents
 
 1. [Getting Started](#getting-started)
-2. [Backends](#backends)
-3. [Core Operations](#core-operations)
-4. [Pub/Sub Events](#pubsub-events)
-5. [Advanced Usage](#advanced-usage)
-6. [Troubleshooting](#troubleshooting)
+2. [Working Examples](#working-examples)
+3. [Backends](#backends)
+4. [Graph Operations](#graph-operations)
+5. [Analysis Operations](#analysis-operations)
+6. [Search Operations](#search-operations)
+7. [CFG Analysis](#cfg-analysis)
+8. [Troubleshooting](#troubleshooting)
 
 ## Getting Started
 
@@ -21,6 +23,7 @@ Add ForgeKit to your `Cargo.toml`:
 [dependencies]
 forge-core = "0.2"
 tokio = { version = "1", features = ["full"] }
+anyhow = "1"
 ```
 
 ### Opening a Codebase
@@ -35,16 +38,9 @@ async fn main() -> anyhow::Result<()> {
     
     // Option 2: Specify backend
     let forge = Forge::open_with_backend(
-        "./my-project", 
+        "./project", 
         BackendKind::NativeV3
     ).await?;
-    
-    // Option 3: Builder pattern
-    let forge = Forge::builder()
-        .path("./my-project")
-        .backend_kind(BackendKind::NativeV3)
-        .build()
-        .await?;
     
     Ok(())
 }
@@ -63,6 +59,239 @@ my-project/
 └── Cargo.toml
 ```
 
+## Working Examples
+
+### Example 1: Find Dead Code
+
+Detect unused functions in your codebase:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    
+    // Find all dead code
+    let dead_code = forge.analysis().find_dead_code().await?;
+    
+    if dead_code.is_empty() {
+        println!("No dead code found!");
+    } else {
+        println!("Found {} unused symbols:", dead_code.len());
+        for symbol in dead_code {
+            println!("  - {} ({:?}) in {:?}", 
+                symbol.name,
+                symbol.kind,
+                symbol.location.file_path
+            );
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### Example 2: Impact Analysis
+
+Find what would break if you change a function:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    
+    // Find all symbols impacted by changing "process_request"
+    let impacted = forge.graph()
+        .impact_analysis("process_request", Some(2))  // 2 hops
+        .await?;
+    
+    println!("Changing 'process_request' would affect {} symbols:", 
+        impacted.len());
+    
+    for symbol in impacted {
+        println!("  [{} hops] {} ({}) in {}",
+            symbol.hop_distance,
+            symbol.name,
+            symbol.kind,
+            symbol.file_path
+        );
+    }
+    
+    Ok(())
+}
+```
+
+### Example 3: Find Callers
+
+Find all functions that call a specific function:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    
+    // Find all callers of "database_query"
+    let callers = forge.graph().callers_of("database_query").await?;
+    
+    println!("'database_query' is called by {} functions:", callers.len());
+    for caller in callers {
+        println!("  - {:?} at line {}", 
+            caller.from,
+            caller.location.line_number
+        );
+    }
+    
+    Ok(())
+}
+```
+
+### Example 4: Complexity Analysis
+
+Calculate cyclomatic complexity of source code:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    let analysis = forge.analysis();
+    
+    let source = r#"
+        fn calculate(x: i32, y: i32) -> i32 {
+            if x > 0 {
+                if y > 0 {
+                    x + y
+                } else {
+                    x - y
+                }
+            } else {
+                0
+            }
+        }
+    "#;
+    
+    let metrics = analysis.analyze_source_complexity(source);
+    
+    println!("Cyclomatic Complexity: {}", metrics.cyclomatic_complexity);
+    println!("Decision Points: {}", metrics.decision_points);
+    println!("Max Nesting Depth: {}", metrics.max_nesting_depth);
+    println!("Lines of Code: {}", metrics.lines_of_code);
+    println!("Risk Level: {:?}", metrics.risk_level());
+    
+    // Risk levels:
+    // - Low (1-10): Simple, easy to test
+    // - Medium (11-20): Moderate complexity
+    // - High (21-50): Complex, needs refactoring
+    // - VeryHigh (>50): Very complex, high risk
+    
+    Ok(())
+}
+```
+
+### Example 5: Pattern Search
+
+Search for code patterns using regex:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    
+    // Find all test functions
+    let tests = forge.search().pattern(r"fn test_.*\(").await?;
+    println!("Found {} test functions", tests.len());
+    
+    // Find all async functions
+    let async_fns = forge.search().pattern(r"async fn ").await?;
+    println!("Found {} async functions", async_fns.len());
+    
+    // Find all structs
+    let structs = forge.search().symbols_by_kind(
+        forge_core::types::SymbolKind::Struct
+    ).await?;
+    println!("Found {} structs", structs.len());
+    
+    Ok(())
+}
+```
+
+### Example 6: Module Dependencies
+
+Analyze dependencies between modules:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    
+    // Get all module dependencies
+    let deps = forge.analysis().module_dependencies().await?;
+    
+    println!("Module Dependencies:");
+    for dep in deps {
+        println!("  {} -> {}", dep.from, dep.to);
+    }
+    
+    // Find circular dependencies
+    let cycles = forge.analysis().find_dependency_cycles().await?;
+    
+    if !cycles.is_empty() {
+        println!("\nWarning: Found {} circular dependencies!", cycles.len());
+        for cycle in cycles {
+            println!("  Cycle: {}", cycle.join(" -> "));
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### Example 7: CFG Analysis
+
+Analyze control flow of functions:
+
+```rust
+use forge_core::Forge;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    
+    // First find a symbol
+    let symbols = forge.graph().find_symbol("process_data").await?;
+    if let Some(symbol) = symbols.first() {
+        let symbol_id = symbol.id;
+        
+        // Compute dominators
+        let doms = forge.cfg().dominators(symbol_id).await?;
+        println!("Function has {} dominator relationships", doms.len());
+        
+        // Find loops
+        let loops = forge.cfg().loops(symbol_id).await?;
+        println!("Found {} loops", loops.len());
+        
+        for loop_info in loops {
+            println!("  Loop at block {:?} with {} blocks",
+                loop_info.header,
+                loop_info.len()
+            );
+        }
+    }
+    
+    Ok(())
+}
+```
+
 ## Backends
 
 ### SQLite Backend
@@ -78,7 +307,6 @@ let forge = Forge::open_with_backend(
 
 **Pros:**
 - Full ACID transactions
-- Raw SQL access
 - Battle-tested stability
 - External tool compatibility
 
@@ -101,7 +329,6 @@ let forge = Forge::open_with_backend(
 - 10-20x faster traversals
 - Pure Rust (no C dependencies)
 - Better for large codebases
-- Lower memory overhead
 
 **Cons:**
 - No raw SQL access
@@ -117,304 +344,141 @@ let forge = Forge::open_with_backend(
 | Maximum stability | SQLite |
 | CI/CD pipelines | Native V3 |
 
-## Core Operations
+## Graph Operations
 
-### Graph Module
-
-The graph module provides symbol and reference queries.
-
-#### Finding Symbols
+### Finding Symbols
 
 ```rust
-let graph = forge.graph();
+// By name (fuzzy search)
+let symbols = forge.graph().find_symbol("main").await?;
 
-// Find by name
-let symbols = graph.find_symbol("main").await?;
-
-// Find with context
-for symbol in &symbols {
-    println!("{}: {} at {:?}", 
-        symbol.kind, 
-        symbol.name, 
-        symbol.location
-    );
-}
+// By ID
+let symbol = forge.graph().find_symbol_by_id(SymbolId(42)).await?;
 ```
 
-#### Finding References
+### Finding References
 
 ```rust
-// Find all references to a symbol
-let refs = graph.find_references("my_function").await?;
+// All references
+let refs = forge.graph().references("MyStruct").await?;
 
-// Find callers (functions that call this)
-let callers = graph.find_callers("my_function").await?;
+// Only callers (functions that call this)
+let callers = forge.graph().callers_of("my_function").await?;
 ```
 
-#### Call Graph Navigation
+### Reachability
 
 ```rust
-// Get outgoing calls from a function
-let calls = graph.get_calls("main").await?;
-
-// Navigate call hierarchy
-for call in &calls {
-    println!("main calls {} in {}", 
-        call.target_name, 
-        call.location.file
-    );
-}
+// Find all symbols reachable from a starting point
+let reachable = forge.graph().reachable_from(SymbolId(1)).await?;
 ```
 
-### Search Module
+## Analysis Operations
 
-Semantic code search via LLMGrep integration.
-
-#### Pattern Search
+### Impact Analysis
 
 ```rust
-let search = forge.search();
-
-// Regex pattern search
-let results = search.pattern(r"fn.*test.*\(").await?;
-
-// Fuzzy symbol search
-let results = search.fuzzy("myfn").await?;
+// Find what would be affected by a change
+let impact = forge.analysis().analyze_impact("target_function").await?;
+println!("{} call sites affected", impact.call_sites);
 ```
 
-#### Semantic Search
+### Cross References
 
 ```rust
-// Search by kind
-let functions = search.by_kind(SymbolKind::Function).await?;
-
-// Search by language
-let rust_items = search.by_language(Language::Rust).await?;
+// Get both callers and callees
+let xrefs = forge.analysis().cross_references("my_function").await?;
+println!("{} callers, {} callees", 
+    xrefs.callers.len(), 
+    xrefs.callees.len()
+);
 ```
 
-### CFG Module
+## Search Operations
 
-Control flow graph analysis.
+### Pattern Search
 
 ```rust
-let cfg = forge.cfg();
-
-// Build CFG for a function
-let graph = cfg.build_cfg("my_function").await?;
-
-// Find paths between nodes
-let paths = cfg.find_paths("start", "end").await?;
-
-// Compute dominators
-let doms = cfg.compute_dominators("entry").await?;
+// Regex search
+let results = forge.search().pattern(r"fn.*test").await?;
 ```
 
-### Edit Module
-
-Span-safe code editing via Splice integration.
+### Semantic Search
 
 ```rust
-let edit = forge.edit();
-
-// Rename a symbol
-edit.rename_symbol("old_name", "new_name").await?;
-
-// Apply a patch
-edit.apply_patch(Patch {
-    location: span,
-    replacement: "new code".to_string(),
-}).await?;
+// Search by meaning (requires indexing)
+let results = forge.search().semantic("error handling").await?;
 ```
 
-## Pub/Sub Events
-
-Real-time notifications for code changes.
-
-### Subscribing to Events
+### By Kind
 
 ```rust
-use forge_core::storage::SubscriptionFilter;
-
-// Subscribe to all events
-let (id, rx) = forge.subscribe(SubscriptionFilter::all()).await?;
-
-// Subscribe to specific events
-let filter = SubscriptionFilter {
-    node_changes: true,
-    edge_changes: false,
-    kv_changes: false,
-    snapshot_commits: true,
-};
-let (id, rx) = forge.subscribe(filter).await?;
-```
-
-### Handling Events
-
-```rust
-use std::sync::mpsc::RecvTimeoutError;
-
-// In a separate task/thread
-std::thread::spawn(move || {
-    loop {
-        match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(event) => {
-                match event {
-                    PubSubEvent::NodeChanged { node_id, .. } => {
-                        println!("Node {} changed", node_id);
-                    }
-                    PubSubEvent::SnapshotCommitted { snapshot_id } => {
-                        println!("Transaction {} committed", snapshot_id);
-                    }
-                    _ => {}
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-    }
-});
-```
-
-### Unsubscribing
-
-```rust
-// Stop receiving events
-forge.unsubscribe(id).await?;
-```
-
-### Event Types
-
-| Event | Description | Fields |
-|-------|-------------|--------|
-| `NodeChanged` | Symbol created/modified | `node_id`, `snapshot_id` |
-| `EdgeChanged` | Reference/call changed | `edge_id`, `from_node`, `to_node`, `snapshot_id` |
-| `KVChanged` | Key-value entry changed | `key_hash`, `snapshot_id` |
-| `SnapshotCommitted` | Transaction committed | `snapshot_id` |
-
-## Advanced Usage
-
-### Custom Backend Configuration
-
-```rust
-// Using builder for fine-grained control
-let forge = Forge::builder()
-    .path("./project")
-    .backend_kind(BackendKind::NativeV3)
-    .database_path("./custom/path/graph.v3")
-    .build()
+// Find all functions
+let functions = forge.search()
+    .symbols_by_kind(SymbolKind::Function)
     .await?;
 ```
 
-### Feature Flag Combinations
+## CFG Analysis
+
+### Building Test CFGs
+
+For unit testing, you can construct CFGs programmatically:
 
 ```rust
-// Cargo.toml examples:
+use forge_core::cfg::TestCfg;
+use forge_core::types::BlockId;
 
-// 1. SQLite with only Magellan and LLMGrep
-[dependencies]
-forge-core = { version = "0.2", default-features = false, features = ["sqlite", "magellan-sqlite", "llmgrep-sqlite"] }
+// Create a simple chain
+let cfg = TestCfg::chain(0, 5);  // 0 -> 1 -> 2 -> 3 -> 4
 
-// 2. V3 with all tools
-[dependencies]
-forge-core = { version = "0.2", features = ["full-v3"] }
+// Create if-else structure
+let cfg = TestCfg::if_else();
 
-// 3. Mixed: Magellan V3, LLMGrep SQLite
-[dependencies]
-forge-core = { version = "0.2", default-features = false, features = ["magellan-v3", "llmgrep-sqlite"] }
-```
+// Create a loop
+let cfg = TestCfg::simple_loop();
 
-### Working with Multiple Codebases
-
-```rust
-// Open multiple codebases concurrently
-let (forge1, forge2) = tokio::join!(
-    Forge::open("./project1"),
-    Forge::open("./project2")
-);
-
-let forge1 = forge1?;
-let forge2 = forge2?;
-
-// Query both
-let symbols1 = forge1.graph().find_symbol("main").await?;
-let symbols2 = forge2.graph().find_symbol("main").await?;
-```
-
-### Cross-Backend Queries
-
-```rust
-// Query SQLite and V3 backends in same program
-let forge_sqlite = Forge::open_with_backend("./project", BackendKind::SQLite).await?;
-let forge_v3 = Forge::open_with_backend("./project", BackendKind::NativeV3).await?;
-
-// Both work independently
-let sqlite_results = forge_sqlite.search().pattern("test").await?;
-let v3_results = forge_v3.search().pattern("test").await?;
+// Analyze
+let dominators = cfg.compute_dominators();
+let loops = cfg.detect_loops();
+let paths = cfg.enumerate_paths();
 ```
 
 ## Troubleshooting
 
-### Database Persistence Issues
+### Database Not Found
 
-**Problem:** V3 database doesn't persist between runs
-
-**Solution:** Ensure you're using sqlitegraph 2.0.5+:
-
-```toml
-[dependencies]
-forge-core = "0.2"  # Uses sqlitegraph 2.0.5+
+```
+Error: DatabaseError("Failed to open graph: ...")
 ```
 
-### Feature Flag Errors
+**Solution:** The `.forge/` directory doesn't exist. Create it or let ForgeKit create it automatically.
 
-**Problem:** "feature not found" errors
+### Symbol Not Found
 
-**Solution:** Check feature flag names:
-
-```toml
-# Correct
-features = ["magellan-v3", "llmgrep-sqlite"]
-
-# Incorrect
-features = ["magellan", "v3"]  # Won't work
+```
+Error: SymbolNotFound(SymbolId(42))
 ```
 
-### Backend Compatibility
+**Solution:** The symbol ID doesn't exist in the graph. Use `find_symbol()` to search by name first.
 
-**Problem:** Tools not working with V3 backend
+### Empty Results
 
-**Solution:** Ensure tools are updated:
+If queries return empty results, the graph may not be indexed:
 
-```toml
-# These versions support V3:
-# - magellan 2.4.5+
-# - llmgrep 3.0.8+
-# - mirage-analyzer 1.0+
-# - splice 2.5+
+```rust
+// Index the codebase first (requires magellan feature)
+forge.graph().index().await?;
 ```
 
-### Performance Issues
+### Backend Mismatch
 
-**Problem:** Slow queries on large codebases
+```
+Error: DatabaseError("Database format mismatch")
+```
 
-**Solution:**
-1. Use Native V3 backend
-2. Enable caching:
-   ```rust
-   let forge = Forge::builder()
-       .path("./project")
-       .cache_ttl(Duration::from_secs(60))
-       .build()
-       .await?;
-   ```
-3. Use specific filters instead of broad queries
-
-### Getting Help
-
-1. Check the [API documentation](API.md)
-2. Review [architecture docs](ARCHITECTURE.md)
-3. File an issue on [GitHub](https://github.com/oldnordic/forge/issues)
+**Solution:** You're trying to open a V3 database with SQLite backend or vice versa. Use the correct backend for your database file.
 
 ---
 
-For more information, see the [API Reference](API.md).
+*For API details, see the [API Reference](API.md).*

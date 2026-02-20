@@ -3,11 +3,14 @@
 //! This module provides access to code graph for querying symbols,
 //! finding references, and running graph algorithms.
 
+pub mod queries;
+
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet, VecDeque};
 use crate::storage::UnifiedGraphStore;
 use crate::error::Result;
 use crate::types::{Symbol, SymbolId, Reference, Cycle, ReferenceKind};
+use queries::GraphQueryEngine;
 
 /// Graph module for symbol and reference queries.
 ///
@@ -22,6 +25,11 @@ pub struct GraphModule {
 impl GraphModule {
     pub(crate) fn new(store: Arc<UnifiedGraphStore>) -> Self {
         Self { store }
+    }
+    
+    /// Get the underlying store for advanced operations
+    pub fn store(&self) -> &UnifiedGraphStore {
+        &self.store
     }
 
     /// Finds symbols by name.
@@ -116,54 +124,56 @@ impl GraphModule {
     ///
     /// A vector of references that call this symbol
     pub async fn callers_of(&self, name: &str) -> Result<Vec<Reference>> {
-        #[cfg(feature = "magellan")]
-        {
-            use magellan::CodeGraph;
-            
-            let codebase_path = &self.store.codebase_path;
-            let db_path = codebase_path.join(".forge").join("graph.db");
-            
-            let mut graph = CodeGraph::open(&db_path)
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to open magellan graph: {}", e)
-                ))?;
-            
-            // Get all file nodes and search for callers
-            let mut callers = Vec::new();
-            let file_nodes = graph.all_file_nodes()
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to get file nodes: {}", e)
-                ))?;
-            
-            for (file_path, _) in file_nodes {
-                // Try to get callers of the symbol in this file
-                let calls = graph.callers_of_symbol(&file_path, name)
-                    .map_err(|e| crate::error::ForgeError::DatabaseError(
-                        format!("Failed to get callers: {}", e)
-                    ))?;
-                
-                for call in calls {
-                    callers.push(Reference {
-                        from: SymbolId(0),
-                        to: SymbolId(0),
-                        kind: ReferenceKind::Call,
-                        location: crate::types::Location {
-                            file_path: call.file_path.clone(),
-                            byte_start: call.byte_start as u32,
-                            byte_end: call.byte_end as u32,
-                            line_number: call.start_line,
-                        },
-                    });
-                }
-            }
-            
-            Ok(callers)
+        // Use the SQL-based query engine for real graph traversal
+        let db_path = self.store.db_path.join("graph.db");
+        
+        if !db_path.exists() {
+            // Fall back to file search if no graph database
+            return self.search_callers_in_files(name).await;
         }
         
-        #[cfg(not(feature = "magellan"))]
+        let engine = GraphQueryEngine::new(&db_path);
+        engine.find_callers(name)
+    }
+    
+    /// Fallback: Search for callers in source files directly
+    async fn search_callers_in_files(&self, name: &str) -> Result<Vec<Reference>> {
+        use tokio::fs;
+        use regex::Regex;
+        
+        let mut callers = Vec::new();
+        let pattern = Regex::new(&format!(r"\b{}\s*\(", regex::escape(name)))
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Invalid regex: {}", e)))?;
+        
+        let mut entries = fs::read_dir(&self.store.codebase_path).await
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read codebase: {}", e)))?;
+        
+        while let Some(entry) = entries.next_entry().await
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
         {
-            Ok(Vec::new())
+            let path = entry.path();
+            if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                if let Ok(content) = fs::read_to_string(&path).await {
+                    for (line_num, line) in content.lines().enumerate() {
+                        if pattern.is_match(line) && !line.trim().starts_with("fn ") {
+                            callers.push(Reference {
+                                from: SymbolId(0),
+                                to: SymbolId(0),
+                                kind: ReferenceKind::Call,
+                                location: crate::types::Location {
+                                    file_path: path.clone(),
+                                    byte_start: 0,
+                                    byte_end: line.len() as u32,
+                                    line_number: line_num + 1,
+                                },
+                            });
+                        }
+                    }
+                }
+            }
         }
+        
+        Ok(callers)
     }
 
     /// Finds all references to a symbol.
@@ -175,63 +185,65 @@ impl GraphModule {
     /// # Returns
     ///
     /// A vector of all references (calls, uses, type refs).
-    /// For Native V3 backend, includes cross-file references.
-    /// For SQLite backend, only same-file references (magellan limitation).
+    /// Uses SQL-based graph queries for accurate cross-file reference resolution.
     pub async fn references(&self, name: &str) -> Result<Vec<Reference>> {
-        let mut all_refs = Vec::new();
+        // Use the SQL-based query engine for real graph traversal
+        let db_path = self.store.db_path.join("graph.db");
         
-        // For Native V3 backend, use the cross-file reference index
-        if self.store.backend_kind == crate::storage::BackendKind::NativeV3 {
-            // Query the store's Native V3 reference storage
-            let refs = self.store.query_references_for_symbol(name).await?;
-            all_refs.extend(refs);
+        if !db_path.exists() {
+            // Fall back to file search if no graph database
+            return self.search_references_in_files(name).await;
         }
         
-        // Also try magellan for same-file references (works on both backends)
-        #[cfg(feature = "magellan")]
+        let engine = GraphQueryEngine::new(&db_path);
+        let mut refs = engine.find_references(name)?;
+        
+        // Remove duplicates based on location
+        let mut seen = std::collections::HashSet::new();
+        refs.retain(|r| {
+            let key = (r.location.file_path.clone(), r.location.line_number);
+            seen.insert(key)
+        });
+        
+        Ok(refs)
+    }
+    
+    /// Fallback: Search for references in source files directly
+    async fn search_references_in_files(&self, name: &str) -> Result<Vec<Reference>> {
+        use tokio::fs;
+        
+        let mut refs = Vec::new();
+        let name_lower = name.to_lowercase();
+        
+        let mut entries = fs::read_dir(&self.store.codebase_path).await
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read codebase: {}", e)))?;
+        
+        while let Some(entry) = entries.next_entry().await
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
         {
-            use magellan::CodeGraph;
-            
-            let codebase_path = &self.store.codebase_path;
-            let db_path = codebase_path.join(".forge").join("graph.db");
-            
-            if let Ok(mut graph) = CodeGraph::open(&db_path) {
-                if let Ok(file_nodes) = graph.all_file_nodes() {
-                    for (file_path, _) in file_nodes {
-                        if let Ok(symbols) = graph.symbol_nodes_in_file(&file_path) {
-                            for (node_id, sym) in symbols {
-                                if sym.name.as_ref() == Some(&name.to_string()) {
-                                    if let Ok(refs) = graph.references_to_symbol(node_id) {
-                                        for ref_fact in refs {
-                                            all_refs.push(Reference {
-                                                from: SymbolId(0),
-                                                to: SymbolId(node_id),
-                                                kind: ReferenceKind::Use,
-                                                location: crate::types::Location {
-                                                    file_path: ref_fact.file_path.clone(),
-                                                    byte_start: ref_fact.byte_start as u32,
-                                                    byte_end: ref_fact.byte_end as u32,
-                                                    line_number: ref_fact.start_line,
-                                                },
-                                            });
-                                        }
-                                    }
-                                }
-                            }
+            let path = entry.path();
+            if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                if let Ok(content) = fs::read_to_string(&path).await {
+                    for (line_num, line) in content.lines().enumerate() {
+                        if line.to_lowercase().contains(&name_lower) {
+                            refs.push(Reference {
+                                from: SymbolId(0),
+                                to: SymbolId(0),
+                                kind: ReferenceKind::TypeReference,
+                                location: crate::types::Location {
+                                    file_path: path.clone(),
+                                    byte_start: 0,
+                                    byte_end: line.len() as u32,
+                                    line_number: line_num + 1,
+                                },
+                            });
                         }
                     }
                 }
             }
         }
         
-        // Remove duplicates based on location
-        let mut seen = std::collections::HashSet::new();
-        all_refs.retain(|r| {
-            let key = (r.location.file_path.clone(), r.location.line_number);
-            seen.insert(key)
-        });
-        
-        Ok(all_refs)
+        Ok(refs)
     }
 
     /// Finds all symbols reachable from a given symbol.
@@ -300,6 +312,31 @@ impl GraphModule {
         self.store.symbol_count().await
     }
     
+    /// Analyze the impact of changing a symbol.
+    ///
+    /// Performs k-hop traversal to find all symbols that would be affected
+    /// by modifying the given symbol.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol_name` - The name of the symbol to analyze
+    /// * `max_hops` - Maximum traversal depth (default: 2)
+    ///
+    /// # Returns
+    ///
+    /// A vector of impacted symbols with their hop distance from the target
+    pub async fn impact_analysis(&self, symbol_name: &str, max_hops: Option<u32>) -> Result<Vec<queries::ImpactedSymbol>> {
+        let db_path = self.store.db_path.join("graph.db");
+        
+        if !db_path.exists() {
+            return Ok(Vec::new());
+        }
+        
+        let engine = GraphQueryEngine::new(&db_path);
+        let hops = max_hops.unwrap_or(2);
+        engine.find_impacted_symbols(symbol_name, hops)
+    }
+    
     /// Indexes the codebase using magellan.
     ///
     /// This runs the magellan indexer to extract symbols and references
@@ -316,7 +353,7 @@ impl GraphModule {
         {
             use magellan::CodeGraph;
             use std::path::Path;
-            use tokio::fs;
+            
             
             let codebase_path = &self.store.codebase_path;
             // Magellan only supports SQLite, so we always use the SQLite db path

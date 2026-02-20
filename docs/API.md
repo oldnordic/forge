@@ -1,17 +1,16 @@
 # ForgeKit API Reference
 
-Complete API reference for ForgeKit SDK.
+Complete API reference for ForgeKit SDK. This documents the working APIs as of v0.2.
 
 ## Table of Contents
 
 - [Core Types](#core-types)
 - [Forge](#forge)
 - [GraphModule](#graphmodule)
+- [AnalysisModule](#analysismodule)
 - [SearchModule](#searchmodule)
 - [CfgModule](#cfgmodule)
 - [EditModule](#editmodule)
-- [AnalysisModule](#analysismodule)
-- [Pub/Sub](#pubsub)
 - [Storage](#storage)
 
 ## Core Types
@@ -42,10 +41,12 @@ Represents a code symbol (function, struct, etc.):
 pub struct Symbol {
     pub id: SymbolId,
     pub name: String,
+    pub fully_qualified_name: String,
     pub kind: SymbolKind,
     pub language: Language,
     pub location: Location,
-    pub data: Value,  // Additional metadata
+    pub parent_id: Option<SymbolId>,
+    pub metadata: Value,
 }
 ```
 
@@ -60,11 +61,16 @@ pub enum SymbolKind {
     Trait,
     Impl,
     Module,
-    Variable,
+    TypeAlias,
     Constant,
-    Type,
+    Static,
+    // Variable types
+    Parameter,
+    LocalVariable,
     Field,
-    Other(String),
+    // Other
+    Macro,
+    Use,
 }
 ```
 
@@ -72,25 +78,35 @@ pub enum SymbolKind {
 
 ```rust
 pub struct Location {
-    pub file: PathBuf,
-    pub line: usize,
-    pub column: usize,
+    pub file_path: PathBuf,
+    pub byte_start: u32,
+    pub byte_end: u32,
+    pub line_number: usize,
 }
 ```
 
-### Language
+### Reference
+
+Represents a reference from one symbol to another:
 
 ```rust
-pub enum Language {
-    Rust,
-    Python,
-    JavaScript,
-    TypeScript,
-    Go,
-    Java,
-    C,
-    Cpp,
-    Other(String),
+pub struct Reference {
+    pub from: SymbolId,
+    pub to: SymbolId,
+    pub kind: ReferenceKind,
+    pub location: Location,
+}
+```
+
+### ReferenceKind
+
+```rust
+pub enum ReferenceKind {
+    Call,           // Function call
+    Use,            // Variable usage
+    TypeReference,  // Type reference
+    Inherit,        // Inheritance
+    Implementation, // Trait implementation
 }
 ```
 
@@ -127,14 +143,6 @@ pub async fn open_with_backend(
 **Example:**
 ```rust
 let forge = Forge::open_with_backend("./project", BackendKind::NativeV3).await?;
-```
-
-#### `backend_kind()`
-
-Get current backend kind.
-
-```rust
-pub fn backend_kind(&self) -> BackendKind
 ```
 
 #### `graph()`
@@ -177,46 +185,15 @@ Get analysis module for composite operations.
 pub fn analysis(&self) -> AnalysisModule
 ```
 
-### Builder
-
-#### `builder()`
-
-Create a builder for custom configuration.
-
-```rust
-pub fn builder() -> ForgeBuilder
-```
-
-#### `ForgeBuilder`
-
-Builder pattern for Forge configuration:
-
-```rust
-let forge = Forge::builder()
-    .path("./project")
-    .backend_kind(BackendKind::NativeV3)
-    .database_path("./custom/db.v3")
-    .cache_ttl(Duration::from_secs(60))
-    .build()
-    .await?;
-```
-
-**Methods:**
-- `path(path)` - Set codebase path
-- `backend_kind(kind)` - Set backend type
-- `database_path(path)` - Custom database location
-- `cache_ttl(duration)` - Cache time-to-live
-- `build()` - Construct the Forge instance
-
 ## GraphModule
 
-Symbol and reference graph queries.
+Symbol and reference queries using the graph database.
 
 ### Methods
 
 #### `find_symbol()`
 
-Find symbols by name.
+Find symbols by name (fuzzy search).
 
 ```rust
 pub async fn find_symbol(&self, name: &str) -> Result<Vec<Symbol>>
@@ -225,121 +202,266 @@ pub async fn find_symbol(&self, name: &str) -> Result<Vec<Symbol>>
 **Example:**
 ```rust
 let symbols = forge.graph().find_symbol("main").await?;
-for sym in &symbols {
-    println!("Found: {} at {:?}", sym.name, sym.location);
+for symbol in symbols {
+    println!("Found: {} ({:?}) at {:?}", 
+        symbol.name, symbol.kind, symbol.location);
 }
 ```
 
-#### `find_references()`
+#### `find_symbol_by_id()`
+
+Find a symbol by its stable ID.
+
+```rust
+pub async fn find_symbol_by_id(&self, id: SymbolId) -> Result<Symbol>
+```
+
+#### `callers_of()`
+
+Find all callers of a symbol.
+
+```rust
+pub async fn callers_of(&self, name: &str) -> Result<Vec<Reference>>
+```
+
+**Example:**
+```rust
+let callers = forge.graph().callers_of("process_request").await?;
+println!("Called by {} functions", callers.len());
+for caller in callers {
+    println!("  - {} at line {}", 
+        caller.from, caller.location.line_number);
+}
+```
+
+#### `references()`
 
 Find all references to a symbol.
 
 ```rust
-pub async fn find_references(&self, symbol_name: &str) -> Result<Vec<Reference>>
+pub async fn references(&self, name: &str) -> Result<Vec<Reference>>
 ```
 
 **Example:**
 ```rust
-let refs = forge.graph().find_references("my_function").await?;
-println!("Found {} references", refs.len());
+let refs = forge.graph().references("MyStruct").await?;
+println!("Referenced {} times", refs.len());
 ```
 
-#### `find_callers()`
+#### `impact_analysis()`
 
-Find functions that call the given symbol.
+Perform k-hop traversal to find all symbols impacted by changing a symbol.
 
 ```rust
-pub async fn find_callers(&self, symbol_name: &str) -> Result<Vec<Symbol>>
+pub async fn impact_analysis(
+    &self, 
+    symbol_name: &str, 
+    max_hops: Option<u32>
+) -> Result<Vec<ImpactedSymbol>>
 ```
 
 **Example:**
 ```rust
-let callers = forge.graph().find_callers("target_fn").await?;
-for caller in &callers {
-    println!("Called by: {}", caller.name);
+// Find all symbols within 2 hops of "process_request"
+let impacted = forge.graph()
+    .impact_analysis("process_request", Some(2))
+    .await?;
+
+for symbol in impacted {
+    println!("{} ({} hops away)", 
+        symbol.name, symbol.hop_distance);
 }
 ```
 
-#### `get_calls()`
+**Returns:** `ImpactedSymbol` contains:
+- `symbol_id: i64` - Entity ID
+- `name: String` - Symbol name
+- `kind: String` - Entity kind (fn, struct, etc.)
+- `file_path: String` - Source file
+- `hop_distance: u32` - Distance from target
+- `edge_type: String` - Type of relationship
 
-Get outgoing calls from a function.
+#### `reachable_from()`
+
+Find all symbols reachable from a given symbol via BFS.
 
 ```rust
-pub async fn get_calls(&self, symbol_name: &str) -> Result<Vec<Call>>
+pub async fn reachable_from(&self, id: SymbolId) -> Result<Vec<SymbolId>>
 ```
 
-**Example:**
+#### `symbol_count()`
+
+Get the total number of symbols in the graph.
+
 ```rust
-let calls = forge.graph().get_calls("main").await?;
-for call in &calls {
-    println!("main calls {}", call.target_name);
-}
+pub async fn symbol_count(&self) -> Result<usize>
 ```
 
 #### `index()`
 
-Index the codebase (requires magellan feature).
+Index the codebase using magellan (requires `magellan` feature).
 
 ```rust
 pub async fn index(&self) -> Result<()>
 ```
 
-## SearchModule
+## AnalysisModule
 
-Semantic code search.
+Composite analysis operations combining graph, CFG, and edit modules.
 
 ### Methods
 
-#### `pattern()`
+#### `analyze_impact()`
 
-Search by regex pattern.
+Analyze the impact of changing a symbol.
 
 ```rust
-pub async fn pattern(&self, regex: &str) -> Result<Vec<SearchResult>>
+pub async fn analyze_impact(&self, symbol_name: &str) -> Result<ImpactAnalysis>
+```
+
+**Returns:**
+- `affected_symbols: Vec<Symbol>` - Directly affected symbols
+- `call_sites: usize` - Total number of call sites
+
+#### `deep_impact_analysis()`
+
+Deep impact analysis with k-hop traversal.
+
+```rust
+pub async fn deep_impact_analysis(
+    &self, 
+    symbol_name: &str, 
+    depth: u32
+) -> Result<Vec<ImpactedSymbol>>
+```
+
+#### `find_dead_code()`
+
+Find dead code (symbols with no references).
+
+```rust
+pub async fn find_dead_code(&self) -> Result<Vec<Symbol>>
 ```
 
 **Example:**
 ```rust
-let results = forge.search().pattern(r"fn.*test").await?;
+let dead = forge.analysis().find_dead_code().await?;
+for symbol in dead {
+    println!("Unused: {} in {:?}", 
+        symbol.name, symbol.location.file_path);
+}
 ```
 
-#### `fuzzy()`
+#### `complexity_metrics()`
 
-Fuzzy symbol name search.
+Calculate complexity metrics for a function (placeholder in v0.2).
 
 ```rust
-pub async fn fuzzy(&self, query: &str) -> Result<Vec<Symbol>>
+pub async fn complexity_metrics(&self, symbol_name: &str) -> Result<ComplexityMetrics>
 ```
 
-**Example:**
-```rust
-let results = forge.search().fuzzy("myfn").await?;
-```
+#### `analyze_source_complexity()`
 
-#### `by_kind()`
-
-Search by symbol kind.
+Calculate complexity from source code directly.
 
 ```rust
-pub async fn by_kind(&self, kind: SymbolKind) -> Result<Vec<Symbol>>
-```
-
-**Example:**
-```rust
-let functions = forge.search().by_kind(SymbolKind::Function).await?;
-```
-
-#### `by_language()`
-
-Search by programming language.
-
-```rust
-pub async fn by_language(&self, language: Language) -> Result<Vec<Symbol>>
+pub fn analyze_source_complexity(&self, source: &str) -> ComplexityMetrics
 ```
 
 **Example:**
 ```rust
-let rust_items = forge.search().by_language(Language::Rust).await?;
+let source = r#"
+fn example(x: i32) -> i32 {
+    if x > 0 { 1 } else { 0 }
+}
+"#;
+let metrics = analysis.analyze_source_complexity(source);
+println!("Complexity: {}", metrics.cyclomatic_complexity);
+println!("Risk: {:?}", metrics.risk_level());
+```
+
+**Returns:** `ComplexityMetrics` contains:
+- `cyclomatic_complexity: usize` - McCabe complexity
+- `decision_points: usize` - Number of branches
+- `max_nesting_depth: usize` - Maximum nesting level
+- `lines_of_code: usize` - Lines of code
+
+#### `cross_references()`
+
+Get cross-references (both callers and callees).
+
+```rust
+pub async fn cross_references(&self, symbol_name: &str) -> Result<CrossReferences>
+```
+
+#### `module_dependencies()`
+
+Analyze module dependencies.
+
+```rust
+pub async fn module_dependencies(&self) -> Result<Vec<ModuleDependency>>
+```
+
+#### `find_dependency_cycles()`
+
+Find circular dependencies between modules.
+
+```rust
+pub async fn find_dependency_cycles(&self) -> Result<Vec<Vec<String>>>
+```
+
+## SearchModule
+
+Semantic code search via LLMGrep integration.
+
+### Methods
+
+#### `pattern()` / `pattern_search()`
+
+Regex pattern search.
+
+```rust
+pub async fn pattern(&self, pattern: &str) -> Result<Vec<Symbol>>
+```
+
+**Example:**
+```rust
+let results = forge.search().pattern(r"fn.*test.*\(").await?;
+for symbol in results {
+    println!("Test function: {}", symbol.name);
+}
+```
+
+#### `semantic()` / `semantic_search()`
+
+Semantic search (requires indexing).
+
+```rust
+pub async fn semantic(&self, query: &str) -> Result<Vec<Symbol>>
+```
+
+#### `symbol_by_name()`
+
+Find a specific symbol by exact name.
+
+```rust
+pub async fn symbol_by_name(&self, name: &str) -> Result<Option<Symbol>>
+```
+
+#### `symbols_by_kind()`
+
+Find all symbols of a specific kind.
+
+```rust
+pub async fn symbols_by_kind(&self, kind: SymbolKind) -> Result<Vec<Symbol>>
+```
+
+#### `index()`
+
+Index the codebase for semantic search (requires `llmgrep` feature).
+
+```rust
+pub async fn index(&self) -> Result<()>
 ```
 
 ## CfgModule
@@ -348,195 +470,131 @@ Control flow graph analysis.
 
 ### Methods
 
-#### `build_cfg()`
+#### `index()`
 
-Build CFG for a function.
+Index source files for CFG extraction.
 
 ```rust
-pub async fn build_cfg(&self, function_name: &str) -> Result<CfgGraph>
+pub async fn index(&self) -> Result<()>
+```
+
+#### `paths()`
+
+Create a path enumeration builder.
+
+```rust
+pub fn paths(&self, function: SymbolId) -> PathBuilder
 ```
 
 **Example:**
 ```rust
-let cfg = forge.cfg().build_cfg("my_function").await?;
+let paths = forge.cfg()
+    .paths(symbol_id)
+    .normal_only()
+    .max_length(10)
+    .execute()
+    .await?;
 ```
 
-#### `find_paths()`
+#### `dominators()`
 
-Find all paths between two nodes.
+Compute dominator tree for a function.
 
 ```rust
-pub async fn find_paths(
-    &self,
-    from: &str,
-    to: &str
-) -> Result<Vec<Vec<CfgNode>>>
+pub async fn dominators(&self, function: SymbolId) -> Result<DominatorTree>
 ```
 
-#### `compute_dominators()`
+**Returns:** `DominatorTree` contains:
+- `root: BlockId` - Entry block
+- `dominators: HashMap<BlockId, BlockId>` - Immediate dominator mapping
 
-Compute dominator tree.
+**Example:**
+```rust
+let doms = forge.cfg().dominators(symbol_id).await?;
+println!("Root: {:?}", doms.root);
+if let Some(idom) = doms.immediate_dominator(block_id) {
+    println!("Immediate dominator: {:?}", idom);
+}
+```
+
+#### `loops()`
+
+Detect natural loops in a function.
 
 ```rust
-pub async fn compute_dominators(
-    &self,
-    entry: &str
-) -> Result<HashMap<String, String>>
+pub async fn loops(&self, function: SymbolId) -> Result<Vec<Loop>>
+```
+
+**Returns:** `Loop` contains:
+- `header: BlockId` - Loop header block
+- `blocks: Vec<BlockId>` - Blocks in the loop body
+- `depth: usize` - Nesting depth
+
+### PathBuilder
+
+Builder for path enumeration queries.
+
+#### Methods
+
+```rust
+pub fn normal_only(self) -> Self      // Filter to normal paths only
+pub fn error_only(self) -> Self       // Filter to error paths only  
+pub fn max_length(self, n: usize) -> Self  // Limit path length
+pub fn limit(self, n: usize) -> Self       // Limit number of paths
+pub async fn execute(self) -> Result<Vec<Path>>  // Execute query
+```
+
+### TestCfg
+
+Test CFG structure for unit testing.
+
+```rust
+// Create a chain: 0 -> 1 -> 2 -> 3 -> 4
+let cfg = TestCfg::chain(0, 5);
+
+// Create an if-else structure
+let cfg = TestCfg::if_else();
+
+// Create a simple loop
+let cfg = TestCfg::simple_loop();
+
+// Compute dominators
+let dom_tree = cfg.compute_dominators();
+
+// Detect loops
+let loops = cfg.detect_loops();
+
+// Enumerate all paths
+let paths = cfg.enumerate_paths();
 ```
 
 ## EditModule
 
-Code editing operations.
+Span-safe code editing via Splice integration.
 
 ### Methods
 
 #### `rename_symbol()`
 
-Rename a symbol across the codebase.
+Rename a symbol across all files.
 
 ```rust
 pub async fn rename_symbol(
     &self,
     old_name: &str,
     new_name: &str
-) -> Result<Vec<Edit>>
+) -> Result<EditResult>
 ```
 
-**Example:**
-```rust
-let edits = forge.edit().rename_symbol("old_fn", "new_fn").await?;
-```
+#### `apply()`
 
-#### `apply_patch()`
-
-Apply a single patch.
+Apply an edit operation.
 
 ```rust
-pub async fn apply_patch(&self, patch: Patch) -> Result<()>
-```
-
-**Example:**
-```rust
-forge.edit().apply_patch(Patch {
-    location: span,
-    replacement: "new code".to_string(),
-}).await?;
-```
-
-#### `apply_edits()`
-
-Apply multiple edits atomically.
-
-```rust
-pub async fn apply_edits(&self, edits: Vec<Edit>) -> Result<()>
-```
-
-## AnalysisModule
-
-Composite analysis operations.
-
-### Methods
-
-#### `impact_analysis()`
-
-Analyze impact of changing a symbol.
-
-```rust
-pub async fn impact_analysis(&self, symbol_name: &str) -> Result<ImpactReport>
-```
-
-**Example:**
-```rust
-let report = forge.analysis().impact_analysis("target_fn").await?;
-println!("Would affect {} functions", report.affected_count);
-```
-
-#### `dead_code_detection()`
-
-Find potentially unused code.
-
-```rust
-pub async fn dead_code_detection(&self) -> Result<Vec<Symbol>>
-```
-
-## Pub/Sub
-
-Real-time event subscription.
-
-### SubscriptionFilter
-
-Filter for event subscriptions:
-
-```rust
-pub struct SubscriptionFilter {
-    pub node_changes: bool,        // NodeChanged events
-    pub edge_changes: bool,        // EdgeChanged events
-    pub kv_changes: bool,          // KVChanged events
-    pub snapshot_commits: bool,    // SnapshotCommitted events
-}
-```
-
-**Constructor Methods:**
-- `all()` - All event types
-- `nodes_only()` - Only node changes
-- `edges_only()` - Only edge changes
-- `kv_only()` - Only KV changes
-- `default()` - None (use field assignment)
-
-### PubSubEvent
-
-Events delivered to subscribers:
-
-```rust
-pub enum PubSubEvent {
-    NodeChanged {
-        node_id: i64,
-        snapshot_id: u64,
-    },
-    EdgeChanged {
-        edge_id: i64,
-        from_node: i64,
-        to_node: i64,
-        snapshot_id: u64,
-    },
-    KVChanged {
-        key_hash: u64,
-        snapshot_id: u64,
-    },
-    SnapshotCommitted {
-        snapshot_id: u64,
-    },
-}
-```
-
-### Forge Subscribe/Unsubscribe
-
-```rust
-// Subscribe to events
-let (subscriber_id, receiver) = forge.subscribe(filter).await?;
-
-// Unsubscribe
-let removed = forge.unsubscribe(subscriber_id).await?;
+pub async fn apply(&mut self, op: EditOperation) -> Result<()>
 ```
 
 ## Storage
-
-### UnifiedGraphStore
-
-Low-level storage interface.
-
-```rust
-pub struct UnifiedGraphStore {
-    pub codebase_path: PathBuf,
-    pub db_path: PathBuf,
-    pub backend_kind: BackendKind,
-}
-```
-
-#### Methods
-
-- `is_connected()` - Check if store is active
-- `backend_kind()` - Get backend type
 
 ### BackendKind
 
@@ -545,119 +603,58 @@ pub enum BackendKind {
     SQLite,
     NativeV3,
 }
+```
 
-impl BackendKind {
-    pub fn file_extension(&self) -> &str;
-    pub fn default_filename(&self) -> &str;
+### UnifiedGraphStore
+
+Low-level storage access (advanced usage).
+
+```rust
+pub struct UnifiedGraphStore {
+    // ...
 }
 ```
 
-## Feature Flags
+#### Methods
 
-### Per-Tool Backend Selection
-
-Each tool can use either SQLite or V3 backend:
-
-```toml
-[features]
-# Individual tool backends
-magellan-sqlite = ["dep:magellan"]
-magellan-v3 = ["dep:magellan"]
-
-llmgrep-sqlite = ["dep:llmgrep"]
-llmgrep-v3 = ["dep:llmgrep", "native-v3"]
-
-mirage-sqlite = ["dep:mirage-analyzer"]
-mirage-v3 = ["dep:mirage-analyzer", "native-v3"]
-
-splice-sqlite = ["dep:splice"]
-splice-v3 = ["dep:splice", "native-v3"]
-
-# Convenience groups
-tools-sqlite = ["magellan-sqlite", "llmgrep-sqlite", "mirage-sqlite", "splice-sqlite"]
-tools-v3 = ["magellan-v3", "llmgrep-v3", "mirage-v3", "splice-v3"]
-
-# Full stacks
-full-sqlite = ["tools-sqlite", "sqlite"]
-full-v3 = ["tools-v3", "native-v3"]
+```rust
+pub fn db_path(&self) -> &Path
+pub fn backend_kind(&self) -> BackendKind
+pub fn is_connected(&self) -> bool
 ```
 
-### Usage Examples
+## Error Handling
 
-```toml
-# Default: SQLite with all tools
-forge-core = "0.2"
-
-# V3 with all tools
-forge-core = { version = "0.2", features = ["full-v3"] }
-
-# SQLite with only Magellan
-forge-core = { version = "0.2", default-features = false, features = ["sqlite", "magellan-sqlite"] }
-
-# Mixed: Magellan V3 + LLMGrep SQLite
-forge-core = { version = "0.2", default-features = false, features = ["magellan-v3", "llmgrep-sqlite"] }
-```
-
-## Error Types
+All operations return `Result<T, ForgeError>`.
 
 ### ForgeError
 
 ```rust
 pub enum ForgeError {
-    NotFound { entity: String, name: String },
-    Backend { kind: BackendKind, message: String },
-    Tool { tool: String, message: String },
-    InvalidInput { message: String },
-    Internal { message: String },
+    DatabaseError(String),
+    GraphError(String),
+    SearchError(String),
+    CfgError(String),
+    EditError(String),
+    SymbolNotFound(SymbolId),
+    InvalidInput(String),
+    IoError(std::io::Error),
 }
 ```
 
-### Result Type
+### Example Error Handling
 
 ```rust
-pub type Result<T> = std::result::Result<T, ForgeError>;
-```
+use forge_core::{Forge, ForgeError};
 
-## Examples
-
-### Complete Example
-
-```rust
-use forge_core::{Forge, BackendKind, SymbolKind};
-use std::time::Duration;
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Open with V3 backend
-    let forge = Forge::open_with_backend("./project", BackendKind::NativeV3).await?;
-    
-    // Find all functions
-    let functions = forge.search().by_kind(SymbolKind::Function).await?;
-    println!("Found {} functions", functions.len());
-    
-    // Find references to main
-    let refs = forge.graph().find_references("main").await?;
-    println!("main has {} references", refs.len());
-    
-    // Subscribe to changes
-    let (id, rx) = forge.subscribe(SubscriptionFilter::all()).await?;
-    
-    tokio::spawn(async move {
-        while let Ok(event) = rx.recv() {
-            println!("Event: {:?}", event);
-        }
-    });
-    
-    // Do work...
-    tokio::time::sleep(Duration::from_secs(60)).await;
-    
-    // Cleanup
-    forge.unsubscribe(id).await?;
-    
-    Ok(())
+match forge.graph().find_symbol("main").await {
+    Ok(symbols) => println!("Found {} symbols", symbols.len()),
+    Err(ForgeError::SymbolNotFound(_)) => println!("Symbol not found"),
+    Err(ForgeError::DatabaseError(e)) => eprintln!("Database error: {}", e),
+    Err(e) => eprintln!("Error: {}", e),
 }
 ```
 
 ---
 
-For more information, see the [User Manual](MANUAL.md).
+*For more examples, see the [User Manual](MANUAL.md).*

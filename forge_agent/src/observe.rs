@@ -3,9 +3,9 @@
 //! This module implements the observation phase of the agent loop, gathering
 //! relevant context from the code graph to inform intelligent operations.
 
-use crate::{AgentError, Result};
+use crate::Result;
 use forge_core::{
-    types::{Symbol, SymbolId},
+    types::SymbolId,
     Forge,
 };
 use std::collections::HashMap;

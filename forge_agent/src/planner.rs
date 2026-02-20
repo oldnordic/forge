@@ -3,7 +3,7 @@
 //! This module implements the planning phase of the agent loop, generating
 //! execution steps from observations and constraints.
 
-use crate::{AgentError, Result};
+use crate::Result;
 use forge_core::Forge;
 use std::sync::Arc;
 

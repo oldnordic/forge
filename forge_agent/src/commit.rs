@@ -3,7 +3,7 @@
 //! This module implements the commit phase, finalizing verified
 //! transactions with version control integration.
 
-use crate::{AgentError, Result};
+use crate::Result;
 use forge_core::Forge;
 use std::sync::Arc;
 

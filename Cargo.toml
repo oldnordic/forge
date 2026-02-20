@@ -4,6 +4,7 @@ members = [
     "forge_core",
     "forge_runtime",
     "forge_agent",
+    "forge-reasoning",
 ]
 
 [workspace.dependencies]

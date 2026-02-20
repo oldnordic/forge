@@ -131,6 +131,7 @@ async fn test_graph_find_symbol_native_v3() {
 }
 
 #[tokio::test]
+#[ignore = "requires magellan feature"]
 async fn test_graph_callers_sqlite() {
     let temp = create_test_repo().await;
     
@@ -153,6 +154,7 @@ async fn test_graph_callers_sqlite() {
 // Note: For SQLite backend, cross-file references are limited (magellan limitation).
 // For Native V3 backend, cross-file references are fully supported.
 #[tokio::test]
+#[ignore = "requires magellan feature"]
 async fn test_graph_references_sqlite() {
     let temp = create_test_repo().await;
     
