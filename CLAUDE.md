@@ -74,10 +74,12 @@ This project enforces a strict TDD workflow (see `docs/DEVELOPMENT_WORKFLOW.md`)
 
 ## File Size Limits
 
-- Core modules: 300 LOC max
-- Tests: 500 LOC max
+- Core modules: 600 LOC max (standard), 1,000 LOC max (with justification)
+- Tests: 500 LOC max (standard), 1,000 LOC max (E2E/integration suites)
 - Files must be cohesive (single purpose)
-- Exceed only with justification in comments
+- Exceed limits only with inline comment justification
+
+**Rationale:** 600 LOC allows for substantial modules while keeping code navigable. 1,000 LOC is reserved for cases where splitting would harm coherence (e.g., tightly coupled algorithms, multi-language support).
 
 ## Anti-Patterns (Strictly Prohibited)
 

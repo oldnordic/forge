@@ -23,16 +23,22 @@ blake3 = "1.5"
 regex = "1"
 
 # Graph database
-sqlitegraph = { version = "2.0.5", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
+sqlitegraph = { version = "2.0.7", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
 
 # Tool integrations - these are the crates published from individual tool repos
-magellan = { version = "2.4.5", optional = true }
-llmgrep = { version = "3.0.8", optional = true }
-mirage-analyzer = { version = "1.0", optional = true }
-splice = { version = "2.5", optional = true }
+magellan = { version = "2.4.6", optional = true }
+llmgrep = { version = "3.0.9", optional = true }
+mirage-analyzer = { version = "1.0.3", optional = true }
+splice = { version = "2.5.3", optional = true }
 
 # For CLI fallback when crates aren't available
 which = { version = "6.0", optional = true }
+
+# Tree-sitter for CFG extraction
+tree-sitter = { version = "0.22", optional = true }
+tree-sitter-c = { version = "0.21", optional = true }
+tree-sitter-java = { version = "0.21", optional = true }
+tree-sitter-rust = { version = "0.21", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }
@@ -43,7 +49,7 @@ default = ["sqlite", "tools"]
 
 # Storage backends
 # Note: Both backends require sqlitegraph dependency
-sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "sqlitegraph/native-v3"]
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend"]
 native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3"]
 
 # Tool integrations with backend selection
@@ -69,10 +75,13 @@ splice = ["dep:splice"]
 splice-sqlite = ["splice"]
 splice-v3 = ["splice", "native-v3"]
 
+# Tree-sitter CFG extraction for C, Java, and Rust
+treesitter-cfg = ["dep:tree-sitter", "dep:tree-sitter-c", "dep:tree-sitter-java", "dep:tree-sitter-rust"]
+
 # Convenience feature groups
 tools = ["magellan", "llmgrep", "mirage", "splice", "which"]
 tools-sqlite = ["magellan-sqlite", "llmgrep-sqlite", "mirage-sqlite", "splice-sqlite", "which"]
 tools-v3 = ["magellan-v3", "llmgrep-v3", "mirage-v3", "splice-v3", "native-v3", "which"]
-full = ["tools", "sqlite", "native-v3"]
-full-sqlite = ["tools-sqlite", "sqlite"]
-full-v3 = ["tools-v3", "native-v3"]
+full = ["tools", "sqlite", "native-v3", "treesitter-cfg"]
+full-sqlite = ["tools-sqlite", "sqlite", "treesitter-cfg"]
+full-v3 = ["tools-v3", "native-v3", "treesitter-cfg"]
