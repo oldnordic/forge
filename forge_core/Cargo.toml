@@ -45,7 +45,7 @@ tokio = { version = "1", features = ["test-util", "macros"] }
 tempfile = "3"
 
 [features]
-default = ["sqlite", "tools"]
+default = ["sqlite", "tools", "treesitter-cfg"]
 
 # Storage backends
 # Note: Both backends require sqlitegraph dependency
