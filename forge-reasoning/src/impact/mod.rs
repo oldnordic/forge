@@ -187,13 +187,6 @@ impl ImpactAnalysisEngine {
             .collect()
     }
 
-    /// Cleanup expired snapshots
-    pub async fn cleanup_expired_snapshots(&self) {
-        let mut snapshots = self.snapshots.lock().await;
-        // The cleanup happens automatically on save, but we can expose it
-        // for manual cleanup if needed
-    }
-
     /// Get snapshot data for inspection
     pub async fn get_snapshot(&self, id: &SnapshotId) -> Option<BeliefSnapshot> {
         let snapshots: tokio::sync::MutexGuard<'_, SnapshotStore> = self.snapshots.lock().await;

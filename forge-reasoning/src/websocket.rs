@@ -12,8 +12,9 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use crate::errors::{ReasoningError, Result};
-use crate::service::{CheckpointEvent, CheckpointService, ServiceMetrics};
-use crate::{CheckpointSummary, SessionId};
+use crate::service::CheckpointEvent;
+use crate::service::CheckpointService;
+use crate::SessionId;
 
 /// WebSocket server configuration
 #[derive(Clone, Debug)]

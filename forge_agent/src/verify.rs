@@ -4,25 +4,18 @@
 //! mutations meet quality and policy requirements.
 
 use crate::{AgentError, Result};
-use forge_core::Forge;
 use std::process::Command;
-use std::sync::Arc;
 
 /// Verifier for post-mutation validation.
 ///
 /// The Verifier runs compile checks, tests, and graph validation.
-#[derive(Clone)]
-pub struct Verifier {
-    /// Forge SDK for graph queries
-    forge: Arc<Forge>,
-}
+#[derive(Clone, Default)]
+pub struct Verifier {}
 
 impl Verifier {
     /// Creates a new verifier.
-    pub fn new(forge: Forge) -> Self {
-        Self {
-            forge: Arc::new(forge),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Runs compile check via cargo.
@@ -174,15 +167,12 @@ pub enum DiagnosticLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_verifier_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _verifier = Verifier::new(forge);
+        let _verifier = Verifier::new();
 
-        // Should create successfully - verifier stores forge internally
+        // Should create successfully
         assert!(true);
     }
 

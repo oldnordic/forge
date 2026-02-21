@@ -7,8 +7,7 @@ use crate::search::SearchModule;
 use crate::cfg::CfgModule;
 use crate::edit::EditModule;
 use crate::error::Result;
-use crate::types::{Symbol, SymbolId, Reference};
-use std::collections::{HashMap, HashSet};
+use crate::types::Symbol;
 use std::time::Instant;
 
 

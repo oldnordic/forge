@@ -407,36 +407,12 @@ fn count_tests(content: &str) -> usize {
         .count()
 }
 
-/// Estimates cyclomatic complexity from function lines.
-fn estimate_complexity(lines: &[&str]) -> usize {
-    // Base complexity is 1
-    let mut complexity = 1;
-
-    // Add 1 for each decision point
-    for line in lines {
-        let trimmed = line.trim();
-        // Check for if, else if, while, for, match keywords
-        // These can appear at start of line or after {
-        if trimmed.contains("if ")
-            || trimmed.contains("else if ")
-            || trimmed.contains("while ")
-            || trimmed.contains("for ")
-            || trimmed.contains("match ")
-            || trimmed.contains("&& ")
-            || trimmed.contains("|| ")
-        {
-            complexity += 1;
-        }
-    }
-
-    complexity
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
     use tempfile::TempDir;
+    use forge_core::Forge;
 
     #[tokio::test]
     async fn test_policy_no_unsafe_in_public_api() {
@@ -557,28 +533,5 @@ mod tests {
 
         let count = count_tests(content);
         assert_eq!(count, 3);
-    }
-
-    #[test]
-    fn test_estimate_complexity() {
-        let lines = vec!["fn simple() {", "    let x = 1;", "}"];
-
-        let complexity = estimate_complexity(&lines);
-        assert_eq!(complexity, 1);
-    }
-
-    #[test]
-    fn test_estimate_complexity_with_branches() {
-        let lines = vec![
-            "fn complex() {",
-            "    if x {",
-            "        if y {",
-            "        }",
-            "    }",
-            "}",
-        ];
-
-        let complexity = estimate_complexity(&lines);
-        assert_eq!(complexity, 3); // base 1 + 2 if statements
     }
 }

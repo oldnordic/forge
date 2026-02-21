@@ -4,25 +4,18 @@
 //! execution steps from observations and constraints.
 
 use crate::Result;
-use forge_core::Forge;
-use std::sync::Arc;
 
 /// Planner for generating execution plans.
 ///
 /// The Planner creates ordered steps from observations, ensuring
 /// dependencies are satisfied and conflicts are detected.
-#[derive(Clone)]
-pub struct Planner {
-    /// Forge SDK for graph queries
-    forge: Arc<Forge>,
-}
+#[derive(Clone, Default)]
+pub struct Planner {}
 
 impl Planner {
     /// Creates a new planner.
-    pub fn new(forge: Forge) -> Self {
-        Self {
-            forge: Arc::new(forge),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Generates execution steps from an observation.
@@ -333,13 +326,10 @@ struct FileRegion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_planner_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _planner = Planner::new(forge);
+        let _planner = Planner::new();
 
         // Should create successfully
         assert!(true);
@@ -347,9 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_steps() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let planner = Planner::new();
 
         let observation = crate::observe::Observation {
             query: "test".to_string(),
@@ -363,9 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_conflicts_empty() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let planner = Planner::new();
 
         let steps = vec![];
         let conflicts = planner.detect_conflicts(&steps).unwrap();
@@ -374,9 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_order_steps() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let planner = Planner::new();
 
         let mut steps = vec![
             PlanStep {
@@ -403,9 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_rollback() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let planner = Planner::new();
 
         let steps = vec![PlanStep {
             description: "Create file".to_string(),
@@ -427,9 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_estimate_impact() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let planner = Planner::new(forge);
+        let planner = Planner::new();
 
         let steps = vec![PlanStep {
             description: "Create test.rs".to_string(),

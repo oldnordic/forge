@@ -2,7 +2,7 @@
 
 use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
 use crate::belief::BeliefGraph;
-use crate::errors::{Result, ReasoningError};
+use crate::errors::Result;
 
 /// Configuration for confidence propagation
 #[derive(Clone, Debug)]
@@ -73,7 +73,7 @@ pub async fn compute_cascade(
     use std::collections::{HashSet, VecDeque};
 
     // Verify start hypothesis exists
-    let start_hypothesis = board.get(start).await
+    board.get(start).await
         .map_err(|e| CascadeError::GraphError(e.to_string()))?
         .ok_or(CascadeError::HypothesisNotFound(start))?;
 

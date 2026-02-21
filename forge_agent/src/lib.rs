@@ -215,12 +215,8 @@ impl Agent {
 
     /// Generates an execution plan from the constrained observation.
     pub async fn plan(&self, constrained: ConstrainedPlan) -> Result<ExecutionPlan> {
-        let forge = self.forge.as_ref().ok_or_else(|| {
-            AgentError::PlanningFailed("Forge SDK not available for planning".to_string())
-        })?;
-
         // Create planner
-        let planner_instance = planner::Planner::new(forge.clone());
+        let planner_instance = planner::Planner::new();
 
         // Convert observation to the planner's format
         let obs = observe::Observation {
@@ -263,12 +259,10 @@ impl Agent {
 
     /// Executes the mutation phase of the plan.
     pub async fn mutate(&self, plan: ExecutionPlan) -> Result<MutationResult> {
-        let forge = self
-            .forge
-            .as_ref()
-            .ok_or_else(|| AgentError::MutationFailed("Forge SDK not available".to_string()))?;
+        // Verify forge is available
+        self.forge.as_ref().ok_or_else(|| AgentError::MutationFailed("Forge SDK not available".to_string()))?;
 
-        let mut mutator = mutate::Mutator::new(forge.clone());
+        let mut mutator = mutate::Mutator::new();
         mutator.begin_transaction().await?;
 
         for step in &plan.steps {
@@ -283,12 +277,7 @@ impl Agent {
 
     /// Verifies the mutation result.
     pub async fn verify(&self, _result: MutationResult) -> Result<VerificationResult> {
-        let forge = self
-            .forge
-            .as_ref()
-            .ok_or_else(|| AgentError::VerificationFailed("Forge SDK not available".to_string()))?;
-
-        let verifier = verify::Verifier::new(forge.clone());
+        let verifier = verify::Verifier::new();
         let report = verifier.verify(&self.codebase_path).await?;
 
         Ok(VerificationResult {
@@ -303,12 +292,7 @@ impl Agent {
 
     /// Commits the verified mutation.
     pub async fn commit(&self, result: VerificationResult) -> Result<CommitResult> {
-        let forge = self
-            .forge
-            .as_ref()
-            .ok_or_else(|| AgentError::CommitFailed("Forge SDK not available".to_string()))?;
-
-        let committer = commit::Committer::new(forge.clone());
+        let committer = commit::Committer::new();
         let files: Vec<std::path::PathBuf> = result
             .diagnostics
             .iter()

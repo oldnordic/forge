@@ -99,13 +99,6 @@ impl Observer {
     }
 }
 
-/// Parsed query representation.
-#[derive(Debug, Clone)]
-pub struct ParsedQuery {
-    /// Original query string
-    original: String,
-}
-
 /// Result of the observation phase.
 ///
 /// Contains relevant context gathered from the code graph.
@@ -134,6 +127,7 @@ pub struct ObservedSymbol {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use forge_core::Forge;
 
     async fn create_test_observer() -> (Observer, TempDir) {
         let temp_dir = TempDir::new().unwrap();

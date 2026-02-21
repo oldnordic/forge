@@ -452,9 +452,9 @@ impl CfgExtractor {
                 }
             }
             
-            // Expression statement - sequential flow
-            "expression_statement" | "declaration" | "local_variable_declaration" 
-            | "let_declaration" | "expression_statement" | "call_expression" => {
+            // Sequential flow - no control flow change
+            "expression_statement" | "declaration" | "local_variable_declaration"
+            | "let_declaration" | "call_expression" => {
                 // These are sequential, no control flow change
             }
             

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Mutex, RwLock};
 
 use chrono::Utc;
 
@@ -137,8 +137,6 @@ pub struct CheckpointService {
 }
 
 struct SessionInfo {
-    name: String,
-    created_at: chrono::DateTime<Utc>,
     auto_config: Option<AutoCheckpointConfig>,
 }
 
@@ -196,11 +194,9 @@ impl CheckpointService {
     }
 
     /// Create a new session
-    pub fn create_session(&self, name: &str) -> Result<SessionId> {
+    pub fn create_session(&self, _name: &str) -> Result<SessionId> {
         let session_id = SessionId::new();
         let info = SessionInfo {
-            name: name.to_string(),
-            created_at: Utc::now(),
             auto_config: None,
         };
         

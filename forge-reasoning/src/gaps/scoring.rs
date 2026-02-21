@@ -10,7 +10,6 @@ use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 
 use chrono::Utc;
-use chrono::DateTime;
 
 use super::{KnowledgeGap, GapCriticality, ScoringConfig, GapId};
 

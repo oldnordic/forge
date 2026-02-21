@@ -7,7 +7,7 @@ use std::path::Path;
 use chrono::Utc;
 use sqlitegraph::{GraphEntity, SqliteGraph};
 
-use crate::checkpoint::{CheckpointId, CheckpointSummary, SessionId, TemporalCheckpoint, DebugStateSnapshot, SessionMetrics, CheckpointTrigger, AutoTrigger};
+use crate::checkpoint::{CheckpointId, CheckpointSummary, SessionId, TemporalCheckpoint, DebugStateSnapshot, CheckpointTrigger, AutoTrigger};
 use crate::errors::{Result, StorageError};
 use crate::storage::CheckpointStorage;
 

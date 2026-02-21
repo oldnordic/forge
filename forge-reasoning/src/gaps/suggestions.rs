@@ -3,20 +3,16 @@
 //! Provides context-aware suggestions for resolving knowledge gaps based on
 //! gap type, hypothesis status, and dependency relationships.
 
-use std::sync::Arc;
-
-use crate::hypothesis::{HypothesisBoard, HypothesisId, HypothesisStatus};
+use crate::hypothesis::HypothesisId;
 use crate::belief::BeliefGraph;
-use crate::errors::Result;
 
-use super::analyzer::{KnowledgeGap, GapId, GapType, GapSuggestion, SuggestedAction};
+use super::analyzer::{KnowledgeGap, GapType, GapSuggestion, SuggestedAction};
 
 /// Generate context-aware action suggestion for a single gap
 ///
 /// Analyzes gap type and linked hypothesis context to recommend the best action.
 pub fn generate_suggestion(
     gap: &KnowledgeGap,
-    board: &HypothesisBoard,
     graph: &BeliefGraph,
 ) -> GapSuggestion {
     let priority = gap.score;
@@ -88,7 +84,7 @@ pub fn generate_suggestion(
     };
 
     // Refine action based on linked hypothesis context
-    let refined_action = if let Some(hid) = gap.hypothesis_id {
+    let refined_action = if let Some(_hid) = gap.hypothesis_id {
         // This is a tokio::block_in_place situation since we're in a sync function
         // For now, use a simplified check without async
         // In practice, the caller should have already loaded hypothesis data
@@ -140,7 +136,6 @@ fn generate_rationale(action: &SuggestedAction, gap: &KnowledgeGap) -> String {
 /// Returns sorted suggestions (highest priority first) for unfilled gaps.
 pub fn generate_all_suggestions(
     gaps: &[KnowledgeGap],
-    board: &HypothesisBoard,
     graph: &BeliefGraph,
 ) -> Vec<GapSuggestion> {
     // Filter unfilled gaps
@@ -150,7 +145,7 @@ pub fn generate_all_suggestions(
 
     // Generate suggestions
     let mut suggestions: Vec<_> = unfilled.iter()
-        .map(|gap| generate_suggestion(gap, board, graph))
+        .map(|gap| generate_suggestion(gap, graph))
         .collect();
 
     // Sort by priority (highest first)
@@ -164,7 +159,8 @@ pub fn generate_all_suggestions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gaps::analyzer::{GapCriticality, KnowledgeGap};
+    use crate::gaps::analyzer::{GapCriticality, KnowledgeGap, GapId};
+    use crate::hypothesis::HypothesisBoard;
     use chrono::Utc;
 
     fn make_test_gap(
@@ -189,7 +185,6 @@ mod tests {
 
     #[test]
     fn test_untested_assumption_generates_verification_check() {
-        let board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         let gap = make_test_gap(
@@ -198,7 +193,7 @@ mod tests {
             GapCriticality::Medium,
         );
 
-        let suggestion = generate_suggestion(&gap, &board, &graph);
+        let suggestion = generate_suggestion(&gap, &graph);
 
         match suggestion.action {
             SuggestedAction::CreateVerificationCheck { .. } => {
@@ -210,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_missing_information_generates_research_or_investigate() {
-        let board = HypothesisBoard::in_memory();
+        let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         // Test with "unknown" keyword
@@ -220,7 +215,7 @@ mod tests {
             GapCriticality::Low,
         );
 
-        let suggestion1 = generate_suggestion(&gap1, &board, &graph);
+        let suggestion1 = generate_suggestion(&gap1, &graph);
 
         match suggestion1.action {
             SuggestedAction::Research { .. } => {
@@ -239,7 +234,7 @@ mod tests {
             GapCriticality::Low,
         );
 
-        let suggestion2 = generate_suggestion(&gap2, &board, &graph);
+        let suggestion2 = generate_suggestion(&gap2, &graph);
 
         match suggestion2.action {
             SuggestedAction::Investigate { .. } => {
@@ -251,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_contradictory_evidence_generates_investigate() {
-        let board = HypothesisBoard::in_memory();
+        let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         let gap = make_test_gap(
@@ -260,7 +255,7 @@ mod tests {
             GapCriticality::High,
         );
 
-        let suggestion = generate_suggestion(&gap, &board, &graph);
+        let suggestion = generate_suggestion(&gap, &graph);
 
         match suggestion.action {
             SuggestedAction::Investigate { .. } => {
@@ -275,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_suggestions_sort_by_priority() {
-        let board = HypothesisBoard::in_memory();
+        let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         let mut gap1 = make_test_gap("Low priority", GapType::MissingInformation, GapCriticality::Low);
@@ -284,7 +279,7 @@ mod tests {
         let mut gap2 = make_test_gap("High priority", GapType::MissingInformation, GapCriticality::High);
         gap2.score = 0.9;
 
-        let suggestions = generate_all_suggestions(&[gap1, gap2], &board, &graph);
+        let suggestions = generate_all_suggestions(&[gap1, gap2], &graph);
 
         assert_eq!(suggestions.len(), 2);
         assert_eq!(suggestions[0].priority, 0.9);
@@ -293,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_filled_gaps_filtered_from_suggestions() {
-        let board = HypothesisBoard::in_memory();
+        let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         let mut filled_gap = make_test_gap("Filled", GapType::MissingInformation, GapCriticality::Low);
@@ -302,7 +297,7 @@ mod tests {
         let unfilled_gap = make_test_gap("Unfilled", GapType::MissingInformation, GapCriticality::Low);
         let unfilled_gap_id = unfilled_gap.id; // Save id before moving
 
-        let suggestions = generate_all_suggestions(&[filled_gap, unfilled_gap], &board, &graph);
+        let suggestions = generate_all_suggestions(&[filled_gap, unfilled_gap], &graph);
 
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].gap_id, unfilled_gap_id);
@@ -310,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_rationale_is_meaningful() {
-        let board = HypothesisBoard::in_memory();
+        let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         let gap = make_test_gap(
@@ -319,7 +314,7 @@ mod tests {
             GapCriticality::Medium,
         );
 
-        let suggestion = generate_suggestion(&gap, &board, &graph);
+        let suggestion = generate_suggestion(&gap, &graph);
 
         assert!(!suggestion.rationale.is_empty());
         assert!(suggestion.rationale.len() > 10);

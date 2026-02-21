@@ -1,6 +1,6 @@
 [package]
 name = "forgekit-core"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/oldnordic/forge"
@@ -24,7 +24,7 @@ regex = "1"
 async-trait = "0.1"
 
 # Graph database
-sqlitegraph = { version = "2.0.7", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
+sqlitegraph = { version = "2.0.8", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
 
 # Tool integrations - these are the crates published from individual tool repos
 magellan = { version = "2.4.6", optional = true }

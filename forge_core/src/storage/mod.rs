@@ -67,6 +67,7 @@ impl std::fmt::Display for BackendKind {
 
 impl BackendKind {
     /// Converts to sqlitegraph's BackendKind.
+    #[cfg(test)] // Only used in tests currently
     fn to_sqlitegraph_kind(&self) -> SqliteGraphBackendKind {
         match self {
             Self::SQLite => SqliteGraphBackendKind::SQLite,
@@ -110,7 +111,6 @@ pub struct UnifiedGraphStore {
 /// Internal reference storage for Native V3 backend
 #[derive(Clone, Debug)]
 struct StoredReference {
-    from_symbol: String,
     to_symbol: String,
     kind: ReferenceKind,
     file_path: PathBuf,
@@ -281,14 +281,12 @@ impl UnifiedGraphStore {
         // This is a capability that SQLite backend (via magellan) doesn't support
         if self.backend_kind == BackendKind::NativeV3 {
             let mut refs = self.references.lock().unwrap();
-            
+
             // Try to resolve symbol names from the reference
             // In a full implementation, we'd look up symbol names from IDs
-            let from_symbol = format!("sym_{}", reference.from.0);
             let to_symbol = format!("sym_{}", reference.to.0);
-            
+
             refs.push(StoredReference {
-                from_symbol,
                 to_symbol,
                 kind: reference.kind.clone(),
                 file_path: reference.location.file_path.clone(),
@@ -481,7 +479,6 @@ impl UnifiedGraphStore {
                             if let Some(matched) = cap.get(1) {
                                 if matched.as_str() == symbol_name {
                                     refs.push(StoredReference {
-                                        from_symbol: format!("file_{}", target_file.display()),
                                         to_symbol: format!("sym_{}", symbol_name),
                                         kind: ReferenceKind::Call,
                                         file_path: target_file.clone(),

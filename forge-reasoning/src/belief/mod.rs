@@ -5,7 +5,6 @@
 //! for dependency chains.
 
 mod graph;
-mod scc;
 
 pub use graph::BeliefGraph;
 

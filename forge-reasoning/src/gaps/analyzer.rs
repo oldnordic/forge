@@ -340,7 +340,7 @@ impl KnowledgeGapAnalyzer {
     /// Returns context-aware suggestions sorted by priority.
     pub async fn get_suggestions(&self, unfilled_only: bool) -> Vec<GapSuggestion> {
         let gaps = self.list_gaps(unfilled_only).await;
-        super::suggestions::generate_all_suggestions(&gaps, &self.board, &self.graph)
+        super::suggestions::generate_all_suggestions(&gaps, &self.graph)
     }
 
     /// Recompute all gap scores (useful after config changes)

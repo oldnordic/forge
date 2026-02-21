@@ -11,7 +11,6 @@
 //!
 //! This crate is currently a stub. Full implementation is planned for v0.3.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 /// Runtime configuration for indexing and caching.

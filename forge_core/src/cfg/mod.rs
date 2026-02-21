@@ -135,15 +135,8 @@ impl CfgModule {
     /// # Arguments
     ///
     /// * `function` - The function symbol ID
-    pub fn paths(&self, function: SymbolId) -> PathBuilder {
-        PathBuilder {
-            module: self.clone(),
-            function_id: function,
-            normal_only: false,
-            error_only: false,
-            max_length: None,
-            limit: None,
-        }
+    pub fn paths(&self, _function: SymbolId) -> PathBuilder {
+        PathBuilder::default()
     }
 
     /// Computes dominators for a function.
@@ -186,10 +179,8 @@ impl CfgModule {
 /// # Examples
 ///
 /// See the crate-level documentation for usage examples.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PathBuilder {
-    module: CfgModule,
-    function_id: SymbolId,
     normal_only: bool,
     error_only: bool,
     max_length: Option<usize>,

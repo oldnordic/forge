@@ -4,24 +4,17 @@
 //! transactions with version control integration.
 
 use crate::Result;
-use forge_core::Forge;
-use std::sync::Arc;
 
 /// Committer for transaction finalization.
 ///
 /// The Committer handles git integration and metadata persistence.
-#[derive(Clone)]
-pub struct Committer {
-    /// Forge SDK for graph queries
-    forge: Arc<Forge>,
-}
+#[derive(Clone, Default)]
+pub struct Committer {}
 
 impl Committer {
     /// Creates a new committer.
-    pub fn new(forge: Forge) -> Self {
-        Self {
-            forge: Arc::new(forge),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Finalizes a verified transaction.
@@ -81,12 +74,11 @@ pub struct CommitReport {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use forge_core::Forge;
 
     #[tokio::test]
     async fn test_committer_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let _committer = Committer::new(forge);
+        let _committer = Committer::new();
 
         // Should create successfully
         assert!(true);
@@ -94,9 +86,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_summary() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let committer = Committer::new(forge);
+        let committer = Committer::new();
 
         let steps = vec![
             crate::planner::PlanStep {
@@ -124,8 +114,8 @@ mod tests {
     #[tokio::test]
     async fn test_create_checkpoint() {
         let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let committer = Committer::new(forge);
+        let _forge = Forge::open(temp_dir.path()).await.unwrap();
+        let committer = Committer::new();
 
         let result = committer
             .finalize(&std::path::PathBuf::new(), &[])

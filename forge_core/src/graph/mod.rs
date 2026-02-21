@@ -72,11 +72,25 @@ impl GraphModule {
                 for sym in symbols {
                     if let Some(ref sym_name) = sym.name {
                         if sym_name.contains(name) {
+                            use crate::types::SymbolKind;
+                            let kind = match sym.kind {
+                                magellan::SymbolKind::Function => SymbolKind::Function,
+                                magellan::SymbolKind::Method => SymbolKind::Method,
+                                magellan::SymbolKind::Class => SymbolKind::Struct,
+                                magellan::SymbolKind::Interface => SymbolKind::Trait,
+                                magellan::SymbolKind::Enum => SymbolKind::Enum,
+                                magellan::SymbolKind::Module => SymbolKind::Module,
+                                magellan::SymbolKind::TypeAlias => SymbolKind::TypeAlias,
+                                magellan::SymbolKind::Union => SymbolKind::Enum,
+                                magellan::SymbolKind::Namespace => SymbolKind::Module,
+                                magellan::SymbolKind::Unknown => SymbolKind::Function,
+                            };
+
                             results.push(Symbol {
                                 id: SymbolId(0), // magellan uses different ID system
                                 name: sym_name.clone(),
                                 fully_qualified_name: sym.fqn.clone().unwrap_or_else(|| sym_name.clone()),
-                                kind: map_magellan_kind(&sym.kind),
+                                kind,
                                 language: map_magellan_language(&sym.file_path),
                                 location: crate::types::Location {
                                     file_path: sym.file_path.clone(),
@@ -427,26 +441,6 @@ impl GraphModule {
         }
         
         Ok(())
-    }
-}
-
-/// Map magellan SymbolKind to forge SymbolKind
-#[cfg(feature = "magellan")]
-fn map_magellan_kind(kind: &magellan::SymbolKind) -> crate::types::SymbolKind {
-    use crate::types::SymbolKind;
-    use magellan::SymbolKind as MagellanKind;
-    
-    match kind {
-        MagellanKind::Function => SymbolKind::Function,
-        MagellanKind::Method => SymbolKind::Method,
-        MagellanKind::Class => SymbolKind::Struct,
-        MagellanKind::Interface => SymbolKind::Trait,
-        MagellanKind::Enum => SymbolKind::Enum,
-        MagellanKind::Module => SymbolKind::Module,
-        MagellanKind::TypeAlias => SymbolKind::TypeAlias,
-        MagellanKind::Union => SymbolKind::Enum,
-        MagellanKind::Namespace => SymbolKind::Module,
-        MagellanKind::Unknown => SymbolKind::Function,
     }
 }
 

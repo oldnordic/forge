@@ -4,17 +4,13 @@
 //! the edit module with transaction support.
 
 use crate::{AgentError, Result};
-use forge_core::Forge;
-use std::sync::Arc;
 use tokio::fs;
 
 /// Mutator for transaction-based code changes.
 ///
 /// The Mutator uses the EditModule to apply changes atomically.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Mutator {
-    /// Forge SDK for graph queries
-    forge: Arc<Forge>,
     /// Current transaction state
     transaction: Option<Transaction>,
 }
@@ -39,11 +35,8 @@ struct RollbackState {
 
 impl Mutator {
     /// Creates a new mutator.
-    pub fn new(forge: Forge) -> Self {
-        Self {
-            forge: Arc::new(forge),
-            transaction: None,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Begins a new transaction.
@@ -155,22 +148,17 @@ impl Mutator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_mutator_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let mutator = Mutator::new(forge);
+        let mutator = Mutator::new();
 
         assert!(mutator.transaction.is_none());
     }
 
     #[tokio::test]
     async fn test_begin_transaction() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let mut mutator = Mutator::new(forge);
+        let mut mutator = Mutator::new();
 
         mutator.begin_transaction().await.unwrap();
         assert!(mutator.transaction.is_some());
@@ -181,9 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rollback() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let mut mutator = Mutator::new(forge);
+        let mut mutator = Mutator::new();
 
         mutator.begin_transaction().await.unwrap();
         assert!(mutator.transaction.is_some());

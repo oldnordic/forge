@@ -8,7 +8,6 @@ use indexmap::IndexSet;  // For deterministic ordering
 
 use crate::hypothesis::types::HypothesisId;
 use crate::errors::Result;
-use super::scc::CycleDetector;
 
 /// Dependency graph for beliefs (hypotheses)
 ///

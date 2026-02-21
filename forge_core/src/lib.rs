@@ -147,9 +147,7 @@ impl Forge {
 #[derive(Clone, Default)]
 pub struct ForgeBuilder {
     path: Option<std::path::PathBuf>,
-    database_path: Option<std::path::PathBuf>,
     backend_kind: Option<BackendKind>,
-    cache_ttl: Option<std::time::Duration>,
 }
 
 impl ForgeBuilder {
@@ -166,26 +164,10 @@ impl ForgeBuilder {
         }
     }
 
-    /// Sets a custom path for the graph database file.
-    pub fn database_path(self, db_path: impl AsRef<std::path::Path>) -> Self {
-        Self {
-            database_path: Some(db_path.as_ref().to_path_buf()),
-            ..self
-        }
-    }
-
     /// Sets the backend kind (SQLite or Native V3).
     pub fn backend_kind(self, kind: BackendKind) -> Self {
         Self {
             backend_kind: Some(kind),
-            ..self
-        }
-    }
-
-    /// Sets the cache TTL for query results.
-    pub fn cache_ttl(self, ttl: std::time::Duration) -> Self {
-        Self {
-            cache_ttl: Some(ttl),
             ..self
         }
     }
@@ -301,9 +283,7 @@ mod tests {
 
         // Default builder should have None for all fields
         assert!(builder.path.is_none());
-        assert!(builder.database_path.is_none());
         assert!(builder.backend_kind.is_none());
-        assert!(builder.cache_ttl.is_none());
     }
 
     #[test]
@@ -316,25 +296,10 @@ mod tests {
     }
 
     #[test]
-    fn test_forge_builder_database_path() {
-        let builder = ForgeBuilder::new().database_path("custom.db");
-
-        assert_eq!(builder.database_path, Some(std::path::PathBuf::from("custom.db")));
-    }
-
-    #[test]
     fn test_forge_builder_backend_kind() {
         let builder = ForgeBuilder::new().backend_kind(BackendKind::NativeV3);
 
         assert_eq!(builder.backend_kind, Some(BackendKind::NativeV3));
-    }
-
-    #[test]
-    fn test_forge_builder_cache_ttl() {
-        let ttl = std::time::Duration::from_secs(60);
-        let builder = ForgeBuilder::new().cache_ttl(ttl);
-
-        assert_eq!(builder.cache_ttl, Some(ttl));
     }
 
     #[tokio::test]

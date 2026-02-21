@@ -2,13 +2,10 @@
 //!
 //! Provides serialization to/from JSON for backup and migration.
 
-use std::rc::Rc;
-
 use serde::{Deserialize, Serialize};
 
 use crate::checkpoint::{SessionId, TemporalCheckpoint};
 use crate::errors::{Result, StorageError};
-use crate::storage::CheckpointStorage;
 use crate::thread_safe::ThreadSafeStorage;
 
 /// Export format for a session's checkpoints

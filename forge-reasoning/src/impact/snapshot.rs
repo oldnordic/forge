@@ -181,8 +181,7 @@ impl SnapshotStore {
     /// Remove all expired snapshots
     fn cleanup_expired(&mut self) {
         let now = Utc::now();
-        self.snapshots
-            .retain(|&created, snapshot| created + self.window_duration > now);
+        self.snapshots.retain(|&created, _| created + self.window_duration > now);
     }
 
     /// List all active (non-expired) snapshots

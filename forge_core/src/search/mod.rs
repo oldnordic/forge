@@ -284,6 +284,7 @@ impl SearchModule {
 
 /// Map magellan SymbolKind to forge SymbolKind
 #[cfg(feature = "magellan")]
+#[expect(dead_code)] // Helper for magellan integration
 fn map_magellan_kind(kind: &magellan::SymbolKind) -> SymbolKind {
     use magellan::SymbolKind as MagellanKind;
     
@@ -336,6 +337,7 @@ fn extract_struct_from_line(line: &str) -> String {
 }
 
 /// Simple glob pattern matching (supports * wildcard)
+#[expect(dead_code)] // Helper for pattern matching
 fn glob_match(pattern: &str, text: &str) -> bool {
     if !pattern.contains('*') {
         return pattern == text;
