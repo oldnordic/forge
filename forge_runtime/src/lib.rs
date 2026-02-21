@@ -13,6 +13,9 @@
 
 use std::time::Duration;
 
+pub mod metrics;
+pub use metrics::{RuntimeMetrics, MetricKind, MetricsSummary};
+
 /// Runtime configuration for indexing and caching.
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
