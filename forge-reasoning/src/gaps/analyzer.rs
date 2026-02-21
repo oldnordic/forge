@@ -463,4 +463,140 @@ mod tests {
         assert_eq!(gaps[0].criticality, GapCriticality::High);
         assert_eq!(gaps[1].criticality, GapCriticality::Low);
     }
+
+    #[tokio::test]
+    async fn test_register_gap_computes_score_correctly() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let graph = Arc::new(BeliefGraph::new());
+        let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
+
+        let gap_id = analyzer.register_gap(
+            "Test gap".to_string(),
+            GapCriticality::High,
+            GapType::MissingInformation,
+            None,
+        ).await.unwrap();
+
+        let gap = analyzer.get_gap(gap_id).unwrap();
+        // Score should be > 0 since High criticality
+        assert!(gap.score > 0.0);
+        assert!(gap.score <= 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_auto_close_gaps_closes_high_confidence_hypotheses() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let graph = Arc::new(BeliefGraph::new());
+        let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), graph);
+
+        // Create hypothesis with high confidence
+        let prior = Confidence::new(0.95).unwrap();
+        let h_id = board.propose("High confidence hypothesis", prior).await.unwrap();
+
+        // Register gap linked to this hypothesis
+        let gap_id = analyzer.register_gap(
+            "Test gap".to_string(),
+            GapCriticality::Medium,
+            GapType::UntestedAssumption,
+            Some(h_id),
+        ).await.unwrap();
+
+        // Auto-close should close this gap
+        let closed = analyzer.auto_close_gaps().await;
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0], gap_id);
+
+        // Verify gap is filled
+        let gap = analyzer.get_gap(gap_id).unwrap();
+        assert!(gap.filled_at.is_some());
+        assert!(gap.resolution_notes.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_suggestions_returns_sorted_list() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let graph = Arc::new(BeliefGraph::new());
+        let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
+
+        // Register gaps
+        analyzer.register_gap(
+            "Low priority".to_string(),
+            GapCriticality::Low,
+            GapType::MissingInformation,
+            None,
+        ).await.unwrap();
+
+        analyzer.register_gap(
+            "High priority".to_string(),
+            GapCriticality::High,
+            GapType::UntestedAssumption,
+            None,
+        ).await.unwrap();
+
+        // Get suggestions
+        let suggestions = analyzer.get_suggestions(true).await;
+
+        // Should have 2 suggestions
+        assert_eq!(suggestions.len(), 2);
+
+        // Should be sorted by priority
+        assert!(suggestions[0].priority >= suggestions[1].priority);
+    }
+
+    #[tokio::test]
+    async fn test_recompute_scores_updates_all_gaps() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let graph = Arc::new(BeliefGraph::new());
+        let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), graph);
+
+        // Register gap
+        let gap_id = analyzer.register_gap(
+            "Test gap".to_string(),
+            GapCriticality::Medium,
+            GapType::MissingInformation,
+            None,
+        ).await.unwrap();
+
+        // Manually set score to wrong value
+        {
+            let gap = analyzer.gaps.get_mut(&gap_id).unwrap();
+            gap.score = 0.0;
+        }
+
+        // Recompute scores
+        analyzer.recompute_scores();
+
+        // Score should be corrected
+        let gap = analyzer.get_gap(gap_id).unwrap();
+        assert!(gap.score > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_depth_computation_matches_dependency_graph() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let graph = Arc::new(BeliefGraph::new());
+        let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), graph.clone());
+
+        // Create hypothesis chain: H1 -> H2 -> H3
+        let prior = Confidence::new(0.5).unwrap();
+        let h1 = board.propose("H1", prior).await.unwrap();
+        let h2 = board.propose("H2", prior).await.unwrap();
+        let h3 = board.propose("H3", prior).await.unwrap();
+
+        // Add dependencies: H1 depends on H2, H2 depends on H3
+        graph.add_dependency(h1, h2).unwrap();
+        graph.add_dependency(h2, h3).unwrap();
+
+        // Register gap for H1
+        let gap_id = analyzer.register_gap(
+            "Test gap".to_string(),
+            GapCriticality::Medium,
+            GapType::UntestedAssumption,
+            Some(h1),
+        ).await.unwrap();
+
+        // Depth should be 2 (H1 -> H2 -> H3)
+        let gap = analyzer.get_gap(gap_id).unwrap();
+        assert_eq!(gap.depth, 2);
+    }
 }
