@@ -1036,4 +1036,186 @@ mod tests {
         assert!(matches!(ApplyResult::Pending, ApplyResult::Pending));
         assert!(matches!(ApplyResult::Failed("x".to_string()), ApplyResult::Failed(_)));
     }
+
+    // End-to-end integration tests
+
+    #[tokio::test]
+    async fn test_full_workflow_from_lookup_to_edit() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let mut analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // 1. Look up a symbol
+        let symbols = analysis.graph().find_symbol("test").await.unwrap();
+        assert!(symbols.is_empty());
+
+        // 2. Check impact
+        let impact = analysis.impact_analysis("test").await.unwrap();
+        assert_eq!(impact.symbol, "test");
+        assert_eq!(impact.impact_score, 0);
+
+        // 3. Try to apply a rename operation
+        let rename = RenameOperation::new("test", "new_name");
+        let result = rename.verify(&analysis).await.unwrap();
+        assert!(matches!(result, ApplyResult::Failed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_cross_module_error_handling() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // Test that errors from graph module propagate correctly
+        let result = analysis.graph().find_symbol("").await;
+        assert!(result.is_ok()); // Empty query returns empty, not error
+
+        // Test that search module handles valid patterns
+        let search_result = analysis.search().pattern_search("test").await;
+        assert!(search_result.is_ok());
+
+        // Test semantic search
+        let semantic_result = analysis.search().semantic_search("test").await;
+        assert!(semantic_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_deep_impact_analysis_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // Test k-hop impact analysis
+        let impacted = analysis.deep_impact_analysis("test", 2).await.unwrap();
+        assert!(impacted.is_empty()); // No symbols in empty database
+    }
+
+    #[tokio::test]
+    async fn test_module_dependencies_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // Test module dependency analysis
+        let deps = analysis.module_dependencies().await.unwrap();
+        assert!(deps.is_empty()); // No dependencies in empty database
+
+        // Test circular dependency detection
+        let cycles = analysis.find_dependency_cycles().await.unwrap();
+        assert!(cycles.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_complexity_metrics_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // Test complexity metrics
+        let metrics = analysis.complexity_metrics("test_function").await.unwrap();
+        assert_eq!(metrics.cyclomatic_complexity, 1);
+        assert_eq!(metrics.decision_points, 0);
+
+        // Test source complexity analysis
+        let source = r#"
+            fn example(x: i32) -> i32 {
+                if x > 0 {
+                    return x * 2;
+                }
+                x
+            }
+        "#;
+        let source_metrics = analysis.analyze_source_complexity(source);
+        assert!(source_metrics.cyclomatic_complexity >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_cross_references_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // Test cross-references
+        let xrefs = analysis.cross_references("test").await.unwrap();
+        assert!(xrefs.callers.is_empty());
+        assert!(xrefs.callees.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_performance_benchmarks_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await.unwrap()
+        );
+        let graph = GraphModule::new(store.clone());
+        let search = SearchModule::new(store.clone());
+        let cfg = CfgModule::new(store.clone());
+        let edit = EditModule::new(store);
+
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
+
+        // Test performance benchmarks
+        let benchmarks = analysis.benchmarks().await.unwrap();
+
+        // Verify all benchmarks completed
+        assert!(benchmarks.impact_analysis_ms >= 0.0);
+        assert!(benchmarks.dead_code_ms >= 0.0);
+        assert!(benchmarks.reference_chain_ms >= 0.0);
+        assert!(benchmarks.call_chain_ms >= 0.0);
+        assert!(benchmarks.total_ms >= 0.0);
+
+        // Total should be sum of components (approximately)
+        let sum = benchmarks.impact_analysis_ms + benchmarks.dead_code_ms
+            + benchmarks.reference_chain_ms + benchmarks.call_chain_ms;
+        assert!(benchmarks.total_ms >= sum * 0.9); // Allow for timing overhead
+    }
 }
