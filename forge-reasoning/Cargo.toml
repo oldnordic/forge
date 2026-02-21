@@ -16,12 +16,19 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio = { workspace = true }
 tracing = "0.1"
 thiserror = "1.0"
+async-trait = "0.1"
 
 # SQLiteGraph - storage backend
 sqlitegraph = { path = "/home/feanor/Projects/sqlitegraph/sqlitegraph-core" }
 
 # Cryptographic hashing for data integrity
 sha2 = "0.10"
+
+# Graph algorithms for dependency analysis
+petgraph = "0.6"
+
+# Deterministic ordered collections
+indexmap = "2"
 
 # WebSocket support (optional)
 tokio-tungstenite = { version = "0.21", optional = true }

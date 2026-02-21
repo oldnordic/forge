@@ -7,6 +7,7 @@
 pub mod checkpoint;
 pub mod errors;
 pub mod export_import;
+pub mod hypothesis;
 pub mod service;
 pub mod storage;
 pub mod storage_sqlitegraph;
@@ -20,6 +21,12 @@ pub use checkpoint::{
     AutoTrigger, CheckpointId, CheckpointSummary, CheckpointTrigger, CompactionPolicy, DebugNote,
     DebugStateSnapshot, SessionId, SessionMetrics, TemporalCheckpoint, TemporalCheckpointManager,
     VerificationResult,
+};
+
+pub use hypothesis::{
+    Confidence, ConfidenceError,
+    Hypothesis, HypothesisBoard, HypothesisId, HypothesisStatus,
+    HypothesisStorage, InMemoryHypothesisStorage,
 };
 
 pub use export_import::{CheckpointExporter, CheckpointImporter};
