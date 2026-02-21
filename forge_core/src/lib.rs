@@ -41,13 +41,12 @@ pub mod edit;
 pub mod analysis;
 pub mod treesitter;
 
-// Runtime layer modules (Phase 2)
-// TODO: Re-enable when dependencies are available
-// pub mod watcher;
-// pub mod indexing;
-// pub mod cache;
-// pub mod pool;
-// pub mod runtime;
+// Runtime layer modules
+pub mod watcher;
+pub mod indexing;
+pub mod cache;
+// pub mod pool; // TODO: Re-enable when implemented
+// pub mod runtime; // TODO: Re-enable when implemented
 
 // Re-export sqlitegraph types for advanced usage
 pub use sqlitegraph::backend::{NodeSpec, EdgeSpec};
@@ -58,6 +57,11 @@ pub use sqlitegraph::config::{BackendKind as SqliteGraphBackendKind, GraphConfig
 pub use error::{ForgeError, Result};
 pub use types::{SymbolId, Location};
 pub use storage::{BackendKind, UnifiedGraphStore};
+
+// Re-export runtime module types
+pub use watcher::{Watcher, WatchEvent};
+pub use indexing::{IncrementalIndexer, PathFilter, FlushStats};
+pub use cache::QueryCache;
 
 use anyhow::anyhow;
 

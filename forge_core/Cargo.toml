@@ -23,6 +23,9 @@ blake3 = "1.5"
 regex = "1"
 async-trait = "0.1"
 
+# Runtime layer dependencies
+notify = "8"
+
 # Graph database
 sqlitegraph = { version = "2.0.8", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
 
