@@ -423,6 +423,9 @@ mod tests {
         let prior = Confidence::new(0.5).unwrap();
         let h_id = board.propose("Test", prior).await.unwrap();
 
+        // First set status to UnderTest (valid transition)
+        board.set_status(h_id, HypothesisStatus::UnderTest).await.unwrap();
+
         let check = VerificationCheck::new(
             "test".to_string(),
             h_id,

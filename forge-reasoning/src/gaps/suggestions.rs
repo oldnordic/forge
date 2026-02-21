@@ -300,11 +300,12 @@ mod tests {
         filled_gap.filled_at = Some(Utc::now());
 
         let unfilled_gap = make_test_gap("Unfilled", GapType::MissingInformation, GapCriticality::Low);
+        let unfilled_gap_id = unfilled_gap.id; // Save id before moving
 
         let suggestions = generate_all_suggestions(&[filled_gap, unfilled_gap], &board, &graph);
 
         assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].gap_id, unfilled_gap.id);
+        assert_eq!(suggestions[0].gap_id, unfilled_gap_id);
     }
 
     #[test]

@@ -77,10 +77,11 @@ impl PartialOrd for ReverseKnowledgeGap {
 
 impl Ord for ReverseKnowledgeGap {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Higher score = lower Ord value (pops first from max-heap)
-        match other.gap.score.partial_cmp(&self.gap.score) {
+        // Higher score = pops first from max-heap
+        // BinaryHeap is max-heap: largest element per Ord comes out first
+        match self.gap.score.partial_cmp(&other.gap.score) {
             Some(Ordering::Equal) => {
-                // Tiebreaker: older gaps first
+                // Tiebreaker: older gaps first (reverse ordering)
                 other.gap.created_at.cmp(&self.gap.created_at)
             }
             Some(order) => order,
@@ -252,11 +253,21 @@ mod tests {
 
     #[test]
     fn test_priority_queue_returns_highest_priority_first() {
-        let mut queue = PriorityQueue::new();
+        let config = ScoringConfig::default();
 
-        queue.push(make_test_gap(GapCriticality::Low, 0, 0.0, 0));
-        queue.push(make_test_gap(GapCriticality::High, 0, 0.0, 0));
-        queue.push(make_test_gap(GapCriticality::Medium, 0, 0.0, 0));
+        let mut low_gap = make_test_gap(GapCriticality::Low, 0, 0.0, 0);
+        let mut high_gap = make_test_gap(GapCriticality::High, 0, 0.0, 0);
+        let mut medium_gap = make_test_gap(GapCriticality::Medium, 0, 0.0, 0);
+
+        // Compute scores so queue ordering works correctly
+        low_gap.score = compute_gap_score(&low_gap, &config);
+        high_gap.score = compute_gap_score(&high_gap, &config);
+        medium_gap.score = compute_gap_score(&medium_gap, &config);
+
+        let mut queue = PriorityQueue::new();
+        queue.push(low_gap);
+        queue.push(high_gap);
+        queue.push(medium_gap);
 
         let first = queue.pop().unwrap();
         assert_eq!(first.criticality, GapCriticality::High);
@@ -284,12 +295,15 @@ mod tests {
         new_gap.score = score;
         old_gap.score = score;
 
+        // Save created_at before moving into queue
+        let old_created_at = old_gap.created_at;
+
         queue.push(old_gap);
         queue.push(new_gap);
 
         // Older gap should come first despite being pushed second
         let first = queue.pop().unwrap();
-        assert_eq!(first.created_at, old_gap.created_at);
+        assert_eq!(first.created_at, old_created_at);
     }
 
     #[test]

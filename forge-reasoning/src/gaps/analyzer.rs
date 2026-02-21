@@ -574,8 +574,6 @@ mod tests {
     #[tokio::test]
     async fn test_depth_computation_matches_dependency_graph() {
         let board = Arc::new(HypothesisBoard::in_memory());
-        let graph = Arc::new(BeliefGraph::new());
-        let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), graph.clone());
 
         // Create hypothesis chain: H1 -> H2 -> H3
         let prior = Confidence::new(0.5).unwrap();
@@ -583,9 +581,13 @@ mod tests {
         let h2 = board.propose("H2", prior).await.unwrap();
         let h3 = board.propose("H3", prior).await.unwrap();
 
-        // Add dependencies: H1 depends on H2, H2 depends on H3
+        // Create graph and add dependencies: H1 depends on H2, H2 depends on H3
+        let mut graph = BeliefGraph::new();
         graph.add_dependency(h1, h2).unwrap();
         graph.add_dependency(h2, h3).unwrap();
+
+        // Now create analyzer with the populated graph
+        let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), Arc::new(graph));
 
         // Register gap for H1
         let gap_id = analyzer.register_gap(

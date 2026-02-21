@@ -189,32 +189,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_exponential_backoff() {
-        // Use a paused time handle to test delay calculations
-        tokio::time::pause();
-
+        // Test that retries happen with expected backoff
         let config = RetryConfig {
             max_retries: 3,
-            initial_delay: Duration::from_millis(100),
-            max_delay: Duration::from_secs(10),
+            initial_delay: Duration::from_millis(10), // Short delay for testing
+            max_delay: Duration::from_millis(100),
             backoff_factor: 2.0,
-            jitter: false, // Disable jitter for predictable testing
+            jitter: false,
         };
 
-        let mut delays = Vec::new();
         let attempt_count = Arc::new(AtomicU32::new(0));
 
-        let _ = execute_with_retry(
+        let result = execute_with_retry(
             || {
                 let attempt_count = attempt_count.clone();
                 async move {
                     let count = attempt_count.fetch_add(1, Ordering::SeqCst);
-                    if count < 3 {
-                        // Record the time before sleep
-                        let before = tokio::time::Instant::now();
-                        // This will cause a retry
-                        Err::<(), _>("error")
+                    if count < 2 {
+                        Err::<(), _>("retry me")
                     } else {
-                        Err::<(), _>("final error")
+                        Ok(())
                     }
                 }
             },
@@ -222,7 +216,9 @@ mod tests {
         )
         .await;
 
-        tokio::time::resume();
+        assert!(result.is_ok());
+        // Should have initial attempt + 2 retries = 3 total
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 3);
     }
 
     #[test]
@@ -237,12 +233,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_delay_capping() {
-        tokio::time::pause();
-
+        // Test that max_delay caps the exponential backoff
         let config = RetryConfig {
-            max_retries: 10,
-            initial_delay: Duration::from_secs(1),
-            max_delay: Duration::from_millis(500), // Very low cap
+            max_retries: 5,
+            initial_delay: Duration::from_millis(10),
+            max_delay: Duration::from_millis(50), // Low cap
             backoff_factor: 10.0, // High growth factor
             jitter: false,
         };
@@ -261,7 +256,8 @@ mod tests {
         )
         .await;
 
-        tokio::time::resume();
+        // Should have attempted max_retries + 1 times
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 6);
     }
 
     #[tokio::test]
