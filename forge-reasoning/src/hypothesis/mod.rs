@@ -13,6 +13,7 @@ pub mod storage;
 pub use confidence::{Confidence, ConfidenceError};
 pub use types::{Hypothesis, HypothesisId, HypothesisStatus, HypothesisState};
 pub use storage::{HypothesisStorage, InMemoryHypothesisStorage};
+pub use evidence::{Evidence, EvidenceId, EvidenceType, EvidenceMetadata, strength_to_likelihood};
 
 use std::sync::Arc;
 use crate::errors::Result;
@@ -93,6 +94,64 @@ impl HypothesisBoard {
         self.storage.delete_hypothesis(id).await
     }
 
+    /// Attach evidence to a hypothesis and update confidence
+    ///
+    /// This is the primary method for evidence attachment. It:
+    /// 1. Stores the evidence
+    /// 2. Converts strength to likelihood ratio
+    /// 3. Updates hypothesis confidence using Bayes formula
+    pub async fn attach_evidence(
+        &self,
+        hypothesis_id: HypothesisId,
+        evidence_type: EvidenceType,
+        strength: f64,
+        metadata: EvidenceMetadata,
+    ) -> Result<(EvidenceId, Confidence)> {
+        // Create evidence
+        let evidence = Evidence::new(hypothesis_id, evidence_type, strength, metadata);
+        let evidence_id = self.storage.attach_evidence(&evidence).await?;
+
+        // Convert strength to likelihood ratio
+        let (likelihood_h, likelihood_not_h) =
+            strength_to_likelihood(evidence.strength(), evidence_type);
+
+        // Update hypothesis confidence
+        let posterior = self.update_with_evidence(
+            hypothesis_id,
+            likelihood_h,
+            likelihood_not_h,
+        ).await?;
+
+        Ok((evidence_id, posterior))
+    }
+
+    /// Get evidence by ID
+    pub async fn get_evidence(&self, id: EvidenceId) -> Result<Option<Evidence>> {
+        self.storage.get_evidence(id).await
+    }
+
+    /// List all evidence for a hypothesis
+    pub async fn list_evidence(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
+        self.storage.list_evidence_for_hypothesis(hypothesis_id).await
+    }
+
+    /// Trace supporting evidence for a hypothesis
+    pub async fn list_supporting_evidence(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
+        let all = self.list_evidence(hypothesis_id).await?;
+        Ok(all.into_iter().filter(|e| e.is_supporting()).collect())
+    }
+
+    /// Trace refuting evidence for a hypothesis
+    pub async fn list_refuting_evidence(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
+        let all = self.list_evidence(hypothesis_id).await?;
+        Ok(all.into_iter().filter(|e| e.is_refuting()).collect())
+    }
+
+    /// Delete evidence
+    pub async fn delete_evidence(&self, id: EvidenceId) -> Result<bool> {
+        self.storage.delete_evidence(id).await
+    }
+
     /// Query hypothesis state at a past checkpoint time
     ///
     /// This enables time-travel queries: "What did I believe at checkpoint X?"
@@ -159,5 +218,101 @@ mod tests {
 
         // Invalid: Confirmed -> Proposed (should fail)
         assert!(board.set_status(id, HypothesisStatus::Proposed).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_attach_evidence_updates_confidence() {
+        let board = HypothesisBoard::in_memory();
+        let prior = Confidence::new(0.5).unwrap();
+        let id = board.propose("Test hypothesis", prior).await.unwrap();
+
+        // Attach supporting evidence
+        let metadata = EvidenceMetadata::Observation {
+            description: "Observed behavior supports hypothesis".to_string(),
+            source_path: None,
+        };
+
+        let (evidence_id, posterior) = board.attach_evidence(
+            id,
+            EvidenceType::Observation,
+            0.5,  // Max supporting strength for Observation
+            metadata,
+        ).await.unwrap();
+
+        // Posterior should be higher than prior
+        assert!(posterior.get() > 0.5);
+
+        // Evidence should be retrievable
+        let evidence = board.get_evidence(evidence_id).await.unwrap().unwrap();
+        assert_eq!(evidence.hypothesis_id(), id);
+    }
+
+    #[tokio::test]
+    async fn test_list_evidence_by_hypothesis() {
+        let board = HypothesisBoard::in_memory();
+        let prior = Confidence::new(0.5).unwrap();
+        let id = board.propose("Test", prior).await.unwrap();
+
+        // Attach multiple evidence
+        for i in 0..3 {
+            let metadata = EvidenceMetadata::Observation {
+                description: format!("Observation {}", i),
+                source_path: None,
+            };
+            board.attach_evidence(id, EvidenceType::Observation, 0.3, metadata).await.unwrap();
+        }
+
+        let evidence_list = board.list_evidence(id).await.unwrap();
+        assert_eq!(evidence_list.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_supporting_vs_refuting_evidence() {
+        let board = HypothesisBoard::in_memory();
+        let prior = Confidence::new(0.5).unwrap();
+        let id = board.propose("Test", prior).await.unwrap();
+
+        // Supporting evidence
+        let metadata_support = EvidenceMetadata::Observation {
+            description: "Supporting".to_string(),
+            source_path: None,
+        };
+        board.attach_evidence(id, EvidenceType::Observation, 0.4, metadata_support).await.unwrap();
+
+        // Refuting evidence
+        let metadata_refute = EvidenceMetadata::Observation {
+            description: "Refuting".to_string(),
+            source_path: None,
+        };
+        board.attach_evidence(id, EvidenceType::Observation, -0.4, metadata_refute).await.unwrap();
+
+        let supporting = board.list_supporting_evidence(id).await.unwrap();
+        let refuting = board.list_refuting_evidence(id).await.unwrap();
+
+        assert_eq!(supporting.len(), 1);
+        assert_eq!(refuting.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_evidence_strength_clamping_by_type() {
+        let board = HypothesisBoard::in_memory();
+        let prior = Confidence::new(0.5).unwrap();
+        let id = board.propose("Test", prior).await.unwrap();
+
+        let metadata = EvidenceMetadata::Observation {
+            description: "Test".to_string(),
+            source_path: None,
+        };
+
+        // Try to attach evidence with strength 1.0 (beyond Observation's max of 0.5)
+        let (evidence_id, _) = board.attach_evidence(
+            id,
+            EvidenceType::Observation,
+            1.0,  // Will be clamped to 0.5
+            metadata,
+        ).await.unwrap();
+
+        let evidence = board.get_evidence(evidence_id).await.unwrap().unwrap();
+        assert_eq!(evidence.strength(), 0.5); // Clamped
     }
 }
