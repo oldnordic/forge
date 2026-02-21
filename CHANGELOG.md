@@ -7,114 +7,172 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.2.0] - 2026-02-21
 
 ### Added
-- **Graph Analysis Module** (`AnalysisModule`)
-  - `impact_analysis()` - k-hop traversal to find affected symbols
-  - `find_dead_code()` - Detect unused functions/methods
-  - `complexity_metrics()` - Calculate cyclomatic complexity
-  - `cross_references()` - Find callers and callees
-  - `module_dependencies()` - Analyze cross-module imports
+
+**Core SDK (forge_core v0.2.0):**
+- **GraphModule** - Symbol lookup, reference tracking, call graph navigation
+  - `find_symbol(name)` - Find symbols by name
+  - `find_symbol_by_id(id)` - Find symbol by ID
+  - `callers_of(name)` - Find all callers of a symbol
+  - `references(name)` - Find all references to a symbol
+  - `impact_analysis(name, depth)` - k-hop traversal for impact analysis
+  - `index()` - Run the magellan indexer
+
+- **SearchModule** - Pattern-based and semantic code search
+  - `pattern_search(pattern)` - Regex pattern search
+  - `semantic_search(query)` - Semantic code search
+  - `symbol_by_name(name)` - Find symbols by name
+  - `symbols_by_kind(kind)` - Filter symbols by kind
+
+- **CfgModule** - Control flow graph analysis
+  - `paths(function)` - Enumerate execution paths
+  - `dominators(function)` - Compute dominator tree
+  - `loops(function)` - Detect natural loops
+  - `index()` - Extract CFG for functions
+
+- **EditModule** - Span-safe code editing
+  - `patch_symbol(symbol, replacement)` - Replace symbol definition
+  - `rename_symbol(old_name, new_name)` - Rename symbol across codebase
+
+- **AnalysisModule** - Composite operations combining all modules
+  - `analyze_impact(symbol)` - Analyze impact of changes
+  - `deep_impact_analysis(symbol, depth)` - Deep k-hop traversal
+  - `find_dead_code()` - Find unreferenced symbols
+  - `complexity_metrics(symbol)` - Calculate cyclomatic complexity
+  - `analyze_source_complexity(source)` - Analyze source directly
+  - `cross_references(symbol)` - Get callers and callees
+  - `module_dependencies()` - Analyze module dependencies
   - `find_dependency_cycles()` - Detect circular dependencies
+  - `benchmarks()` - Performance benchmarks for operations
 
-- **Graph Query Engine** using sqlitegraph high-level API
-  - `find_callers()` - Find all callers of a symbol
-  - `find_references()` - Find all references to a symbol
-  - `find_impacted_symbols()` - k-hop traversal for impact analysis
-  - Removed direct `rusqlite` dependency (uses sqlitegraph instead)
+- **EditOperation Trait** - Safe code transformation API
+  - `InsertOperation` - Insert content at location
+  - `DeleteOperation` - Delete symbols with validation
+  - `RenameOperation` - Rename symbols with validation
+  - `ErrorResult` - Always-fails operation
+  - `ApplyResult` enum (Applied, AlwaysError, Pending, Failed)
+  - `Diff` type for change previews
 
-- **Complexity Analysis** (`analysis::complexity`)
-  - Cyclomatic complexity calculation from CFG
+- **DeadCodeAnalyzer** - Find unused code
+  - Database-backed dead code detection
+  - Filters public API and entry points
+  - Graceful handling of empty databases
+
+- **ComplexityMetrics** - Code complexity analysis
+  - Cyclomatic complexity calculation
   - Decision point counting
   - Nesting depth analysis
   - Risk level classification (Low/Medium/High/VeryHigh)
 
-- **Dead Code Detection** (`analysis::dead_code`)
-  - Detects symbols with no incoming references
-  - Filters public API and entry points
-  - Exports test functions
-
-- **Module Dependency Analysis** (`analysis::modules`)
-  - Cross-file dependency graph construction
-  - Circular dependency detection
+- **ModuleAnalyzer** - Module dependency analysis
+  - Cross-module dependency graph
+  - Circular dependency detection using petgraph
   - Depth analysis
 
-### Changed
-- **Refactored graph queries** to use sqlitegraph's high-level API
-  - Uses `GraphBackend::fetch_incoming()` instead of raw SQL
-  - Uses `GraphBackend::k_hop()` for impact analysis
-  - Uses `SnapshotId::current()` for MVCC reads
-  - Removed `rusqlite` dependency
+**Forge Runtime (forge_runtime v0.1.0):**
+- **ForgeRuntime** - Runtime services stub
+  - RuntimeConfig for configuration
+  - RuntimeStats for metrics
+  - File watching infrastructure (notify dependency)
 
-### Fixed
-- **Complexity calculation** now correctly handles single-node CFGs
-- **Test expectations** updated for dominator and loop detection
+**Forge Agent (forge_agent v0.1.0):**
+- **Agent** - Deterministic AI orchestration loop
+  - Six-phase loop: Observe → Constrain → Plan → Mutate → Verify → Commit
+  - Observation, ConstrainedPlan, ExecutionPlan types
+  - MutationResult, VerificationResult, CommitResult types
 
----
-
-## [0.2.0] - 2026-02-13
-
-### Added
-- **Individual tool backend selection**
-  - New features for choosing backend per tool:
-    - `magellan-sqlite` / `magellan-v3` - Magellan with SQLite or V3 backend
-    - `llmgrep-sqlite` / `llmgrep-v3` - LLMGrep with SQLite or V3 backend  
-    - `mirage-sqlite` / `mirage-v3` - Mirage with SQLite or V3 backend
-    - `splice-sqlite` / `splice-v3` - Splice with SQLite or V3 backend
-  - Convenience groups:
-    - `tools-sqlite` - All tools with SQLite backend
-    - `tools-v3` - All tools with V3 backend
-    - `full-sqlite` / `full-v3` - Everything with specific backend
-
-- **sqlitegraph V3 Backend Integration**
-  - Native V3 backend for high-performance graph storage
-  - Uses `.forge/graph.v3` database format (not SQLite)
-  - Full CRUD operations for symbols and references
-
-- **Path Filtering for Indexing**
-  - `PathFilter` struct with glob pattern support (`*`, `**`)
-  - Default filter only indexes `src/` and `tests/` directories
-  - Automatic exclusion of `target/`, `node_modules/`, `.git/`, `.forge/`
-
-- **Control Flow Graph (CFG) Module**
-  - Dominator tree computation
-  - Natural loop detection
-  - Path enumeration with filters
-  - Test CFG builder for unit tests
+**Forge-Reasoning:**
+- **Hypothesis tracking** with Bayesian confidence
+- **Evidence storage** with source types (Observation, Experiment, Reference, Deduction)
+- **Belief dependency graph** with cycle detection (petgraph)
+- **Async verification** with retry logic and exponential backoff
+- **Knowledge gap analysis** with multi-factor priority scoring
+- **Confidence propagation** with cascade preview
+- **Impact analysis engine** with snapshot revert
 
 ### Changed
-- **Updated dependencies for V3 backend persistence fix**
-  - `sqlitegraph`: 2.0.1/2.0.2 → 2.0.5 (V3 persistence fix)
-  - `magellan`: path → 2.4.5 (uses sqlitegraph 2.0.5)
-  - `llmgrep`: 2.1 → 3.0.8 (uses magellan 2.4.5, sqlitegraph 2.0.5)
-  - V3 databases now properly persist across process restarts
+
+- **UnifiedGraphStore** - Unified backend abstraction
+  - Dual backend support (SQLite / Native V3)
+  - ACID transactions for atomic operations
+  - MVCC reads via SnapshotId
+
+- **Storage backend** - Uses sqlitegraph 2.0.7
+  - 35+ graph algorithms (cycles, reachability, SCC, dominators)
+  - Dual backend: SQLite (stable) or Native V3 (high performance)
 
 ### Dependencies
-- Updated `sqlitegraph` to v2.0.5
-- Added `parking_lot` for synchronization
-- Added `regex` for glob pattern matching
+
+**Core:**
+- `sqlitegraph` 2.0.7 - Graph database backend
+- `tokio` 1.49.0 - Async runtime
+- `serde` / `serde_json` 1.0 - Serialization
+- `thiserror` 2.0.18 - Error types
+- `async-trait` 0.1.89 - Async trait support
+- `petgraph` 0.8.3 - Graph algorithms
+- `regex` 1.12.3 - Pattern matching
+- `blake3` 1.5.3 - Hashing
+- `anyhow` 1.0 - Error handling at API boundaries
+
+**Tool Integrations (optional):**
+- `magellan` 2.4.6 - Code indexing
+- `llmgrep` 3.0.9 - Semantic search
+- `mirage-analyzer` 1.0.3 - CFG analysis
+- `splice` 2.5.3 - Code editing
+
+**Forge-Reasoning:**
+- `uuid` 1.21.0 - Unique identifiers
+- `chrono` 0.4.43 - Timestamps
+- `indexmap` 2.13.0 - Ordered collections
+
+### Feature Flags
+
+**Storage Backends:**
+- `sqlite` (default) - SQLite backend
+- `native-v3` - Native V3 backend
+
+**Tool Integrations:**
+- `magellan` / `magellan-sqlite` / `magellan-v3`
+- `llmgrep` / `llmgrep-sqlite` / `llmgrep-v3`
+- `mirage` / `mirage-sqlite` / `mirage-v3`
+- `splice` / `splice-sqlite` / `splice-v3`
+- `tools` - All tools
+- `tools-sqlite` / `tools-v3` - All tools with specific backend
+- `full-sqlite` / `full-v3` - Everything with specific backend
+
+**Forge-Reasoning:**
+- `websocket` - WebSocket API support
+
+### Test Coverage
+
+- **535+ tests** passing (100% pass rate)
+- E2E tests: 163 tests across 8 waves
+- Unit tests: 155 forge_core tests + 217 other tests
+- Integration tests for cross-module functionality
+- Performance benchmarks included
+
+### Documentation
+
+- API reference for all modules
+- Architecture documentation
+- User manual with working examples
+- Contributing guidelines
+- Development workflow guide
 
 ---
 
-## [0.1.0] - TBD
+## [0.1.0] - 2026-02-12
 
 ### Added
-- Workspace structure
-- Public API stubs
-- Core type definitions
-- Error hierarchy
-- Basic test infrastructure
 
-### Documentation
-- README.md with project overview
-- ARCHITECTURE.md with system design
-- API.md with interface reference
-- PHILOSOPHY.md with design principles
-- DEVELOPMENT_WORKFLOW.md with process
-- CONTRIBUTING.md with guidelines
-- ROADMAP.md with project roadmap
-- AGENTS.md with AI agent instructions
+- Workspace structure with 4 crates
+- Public API stubs
+- Core type definitions (SymbolId, BlockId, Location, Span)
+- Error hierarchy (ForgeError)
+- Basic test infrastructure
+- Project documentation (README, ARCHITECTURE, API, MANUAL)
 
 ---
 
@@ -147,4 +205,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-*Last updated: 2026-02-18*
+*Last updated: 2026-02-21*

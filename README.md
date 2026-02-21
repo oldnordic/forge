@@ -1,8 +1,8 @@
 # ForgeKit - Deterministic Code Intelligence SDK
 
-[![Crates.io](https://img.shields.io/crates/v/forge-core)](https://crates.io/crates/forge-core)
-[![Documentation](https://docs.rs/forge-core/badge.svg)](https://docs.rs/forge-core)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/oldnordic/forge)
+[![Tests](https://img.shields.io/badge/tests-535%20passing-brightgreen)](https://github.com/oldnordic/forge)
 
 ForgeKit provides a unified SDK for code intelligence operations, integrating multiple tools into a single API with support for both SQLite and Native V3 backends.
 
@@ -217,4 +217,6 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 
 ---
 
-**Note:** This is an early-stage project. APIs may change until v1.0.
+**Current Version:** 0.2.0 (Development)
+
+**Note:** ForgeKit is currently in active development. The crate has not yet been published to crates.io. APIs may change until v1.0.

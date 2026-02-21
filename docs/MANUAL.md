@@ -11,7 +11,8 @@ Complete guide to using ForgeKit for code intelligence operations.
 5. [Analysis Operations](#analysis-operations)
 6. [Search Operations](#search-operations)
 7. [CFG Analysis](#cfg-analysis)
-8. [Troubleshooting](#troubleshooting)
+8. [Edit Operations](#edit-operations)
+9. [Troubleshooting](#troubleshooting)
 
 ## Getting Started
 
@@ -288,6 +289,77 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     
+    Ok(())
+}
+```
+
+### Example 8: Safe Code Editing with EditOperation
+
+Use the EditOperation trait for safe, validated code transformations:
+
+```rust
+use forge_core::Forge;
+use forge_core::analysis::edit_operation::{InsertOperation, DeleteOperation, RenameOperation};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    let analysis = forge.analysis();
+
+    // Create an insert operation
+    let insert = InsertOperation {
+        file_path: "src/lib.rs".into(),
+        line: 10,
+        content: "// TODO: implement this\n".to_string(),
+    };
+
+    // Verify before applying
+    let result = insert.verify(&analysis).await?;
+    println!("Verification: {:?}", result);
+
+    // Preview the change
+    let diff = insert.preview(&analysis).await?;
+    println!("Diff: {}", diff);
+
+    // Apply the change
+    let applied = insert.apply(&mut analysis).await?;
+    println!("Applied: {:?}", applied);
+
+    Ok(())
+}
+```
+
+Rename symbol across the codebase:
+
+```rust
+use forge_core::Forge;
+use forge_core::analysis::edit_operation::RenameOperation;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let forge = Forge::open("./project").await?;
+    let analysis = forge.analysis();
+
+    // Rename a function
+    let rename = RenameOperation {
+        old_name: "old_function_name".to_string(),
+        new_name: "new_function_name".to_string(),
+    };
+
+    // Verify the rename is safe
+    let result = rename.verify(&analysis).await?;
+    match result {
+        forge_core::analysis::edit_operation::ApplyResult::Applied => {
+            // Apply the rename
+            rename.apply(&mut analysis).await?;
+            println!("Rename successful!");
+        }
+        forge_core::analysis::edit_operation::ApplyResult::AlwaysError => {
+            println!("Cannot rename this symbol");
+        }
+        _ => {}
+    }
+
     Ok(())
 }
 ```
