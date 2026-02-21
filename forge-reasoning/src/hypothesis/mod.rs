@@ -6,6 +6,7 @@
 
 pub mod confidence;
 pub mod types;
+pub mod evidence;
 pub mod storage;
 
 // Public exports
