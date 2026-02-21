@@ -666,6 +666,22 @@ impl CheckpointService {
             checked_at: Some(Utc::now()),
         })
     }
+
+    /// Get hypothesis state at a specific checkpoint
+    pub async fn get_hypothesis_state(
+        &self,
+        checkpoint_id: CheckpointId,
+    ) -> Result<Option<crate::hypothesis::types::HypothesisState>> {
+        // Search for the checkpoint across all sessions
+        let sessions = self.sessions.read().unwrap();
+        for session_id in sessions.keys() {
+            let manager = self.get_manager(*session_id);
+            if let Some(checkpoint) = manager.get(&checkpoint_id)? {
+                return Ok(checkpoint.state.hypothesis_state);
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// Report from validation operation

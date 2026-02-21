@@ -359,6 +359,7 @@ impl ThreadSafeCheckpointManager {
             working_dir: std::env::current_dir().ok(),
             env_vars: std::env::vars().collect(),
             metrics: crate::checkpoint::SessionMetrics::default(),
+            hypothesis_state: None, // Will be populated when hypothesis state is captured
         })
     }
 

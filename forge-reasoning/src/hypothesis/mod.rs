@@ -6,6 +6,7 @@
 
 pub mod confidence;
 pub mod types;
+pub mod evidence;
 pub mod storage;
 
 // Public exports
@@ -90,6 +91,18 @@ impl HypothesisBoard {
     /// Delete a hypothesis
     pub async fn delete(&self, id: HypothesisId) -> Result<bool> {
         self.storage.delete_hypothesis(id).await
+    }
+
+    /// Query hypothesis state at a past checkpoint time
+    ///
+    /// This enables time-travel queries: "What did I believe at checkpoint X?"
+    pub async fn state_at(
+        &self,
+        checkpoint_service: &crate::service::CheckpointService,
+        checkpoint_id: crate::checkpoint::CheckpointId,
+    ) -> Result<Option<crate::hypothesis::types::HypothesisState>> {
+        // Query checkpoint service for hypothesis state at given checkpoint
+        checkpoint_service.get_hypothesis_state(checkpoint_id).await
     }
 }
 

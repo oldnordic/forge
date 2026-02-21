@@ -162,6 +162,8 @@ pub struct DebugStateSnapshot {
     pub working_dir: Option<PathBuf>,
     pub env_vars: HashMap<String, String>,
     pub metrics: SessionMetrics,
+    /// Hypothesis state snapshot (optional for backward compatibility)
+    pub hypothesis_state: Option<crate::hypothesis::types::HypothesisState>,
 }
 
 /// What triggered this checkpoint
@@ -468,6 +470,7 @@ impl TemporalCheckpointManager {
             working_dir: std::env::current_dir().ok(),
             env_vars: std::env::vars().collect(),
             metrics: SessionMetrics::default(),
+            hypothesis_state: None, // Will be populated when hypothesis state is captured
         })
     }
 
