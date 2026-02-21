@@ -164,7 +164,7 @@ mod tests {
             description: "Test gap".to_string(),
             hypothesis_id: Some(HypothesisId::new()),
             criticality,
-            gap_type: crate::analyzer::GapType::MissingInformation,
+            gap_type: crate::gaps::analyzer::GapType::MissingInformation,
             created_at,
             filled_at: None,
             resolution_notes: None,

@@ -164,7 +164,7 @@ pub fn generate_all_suggestions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::analyzer::{GapCriticality, KnowledgeGap};
+    use crate::gaps::analyzer::{GapCriticality, KnowledgeGap};
     use chrono::Utc;
 
     fn make_test_gap(
