@@ -4,6 +4,7 @@
 //! - Temporal Checkpointing: Save/restore debugging state
 
 // Module declarations
+pub mod belief;
 pub mod checkpoint;
 pub mod errors;
 pub mod export_import;
@@ -28,6 +29,8 @@ pub use hypothesis::{
     Hypothesis, HypothesisBoard, HypothesisId, HypothesisStatus,
     HypothesisStorage, InMemoryHypothesisStorage,
 };
+
+pub use belief::{BeliefGraph, ReasoningSystem};
 
 pub use export_import::{CheckpointExporter, CheckpointImporter};
 
