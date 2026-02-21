@@ -9,6 +9,7 @@ pub mod checkpoint;
 pub mod errors;
 pub mod export_import;
 pub mod hypothesis;
+pub mod impact;
 pub mod service;
 pub mod storage;
 pub mod storage_sqlitegraph;
@@ -33,6 +34,11 @@ pub use hypothesis::{
 };
 
 pub use belief::{BeliefGraph, ReasoningSystem};
+
+pub use impact::{
+    ConfidenceChange, CascadeError, PropagationConfig, PropagationResult,
+    CascadePreview, PreviewId,
+};
 
 pub use export_import::{CheckpointExporter, CheckpointImporter};
 
