@@ -28,6 +28,8 @@ pub use hypothesis::{
     Confidence, ConfidenceError,
     Hypothesis, HypothesisBoard, HypothesisId, HypothesisStatus,
     HypothesisStorage, InMemoryHypothesisStorage,
+    Evidence, EvidenceId, EvidenceType, EvidenceMetadata,
+    strength_to_likelihood,
 };
 
 pub use belief::{BeliefGraph, ReasoningSystem};
