@@ -45,7 +45,7 @@ impl Watcher {
     ///
     /// * `store` - The graph store for event correlation
     /// * `sender` - Channel to send watch events
-    pub(crate) fn new(
+    pub fn new(
         store: Arc<UnifiedGraphStore>,
         sender: mpsc::UnboundedSender<WatchEvent>,
     ) -> Self {

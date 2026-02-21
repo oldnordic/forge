@@ -631,7 +631,7 @@ mod tests {
     #[tokio::test]
     async fn test_full_rescan() {
         let temp = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(temp.path()).await.unwrap());
+        let store = Arc::new(UnifiedGraphStore::open(temp.path(), BackendKind::default()).await.unwrap());
         let indexer = IncrementalIndexer::new(store);
 
         // Create a directory structure
