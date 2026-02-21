@@ -141,6 +141,42 @@ impl Default for ScoringConfig {
     }
 }
 
+/// Action suggestion for resolving a knowledge gap
+///
+/// Generated based on gap type, hypothesis context, and dependency relationships.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GapSuggestion {
+    /// ID of the gap this suggestion addresses
+    pub gap_id: GapId,
+    /// Suggested action to take
+    pub action: SuggestedAction,
+    /// Human-readable rationale for this suggestion
+    pub rationale: String,
+    /// Priority score (copied from gap)
+    pub priority: f64,
+}
+
+/// Suggested action for resolving a knowledge gap
+///
+/// Action types are context-aware based on gap type and linked hypothesis state.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum SuggestedAction {
+    /// Run a specific test to gather evidence
+    RunTest { test_name: String },
+    /// Investigate a specific area
+    Investigate { area: String, details: String },
+    /// Gather evidence for a hypothesis
+    GatherEvidence { hypothesis_id: HypothesisId },
+    /// Resolve a dependency between hypotheses
+    ResolveDependency { dependent_id: HypothesisId, dependee_id: HypothesisId },
+    /// Create a verification check for a hypothesis
+    CreateVerificationCheck { command: String, hypothesis_id: HypothesisId },
+    /// Research a specific topic
+    Research { topic: String },
+    /// Other action (flexible catch-all)
+    Other { description: String },
+}
+
 /// Knowledge gap analyzer with multi-factor priority scoring
 ///
 /// Main API for registering, tracking, and resolving knowledge gaps.
