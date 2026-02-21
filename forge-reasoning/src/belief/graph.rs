@@ -133,12 +133,12 @@ impl BeliefGraph {
     /// Get all hypotheses that transitively depend on this hypothesis (reverse chain)
     pub fn reverse_dependency_chain(&self, hypothesis_id: HypothesisId) -> Result<IndexSet<HypothesisId>> {
         // Use reversed graph for reverse reachability
-        let reversed = self.graph.clone();
+        let _reversed = self.graph.clone();
         // Note: We need to manually collect reverse dependencies
         let mut result = IndexSet::new();
         let mut visited = HashSet::new();
         self.collect_reverse_dependencies(hypothesis_id, &mut visited, &mut result);
-        result.remove(&hypothesis_id); // Exclude self
+        result.shift_remove(&hypothesis_id); // Exclude self
         Ok(result)
     }
 
@@ -226,6 +226,20 @@ impl BeliefGraph {
         } else {
             Ok(false)
         }
+    }
+
+    /// Returns all dependency edges as (dependent, dependee) pairs
+    ///
+    /// If A depends on B, returns (A, B)
+    pub fn all_edges(&self) -> Vec<(HypothesisId, HypothesisId)> {
+        self.graph.raw_edges()
+            .iter()
+            .map(|e| {
+                let dependent = self.graph[e.source()];
+                let dependee = self.graph[e.target()];
+                (dependent, dependee)
+            })
+            .collect()
     }
 
     fn get_or_create_node(&mut self, id: HypothesisId) -> NodeIndex {

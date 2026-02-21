@@ -163,6 +163,19 @@ impl HypothesisBoard {
         // Query checkpoint service for hypothesis state at given checkpoint
         checkpoint_service.get_hypothesis_state(checkpoint_id).await
     }
+
+    /// Directly sets confidence without evidence (used by propagation system)
+    ///
+    /// This method bypasses the normal evidence-based update path and is intended
+    /// for use by the confidence propagation system, which updates dependents
+    /// based on cascade computations.
+    pub async fn update_confidence_direct(
+        &self,
+        id: HypothesisId,
+        confidence: Confidence,
+    ) -> Result<()> {
+        self.storage.update_confidence(id, confidence).await
+    }
 }
 
 #[cfg(test)]
