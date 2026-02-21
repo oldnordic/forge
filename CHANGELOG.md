@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-02-21
+
+### Changed
+- **Updated sqlitegraph dependency to 2.0.8**
+  - Includes compiler warning fixes (31 warnings resolved)
+  - Remaining 61 warnings are intentional dead code for API completeness, feature-gated functionality, and future use
+  - All 522 tests pass with updated dependency
+
+## [0.2.1] - 2026-02-21
+
+### Fixed
+- **Code cleanup** - Removed unused code and fields across all crates
+- **forge_core** - Removed unused imports, fields, and inlined unused functions
+- **forge_runtime** - Removed unused imports
+- **forge_agent** - Removed unused fields from modules (observe, policy, planner, mutate, verify, commit)
+- **forge-reasoning** - Removed duplicate SCC module, unused fields and methods
+- All 522 tests pass
+
 ## [0.2.0] - 2026-02-21
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "forge-reasoning"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Forge Contributors"]
 description = "Reasoning tools for LLM debugging - checkpointing, hypotheses, contradictions"
