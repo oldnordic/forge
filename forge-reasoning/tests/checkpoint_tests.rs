@@ -277,6 +277,7 @@ fn test_restore_invalid_checkpoint() {
             working_dir: None,
             env_vars: HashMap::new(),
             metrics: SessionMetrics::default(),
+            hypothesis_state: None,
         },
         trigger: CheckpointTrigger::Manual,
         session_id: SessionId::new(),
