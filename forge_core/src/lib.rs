@@ -138,6 +138,7 @@ impl Forge {
             self.graph(),
             self.cfg(),
             self.edit(),
+            self.search(),
         )
     }
 }
