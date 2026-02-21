@@ -22,7 +22,7 @@
 //!     ..Default::default()
 //! };
 //!
-//! let runtime = ForgeRuntime::new("./my-project").await?;
+//! let mut runtime = ForgeRuntime::new("./my-project").await?;
 //!
 //! // Start file watching with automatic re-indexing
 //! runtime.watch().await?;

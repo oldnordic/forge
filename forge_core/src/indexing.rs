@@ -3,7 +3,7 @@
 //! This module provides change-based incremental indexing to avoid full
 //! re-scans when files are modified.
 
-use crate::storage::UnifiedGraphStore;
+use crate::storage::{UnifiedGraphStore, BackendKind};
 use crate::watcher::WatchEvent;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -472,7 +472,7 @@ pub struct FlushStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::UnifiedGraphStore;
+    use crate::storage::{UnifiedGraphStore, BackendKind};
 
     #[tokio::test]
     async fn test_indexer_creation() {
