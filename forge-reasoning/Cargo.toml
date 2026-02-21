@@ -30,6 +30,9 @@ petgraph = "0.6"
 # Deterministic ordered collections
 indexmap = "2"
 
+# Random number generation for retry jitter
+rand = "0.8"
+
 # WebSocket support (optional)
 tokio-tungstenite = { version = "0.21", optional = true }
 futures-util = { version = "0.3", optional = true }

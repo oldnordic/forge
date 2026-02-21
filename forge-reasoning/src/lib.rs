@@ -2,18 +2,22 @@
 //!
 //! Provides cognitive scaffolding for LLM debugging:
 //! - Temporal Checkpointing: Save/restore debugging state
+//! - Knowledge Gap Analysis: Track and prioritize missing information
+//! - Verification Execution: Async check execution with retry and evidence attachment
 
 // Module declarations
 pub mod belief;
 pub mod checkpoint;
 pub mod errors;
 pub mod export_import;
+pub mod gaps;
 pub mod hypothesis;
 pub mod impact;
 pub mod service;
 pub mod storage;
 pub mod storage_sqlitegraph;
 pub mod thread_safe;
+pub mod verification;
 
 #[cfg(feature = "websocket")]
 pub mod websocket;
@@ -35,6 +39,11 @@ pub use hypothesis::{
 
 pub use belief::{BeliefGraph, ReasoningSystem};
 
+pub use gaps::{
+    KnowledgeGapAnalyzer, KnowledgeGap, GapId, GapCriticality, GapType,
+    GapSuggestion, SuggestedAction, ScoringConfig, compute_gap_score,
+};
+
 pub use impact::{
     // Impact analysis engine
     ImpactAnalysisEngine,
@@ -55,6 +64,11 @@ pub use storage::{create_storage, BackendKind, CheckpointStorage, StorageConfig}
 pub use storage_sqlitegraph::SqliteGraphStorage;
 
 pub use thread_safe::{ThreadSafeCheckpointManager, ThreadSafeStorage};
+
+pub use verification::{
+    VerificationRunner, VerificationCheck, CheckId, CheckResult, CheckStatus,
+    VerificationCommand, PassAction, FailAction, RetryConfig,
+};
 
 pub use service::{
     AnnotationSeverity, AutoCheckpointConfig, CheckpointAnnotation, CheckpointCommand,

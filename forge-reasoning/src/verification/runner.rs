@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use uuid::Uuid;
 
 use crate::hypothesis::{HypothesisBoard, HypothesisStatus};
 use crate::hypothesis::types::HypothesisId;
@@ -79,10 +78,9 @@ impl VerificationRunner {
     }
 
     /// Get status of a check
-    pub fn get_status(&self, check_id: CheckId) -> Option<CheckStatus> {
-        // Note: This is a synchronous method that returns cached status
-        // For real-time status, we'd need async or channel-based updates
-        None // TODO: Implement in Task 3
+    pub async fn get_status(&self, check_id: CheckId) -> Option<CheckStatus> {
+        let checks = self.checks.lock().await;
+        checks.get(&check_id).map(|c| c.status.clone())
     }
 
     /// List all checks
@@ -91,33 +89,11 @@ impl VerificationRunner {
         checks.iter().map(|(id, check)| (*id, check.status.clone())).collect()
     }
 
-    /// Execute a single check
-    async fn execute_check(&self, mut check: VerificationCheck) -> CheckResult {
-        check.status = CheckStatus::Running;
-
-        let start = std::time::Instant::now();
-
-        let result = match &check.command {
-            VerificationCommand::ShellCommand(cmd) => {
-                self.execute_shell_command(cmd, check.timeout).await
-            }
-            VerificationCommand::CustomAssertion { .. } => {
-                // TODO: Implement custom assertions
-                CheckResult::Panic {
-                    message: "Custom assertions not yet implemented".to_string(),
-                }
-            }
-        };
-
-        let duration = start.elapsed();
-        self.update_check_status(check.id, &result).await;
-
-        result
-    }
-
     /// Execute a shell command with timeout
     async fn execute_shell_command(&self, command: &str, timeout: Duration) -> CheckResult {
         use tokio::process::Command;
+
+        let start = std::time::Instant::now();
 
         let result = tokio::time::timeout(
             timeout,
@@ -127,6 +103,8 @@ impl VerificationRunner {
                 .output()
         ).await;
 
+        let duration = start.elapsed();
+
         match result {
             Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -135,7 +113,7 @@ impl VerificationRunner {
                 if output.status.success() {
                     CheckResult::Passed {
                         output: stdout,
-                        duration: std::time::Duration::from_secs(0), // Placeholder
+                        duration,
                     }
                 } else {
                     CheckResult::Failed {
@@ -155,46 +133,6 @@ impl VerificationRunner {
                 }
             }
         }
-    }
-
-    /// Update check status based on result
-    async fn update_check_status(&self, check_id: CheckId, result: &CheckResult) {
-        let mut checks = self.checks.lock().await;
-        if let Some(check) = checks.get_mut(&check_id) {
-            check.status = match result {
-                CheckResult::Passed { .. } => CheckStatus::Completed,
-                _ => CheckStatus::Failed,
-            };
-        }
-    }
-
-    /// Execute a single check with retry logic
-    async fn execute_with_retry_wrapper(&self, check: VerificationCheck) -> CheckResult {
-        let check_clone = check.clone();
-        let board = self.board.clone();
-
-        execute_with_retry(
-            || {
-                let check = check_clone.clone();
-                async move {
-                    // Execute the check
-                    let result = self.execute_check(check).await;
-
-                    // Check if result is retryable
-                    match &result {
-                        CheckResult::Timeout { .. } | CheckResult::Panic { .. } => {
-                            // These are retryable
-                            Err(result)
-                        }
-                        _ => {
-                            // Success or non-retryable error
-                            Ok(result)
-                        }
-                    }
-                }
-            },
-            self.retry_config.clone(),
-        ).await.unwrap_or_else(|err| err)
     }
 
     /// Record check result as evidence
@@ -275,37 +213,107 @@ impl VerificationRunner {
         let mut join_set = JoinSet::new();
 
         for check_id in check_ids {
-            let check = {
-                let checks = self.checks.lock().await;
-                checks.get(&check_id).cloned()
-            };
+            let semaphore = semaphore.clone();
+            let checks = self.checks.clone();
+            let board = self.board.clone();
 
-            if let Some(check) = check {
-                let semaphore = semaphore.clone();
-                let checks = self.checks.clone();
-                let board = self.board.clone();
+            join_set.spawn(async move {
+                let _permit = semaphore.acquire().await.unwrap();
 
-                join_set.spawn(async move {
-                    let _permit = semaphore.acquire().await.unwrap();
-                    let result = self.execute_with_retry_wrapper(check.clone()).await;
-                    let _ = self.record_result(&check, &result).await;
+                // Get check
+                let check = {
+                    let checks_lock = checks.lock().await;
+                    checks_lock.get(&check_id).cloned()
+                };
 
-                    // Execute actions
-                    if result.is_success() {
-                        let _ = self.execute_pass_action(&check).await;
-                    } else {
-                        let _ = self.execute_fail_action(&check).await;
+                let (check, result) = match check {
+                    Some(c) => {
+                        // Execute shell command
+                        let cmd = match &c.command {
+                            VerificationCommand::ShellCommand(cmd) => cmd.clone(),
+                            VerificationCommand::CustomAssertion { .. } => {
+                                return (check_id, CheckResult::Panic {
+                                    message: "Custom assertions not yet implemented".to_string()
+                                });
+                            }
+                        };
+
+                        let start = std::time::Instant::now();
+                        let cmd_result = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&cmd)
+                            .output()
+                            .await;
+
+                        let duration = start.elapsed();
+
+                        let result = match cmd_result {
+                            Ok(output) => {
+                                if output.status.success() {
+                                    CheckResult::Passed {
+                                        output: String::from_utf8_lossy(&output.stdout).to_string(),
+                                        duration,
+                                    }
+                                } else {
+                                    CheckResult::Failed {
+                                        output: String::from_utf8_lossy(&output.stdout).to_string(),
+                                        error: String::from_utf8_lossy(&output.stderr).to_string(),
+                                    }
+                                }
+                            }
+                            Err(e) => CheckResult::Panic {
+                                message: format!("Failed to execute: {}", e),
+                            }
+                        };
+
+                        // Record evidence
+                        let (strength, passed) = match &result {
+                            CheckResult::Passed { .. } => (1.0, true),
+                            _ => (-1.0, false),
+                        };
+
+                        let metadata = EvidenceMetadata::Experiment {
+                            name: c.name.clone(),
+                            test_command: cmd,
+                            output: result.output().unwrap_or("").to_string(),
+                            passed,
+                        };
+
+                        let _ = board.attach_evidence(
+                            c.hypothesis_id,
+                            EvidenceType::Experiment,
+                            strength,
+                            metadata,
+                        ).await;
+
+                        // Execute actions
+                        if result.is_success() {
+                            if let Some(PassAction::SetStatus(status)) = &c.on_pass {
+                                let _ = board.set_status(c.hypothesis_id, status.clone()).await;
+                            }
+                        } else {
+                            if let Some(FailAction::SetStatus(status)) = &c.on_fail {
+                                let _ = board.set_status(c.hypothesis_id, status.clone()).await;
+                            }
+                        }
+
+                        (check_id, result)
                     }
+                    None => {
+                        return (check_id, CheckResult::Panic {
+                            message: "Check not found".to_string()
+                        });
+                    }
+                };
 
-                    (check.id, result)
-                });
-            }
+                (check_id, result)
+            });
         }
 
         let mut results = Vec::new();
         while let Some(result) = join_set.join_next().await {
-            if let Ok((check_id, check_result)) = result {
-                results.push((check_id, check_result));
+            if let Ok(r) = result {
+                results.push(r);
             }
         }
 
@@ -328,10 +336,10 @@ mod tests {
     #[tokio::test]
     async fn test_register_check() {
         let board = Arc::new(HypothesisBoard::in_memory());
-        let runner = VerificationRunner::new(board, 10);
+        let runner = VerificationRunner::new(board.clone(), 10);
 
         let prior = Confidence::new(0.5).unwrap();
-        let h_id = runner.board.propose("Test hypothesis", prior).await.unwrap();
+        let h_id = board.propose("Test hypothesis", prior).await.unwrap();
 
         let check_id = runner.register_check(
             "test check".to_string(),
@@ -343,6 +351,10 @@ mod tests {
         ).await;
 
         assert!(check_id.is_ok());
+
+        // List checks should include our check
+        let checks = runner.list_checks().await;
+        assert_eq!(checks.len(), 1);
     }
 
     #[tokio::test]
@@ -351,7 +363,7 @@ mod tests {
         let runner = VerificationRunner::new(board, 10);
 
         let result = runner.execute_shell_command("echo hello", Duration::from_secs(1)).await;
-        assert!(result.is_passed());
+        assert!(result.is_success());
     }
 
     #[tokio::test]
@@ -360,7 +372,8 @@ mod tests {
         let runner = VerificationRunner::new(board, 10);
 
         let result = runner.execute_shell_command("exit 1", Duration::from_secs(1)).await;
-        assert!(!result.is_passed());
+        assert!(!result.is_success());
+        assert!(matches!(result, CheckResult::Failed { .. }));
     }
 
     #[tokio::test]
@@ -401,15 +414,103 @@ mod tests {
         let evidence_list = board.list_evidence(h_id).await.unwrap();
         assert_eq!(evidence_list.len(), 1);
     }
-}
 
-// Helper trait for CheckResult
-trait CheckResultHelper {
-    fn is_passed(&self) -> bool;
-}
+    #[tokio::test]
+    async fn test_on_pass_action_sets_status() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let runner = VerificationRunner::new(board.clone(), 10);
 
-impl CheckResultHelper for CheckResult {
-    fn is_passed(&self) -> bool {
-        matches!(self, CheckResult::Passed { .. })
+        let prior = Confidence::new(0.5).unwrap();
+        let h_id = board.propose("Test", prior).await.unwrap();
+
+        let check = VerificationCheck::new(
+            "test".to_string(),
+            h_id,
+            Duration::from_secs(1),
+            VerificationCommand::ShellCommand("echo test".to_string()),
+            Some(PassAction::SetStatus(HypothesisStatus::Confirmed)),
+            None,
+        );
+
+        let result = CheckResult::Passed {
+            output: "test".to_string(),
+            duration: Duration::from_millis(100),
+        };
+
+        runner.execute_pass_action(&check).await.unwrap();
+
+        let hypothesis = board.get(h_id).await.unwrap().unwrap();
+        assert_eq!(hypothesis.status(), HypothesisStatus::Confirmed);
+    }
+
+    #[tokio::test]
+    async fn test_on_fail_action_sets_status() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let runner = VerificationRunner::new(board.clone(), 10);
+
+        let prior = Confidence::new(0.5).unwrap();
+        let h_id = board.propose("Test", prior).await.unwrap();
+
+        let check = VerificationCheck::new(
+            "test".to_string(),
+            h_id,
+            Duration::from_secs(1),
+            VerificationCommand::ShellCommand("echo test".to_string()),
+            None,
+            Some(FailAction::SetStatus(HypothesisStatus::Rejected)),
+        );
+
+        let result = CheckResult::Failed {
+            output: "test".to_string(),
+            error: "error".to_string(),
+        };
+
+        runner.execute_fail_action(&check).await.unwrap();
+
+        let hypothesis = board.get(h_id).await.unwrap().unwrap();
+        assert_eq!(hypothesis.status(), HypothesisStatus::Rejected);
+    }
+
+    #[tokio::test]
+    async fn test_parallel_execution_respects_semaphore() {
+        let board = Arc::new(HypothesisBoard::in_memory());
+        let runner = VerificationRunner::new(board.clone(), 2); // max 2 concurrent
+
+        let prior = Confidence::new(0.5).unwrap();
+        let h1 = board.propose("H1", prior).await.unwrap();
+        let h2 = board.propose("H2", prior).await.unwrap();
+        let h3 = board.propose("H3", prior).await.unwrap();
+
+        // Register 3 checks
+        let c1 = runner.register_check(
+            "check1".to_string(),
+            h1,
+            VerificationCommand::ShellCommand("sleep 0.1".to_string()),
+            Duration::from_secs(1),
+            None,
+            None,
+        ).await.unwrap();
+
+        let c2 = runner.register_check(
+            "check2".to_string(),
+            h2,
+            VerificationCommand::ShellCommand("sleep 0.1".to_string()),
+            Duration::from_secs(1),
+            None,
+            None,
+        ).await.unwrap();
+
+        let c3 = runner.register_check(
+            "check3".to_string(),
+            h3,
+            VerificationCommand::ShellCommand("sleep 0.1".to_string()),
+            Duration::from_secs(1),
+            None,
+            None,
+        ).await.unwrap();
+
+        // Execute all 3
+        let results = runner.execute_checks(vec![c1, c2, c3]).await;
+        assert_eq!(results.len(), 3);
     }
 }

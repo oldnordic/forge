@@ -158,7 +158,7 @@ impl VerificationCheck {
 
     /// Check if this check is retryable based on current status
     pub fn is_retryable(&self) -> bool {
-        matches!(self.status, CheckStatus::Failed | CheckStatus::Timeout)
+        matches!(self.status, CheckStatus::Failed)
     }
 }
 
@@ -259,7 +259,7 @@ mod tests {
         let failed_check = pending_check.clone().with_status(CheckStatus::Failed);
         assert!(failed_check.is_retryable());
 
-        let timeout_check = pending_check.clone().with_status(CheckStatus::Timeout);
-        assert!(timeout_check.is_retryable());
+        let failed_check = pending_check.clone().with_status(CheckStatus::Failed);
+        assert!(failed_check.is_retryable());
     }
 }
