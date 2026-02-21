@@ -36,8 +36,14 @@ pub use hypothesis::{
 pub use belief::{BeliefGraph, ReasoningSystem};
 
 pub use impact::{
-    ConfidenceChange, CascadeError, PropagationConfig, PropagationResult,
-    CascadePreview, PreviewId,
+    // Impact analysis engine
+    ImpactAnalysisEngine,
+    // Propagation types
+    ConfidenceChange, PropagationConfig, PropagationResult,
+    // Preview types
+    CascadePreview, PreviewId, PreviewPage, PaginationState, CycleWarning,
+    // Snapshot types
+    SnapshotId, BeliefSnapshot, SnapshotStore,
 };
 
 pub use export_import::{CheckpointExporter, CheckpointImporter};
