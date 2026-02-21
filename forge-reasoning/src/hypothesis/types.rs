@@ -4,6 +4,7 @@
 //! - HypothesisId: Unique identifier (UUID v4)
 //! - HypothesisStatus: Lifecycle state machine
 //! - Hypothesis: Main data structure with confidence tracking
+//! - HypothesisState: Checkpoint snapshot of all hypotheses
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -139,6 +140,34 @@ impl Hypothesis {
     /// Get current confidence (posterior, or prior if no updates yet)
     pub fn current_confidence(&self) -> Confidence {
         self.posterior
+    }
+}
+
+/// Snapshot of all hypotheses and their state at a point in time
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HypothesisState {
+    /// All hypotheses and their current state
+    pub hypotheses: Vec<Hypothesis>,
+    /// Dependency edges between hypotheses (from_id, to_id)
+    pub dependencies: Vec<(HypothesisId, HypothesisId)>,
+    /// Snapshot timestamp
+    pub captured_at: DateTime<Utc>,
+    /// Global sequence for checkpoint ordering
+    pub sequence: u64,
+}
+
+impl HypothesisState {
+    pub fn new(
+        hypotheses: Vec<Hypothesis>,
+        dependencies: Vec<(HypothesisId, HypothesisId)>,
+        sequence: u64,
+    ) -> Self {
+        Self {
+            hypotheses,
+            dependencies,
+            captured_at: Utc::now(),
+            sequence,
+        }
     }
 }
 

@@ -6,12 +6,11 @@
 
 pub mod confidence;
 pub mod types;
-pub mod evidence;
 pub mod storage;
 
 // Public exports
 pub use confidence::{Confidence, ConfidenceError};
-pub use types::{Hypothesis, HypothesisId, HypothesisStatus};
+pub use types::{Hypothesis, HypothesisId, HypothesisStatus, HypothesisState};
 pub use storage::{HypothesisStorage, InMemoryHypothesisStorage};
 
 use std::sync::Arc;
