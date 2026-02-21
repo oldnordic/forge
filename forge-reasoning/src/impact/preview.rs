@@ -107,8 +107,12 @@ pub async fn create_preview(
     config: &PropagationConfig,
     page_size: usize,
 ) -> Result<CascadePreview> {
+    use crate::errors::ReasoningError;
+
     // Compute cascade using propagation module
-    let result = super::propagation::compute_cascade(start, new_confidence, board, graph, config).await?;
+    let result = super::propagation::compute_cascade(start, new_confidence, board, graph, config)
+        .await
+        .map_err(|e| ReasoningError::InvalidState(e.to_string()))?;
 
     // Create pagination state
     let pagination = PaginationState::new(result.changes.len(), page_size);

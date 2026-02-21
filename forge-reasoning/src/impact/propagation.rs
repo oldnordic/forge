@@ -36,7 +36,7 @@ pub struct PropagationResult {
 }
 
 /// Represents a change in confidence for a single hypothesis
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ConfidenceChange {
     pub hypothesis_id: HypothesisId,
     pub hypothesis_name: String,
