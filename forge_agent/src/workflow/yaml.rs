@@ -12,6 +12,7 @@ use crate::workflow::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::Path;
 use thiserror::Error;
 
 /// Workflow definition from YAML.
@@ -196,6 +197,63 @@ impl TryFrom<YamlWorkflow> for Workflow {
 
         Ok(workflow)
     }
+}
+
+/// Loads a workflow from a YAML file.
+///
+/// # Arguments
+///
+/// * `path` - Path to the YAML file
+///
+/// # Returns
+///
+/// - `Ok(Workflow)` - If workflow loaded and converted successfully
+/// - `Err(YamlWorkflowError)` - If file cannot be read or YAML is invalid
+///
+/// # Example
+///
+/// ```ignore
+/// use forge_agent::workflow::yaml::load_workflow_from_file;
+///
+/// let workflow = load_workflow_from_file(Path::new("workflow.yaml")).await?;
+/// ```
+pub async fn load_workflow_from_file(path: &Path) -> Result<Workflow, YamlWorkflowError> {
+    let content = tokio::fs::read_to_string(path).await?;
+    Ok(load_workflow_from_string(&content)?)
+}
+
+/// Loads a workflow from a YAML string.
+///
+/// # Arguments
+///
+/// * `yaml` - YAML string containing workflow definition
+///
+/// # Returns
+///
+/// - `Ok(Workflow)` - If workflow parsed and converted successfully
+/// - `Err(YamlWorkflowError)` - If YAML is invalid
+///
+/// # Example
+///
+/// ```ignore
+/// use forge_agent::workflow::yaml::load_workflow_from_string;
+///
+/// let yaml = r#"
+/// name: "My Workflow"
+/// tasks:
+///   - id: "task1"
+///     name: "Task 1"
+///     type: GRAPH_QUERY
+///     params:
+///       query_type: "find_symbol"
+///       target: "my_function"
+/// "#;
+///
+/// let workflow = load_workflow_from_string(yaml)?;
+/// ```
+pub fn load_workflow_from_string(yaml: &str) -> Result<Workflow, YamlWorkflowError> {
+    let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml)?;
+    yaml_workflow.try_into()
 }
 
 #[cfg(test)]
@@ -448,6 +506,46 @@ tasks:
 
         assert!(workflow.is_ok());
         let workflow = workflow.unwrap();
+        assert_eq!(workflow.task_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_load_from_string() {
+        let yaml = r#"
+name: "Test Workflow"
+tasks:
+  - id: "task1"
+    name: "Task 1"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "test_function"
+"#;
+
+        let workflow = load_workflow_from_string(yaml).unwrap();
+        assert_eq!(workflow.task_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_load_from_file() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let yaml = r#"
+name: "File Workflow"
+tasks:
+  - id: "task1"
+    name: "Task 1"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "my_function"
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "{}", yaml).unwrap();
+
+        let workflow = load_workflow_from_file(temp_file.path()).await.unwrap();
         assert_eq!(workflow.task_count(), 1);
     }
 }
