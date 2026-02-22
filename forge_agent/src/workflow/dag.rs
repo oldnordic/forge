@@ -221,6 +221,111 @@ impl Workflow {
         Ok(order)
     }
 
+    /// Returns tasks grouped into parallel execution layers.
+    ///
+    /// Tasks in the same layer have no dependencies between them and can execute
+    /// concurrently. Tasks in layer N only depend on tasks in layers < N.
+    ///
+    /// This uses the longest path distance from any root (task with in-degree = 0)
+    /// to determine the layer. All tasks at distance 0 are independent roots,
+    /// tasks at distance 1 depend only on roots, etc.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Vec<Vec<TaskId>>)` - Tasks grouped into layers, where each inner vec
+    ///   contains tasks that can execute in parallel
+    /// - `Err(WorkflowError::CycleDetected)` - If graph contains a cycle
+    /// - `Err(WorkflowError::EmptyWorkflow)` - If workflow has no tasks
+    ///
+    /// # Example
+    ///
+    /// For a diamond DAG (a -> b, a -> c, b -> d, c -> d), returns:
+    /// ```ignore
+    /// vec![
+    ///     vec!["a"],      // Layer 0: root task
+    ///     vec!["b", "c"], // Layer 1: independent tasks
+    ///     vec!["d"],      // Layer 2: depends on b and c
+    /// ]
+    /// ```
+    pub fn execution_layers(&self) -> Result<Vec<Vec<TaskId>>, WorkflowError> {
+        if self.graph.node_count() == 0 {
+            return Err(WorkflowError::EmptyWorkflow);
+        }
+
+        // Verify no cycles using topological sort
+        let _sorted_indices = petgraph_toposort(&self.graph, None)
+            .map_err(|_| WorkflowError::CycleDetected(self.detect_cycle_nodes()))?;
+
+        // Find all root nodes (in-degree = 0)
+        let roots: Vec<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&idx| {
+                self.graph
+                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .count()
+                    == 0
+            })
+            .collect();
+
+        if roots.is_empty() && self.graph.node_count() > 0 {
+            // Cycle detected (all nodes have incoming edges)
+            return Err(WorkflowError::CycleDetected(self.detect_cycle_nodes()));
+        }
+
+        // Compute longest distance from each node to any root
+        // Use BFS to compute the maximum distance
+        let mut distances: HashMap<NodeIndex, usize> = HashMap::new();
+
+        // Initialize roots at distance 0
+        for &root in &roots {
+            distances.insert(root, 0);
+        }
+
+        // Process nodes in topological order to compute distances
+        let sorted_indices = petgraph_toposort(&self.graph, None).unwrap();
+        for idx in sorted_indices {
+            let max_incoming = self
+                .graph
+                .neighbors_directed(idx, petgraph::Direction::Incoming)
+                .filter_map(|neighbor| distances.get(&neighbor).copied())
+                .max()
+                .unwrap_or(0);
+
+            let current_distance = distances.get(&idx).copied().unwrap_or(0);
+            distances.insert(idx, std::cmp::max(current_distance, max_incoming + 1));
+
+            // Propagate distance to outgoing neighbors
+            for neighbor in self.graph.neighbors_directed(idx, petgraph::Direction::Outgoing) {
+                let neighbor_dist = distances.get(&neighbor).copied().unwrap_or(0);
+                if distances[&idx] + 1 > neighbor_dist {
+                    distances.insert(neighbor, distances[&idx] + 1);
+                }
+            }
+        }
+
+        // Group tasks by their distance level (minus 1 to put roots at layer 0)
+        let mut layer_map: HashMap<usize, Vec<TaskId>> = HashMap::new();
+        for (idx, distance) in &distances {
+            if let Some(node) = self.graph.node_weight(*idx) {
+                let layer = if *distance == 0 { 0 } else { distance - 1 };
+                layer_map
+                    .entry(layer)
+                    .or_insert_with(Vec::new)
+                    .push(node.id.clone());
+            }
+        }
+
+        // Collect layers into a vector and sort by layer number
+        let mut layers: Vec<(usize, Vec<TaskId>)> = layer_map.into_iter().collect();
+        layers.sort_by_key(|(layer, _)| *layer);
+
+        // Extract just the task vectors
+        let result: Vec<Vec<TaskId>> = layers.into_iter().map(|(_, tasks)| tasks).collect();
+
+        Ok(result)
+    }
+
     /// Returns tasks that are ready to execute (in-degree = 0).
     ///
     /// Tasks with no incoming edges have no unsatisfied dependencies
@@ -707,5 +812,182 @@ mod tests {
         assert!(preview[1].contains("'c' should depend on task 'b'"));
         assert!(preview[1].contains("test_struct"));
         assert!(preview[1].contains("reference"));
+    }
+
+    // ============== execution_layers() tests ==============
+
+    #[test]
+    fn test_execution_layers_empty_workflow() {
+        let workflow = Workflow::new();
+        let result = workflow.execution_layers();
+        assert!(matches!(result, Err(WorkflowError::EmptyWorkflow)));
+    }
+
+    #[test]
+    fn test_execution_layers_single_task() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].len(), 1);
+        assert_eq!(layers[0][0], TaskId::new("a"));
+    }
+
+    #[test]
+    fn test_execution_layers_two_independent_tasks() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].len(), 2);
+        assert!(layers[0].contains(&TaskId::new("a")));
+        assert!(layers[0].contains(&TaskId::new("b")));
+    }
+
+    #[test]
+    fn test_execution_layers_linear_chain() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 3);
+        assert_eq!(layers[0], vec![TaskId::new("a")]);
+        assert_eq!(layers[1], vec![TaskId::new("b")]);
+        assert_eq!(layers[2], vec![TaskId::new("c")]);
+    }
+
+    #[test]
+    fn test_execution_layers_diamond_pattern() {
+        let mut workflow = Workflow::new();
+
+        // Create a diamond DAG: a -> [b, c] -> d
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+        workflow.add_task(Box::new(MockTask::new("d", "Task D")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("a", "c").unwrap();
+        workflow.add_dependency("b", "d").unwrap();
+        workflow.add_dependency("c", "d").unwrap();
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 3);
+
+        // Layer 0: only 'a' (root)
+        assert_eq!(layers[0], vec![TaskId::new("a")]);
+
+        // Layer 1: 'b' and 'c' (independent tasks that depend on 'a')
+        assert_eq!(layers[1].len(), 2);
+        assert!(layers[1].contains(&TaskId::new("b")));
+        assert!(layers[1].contains(&TaskId::new("c")));
+
+        // Layer 2: only 'd' (depends on both 'b' and 'c')
+        assert_eq!(layers[2], vec![TaskId::new("d")]);
+    }
+
+    #[test]
+    fn test_execution_layers_fan_out() {
+        let mut workflow = Workflow::new();
+
+        // Fan-out: a -> [b, c, d]
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+        workflow.add_task(Box::new(MockTask::new("d", "Task D")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("a", "c").unwrap();
+        workflow.add_dependency("a", "d").unwrap();
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0], vec![TaskId::new("a")]);
+        assert_eq!(layers[1].len(), 3);
+    }
+
+    #[test]
+    fn test_execution_layers_fan_in() {
+        let mut workflow = Workflow::new();
+
+        // Fan-in: [a, b, c] -> d
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+        workflow.add_task(Box::new(MockTask::new("d", "Task D")));
+
+        workflow.add_dependency("a", "d").unwrap();
+        workflow.add_dependency("b", "d").unwrap();
+        workflow.add_dependency("c", "d").unwrap();
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].len(), 3); // a, b, c are independent
+        assert_eq!(layers[1], vec![TaskId::new("d")]);
+    }
+
+    #[test]
+    fn test_execution_layers_complex_dag() {
+        let mut workflow = Workflow::new();
+
+        // Complex DAG with multiple layers:
+        //     a
+        //    / \
+        //   b   c
+        //   |   |
+        //   d   e
+        //    \ /
+        //     f
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+        workflow.add_task(Box::new(MockTask::new("d", "Task D")));
+        workflow.add_task(Box::new(MockTask::new("e", "Task E")));
+        workflow.add_task(Box::new(MockTask::new("f", "Task F")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("a", "c").unwrap();
+        workflow.add_dependency("b", "d").unwrap();
+        workflow.add_dependency("c", "e").unwrap();
+        workflow.add_dependency("d", "f").unwrap();
+        workflow.add_dependency("e", "f").unwrap();
+
+        let layers = workflow.execution_layers().unwrap();
+        assert_eq!(layers.len(), 4);
+        assert_eq!(layers[0], vec![TaskId::new("a")]);
+        assert_eq!(layers[1].len(), 2); // b and c
+        assert_eq!(layers[2].len(), 2); // d and e
+        assert_eq!(layers[3], vec![TaskId::new("f")]);
+    }
+
+    #[test]
+    fn test_execution_layers_with_cycle() {
+        let mut workflow = Workflow::new();
+
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+
+        // Create a cycle: a -> b -> c -> a
+        // Note: add_dependency removes the edge if it creates a cycle,
+        // so we need to directly manipulate the graph for this test
+        let a_idx = workflow.task_map.get(&TaskId::new("a")).copied().unwrap();
+        let b_idx = workflow.task_map.get(&TaskId::new("b")).copied().unwrap();
+        let c_idx = workflow.task_map.get(&TaskId::new("c")).copied().unwrap();
+
+        workflow.graph.add_edge(a_idx, b_idx, ());
+        workflow.graph.add_edge(b_idx, c_idx, ());
+        workflow.graph.add_edge(c_idx, a_idx, ()); // Creates a cycle
+
+        let result = workflow.execution_layers();
+        assert!(matches!(result, Err(WorkflowError::CycleDetected(_))));
     }
 }
