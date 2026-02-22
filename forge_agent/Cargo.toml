@@ -27,6 +27,7 @@ full-v3 = ["agent-v3", "native-v3"]
 
 [dependencies]
 forgekit-core = { version = "0.2.2", path = "../forge_core", default-features = false }
+forgekit-runtime = { path = "../forge_runtime" }
 sqlitegraph = { version = "2.0.8", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
