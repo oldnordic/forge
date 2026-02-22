@@ -26,6 +26,8 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::IntoNeighborsDirected;
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -92,6 +94,296 @@ impl ExecutableCompensation {
 impl From<ExecutableCompensation> for CompensationAction {
     fn from(exec: ExecutableCompensation) -> Self {
         exec.action
+    }
+}
+
+/// Compensation action for external tool side effects.
+///
+/// ToolCompensation wraps an undo function that compensates for external
+/// tool actions (file edits, process spawns, etc.) that cannot be rolled
+/// back through normal workflow operations.
+#[derive(Clone)]
+pub struct ToolCompensation {
+    /// Human-readable description of the compensation
+    pub description: String,
+    /// Optional undo function (executed during rollback)
+    #[allow(clippy::type_complexity)]
+    compensate: Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>,
+}
+
+impl ToolCompensation {
+    /// Creates a new ToolCompensation with the given description and undo function.
+    pub fn new<F>(description: impl Into<String>, compensate_fn: F) -> Self
+    where
+        F: Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync + 'static,
+    {
+        Self {
+            description: description.into(),
+            compensate: Arc::new(compensate_fn),
+        }
+    }
+
+    /// Executes the compensation action.
+    pub fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+        (self.compensate)(context)
+    }
+
+    /// Creates a file deletion compensation for undoing file creation.
+    ///
+    /// # Arguments
+    ///
+    /// * `file_path` - Path to the file that will be deleted during rollback
+    ///
+    /// # Returns
+    ///
+    /// A ToolCompensation that deletes the specified file
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let comp = ToolCompensation::file_compensation("/tmp/work_output.txt");
+    /// ```
+    pub fn file_compensation(file_path: impl Into<String>) -> Self {
+        let path = file_path.into();
+        Self::new(format!("Delete file: {}", path), move |_context| {
+            // Delete the file if it exists
+            if Path::new(&path).exists() {
+                fs::remove_file(&path).map_err(|e| {
+                    TaskError::ExecutionFailed(format!("Failed to delete file {}: {}", path, e))
+                })?;
+            }
+            Ok(TaskResult::Success)
+        })
+    }
+
+    /// Creates a process termination compensation for undoing process spawns.
+    ///
+    /// # Arguments
+    ///
+    /// * `pid` - Process ID to terminate
+    ///
+    /// # Returns
+    ///
+    /// A ToolCompensation that terminates the specified process
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let comp = ToolCompensation::process_compensation(12345);
+    /// ```
+    pub fn process_compensation(pid: u32) -> Self {
+        Self::new(format!("Terminate process: {}", pid), move |_context| {
+            // Try to kill the process gracefully
+            #[cfg(unix)]
+            {
+                use std::process::Command;
+                let result = Command::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .output();
+
+                match result {
+                    Ok(_) => Ok(TaskResult::Success),
+                    Err(e) => Ok(TaskResult::Failed(format!("Failed to terminate process {}: {}", pid, e))),
+                }
+            }
+
+            #[cfg(not(unix))]
+            {
+                Ok(TaskResult::Failed(format!("Process termination not supported on this platform")))
+            }
+        })
+    }
+
+    /// Creates a skip compensation (no undo needed).
+    ///
+    /// Used for tasks that don't have side effects or don't need compensation.
+    pub fn skip(description: impl Into<String>) -> Self {
+        Self::new(description, |_context| Ok(TaskResult::Skipped))
+    }
+
+    /// Creates a retry compensation (recommends retry instead of undo).
+    ///
+    /// Used for transient failures where retry is preferred over compensation.
+    pub fn retry(description: impl Into<String>) -> Self {
+        Self::new(description, |_context| Ok(TaskResult::Skipped))
+    }
+}
+
+impl From<CompensationAction> for ToolCompensation {
+    fn from(action: CompensationAction) -> Self {
+        match action.action_type {
+            CompensationType::Skip => ToolCompensation::skip(action.description),
+            CompensationType::Retry => ToolCompensation::retry(action.description),
+            CompensationType::UndoFunction => {
+                // Note: Can't create undo from serializable action
+                // This is a no-op compensation
+                ToolCompensation::skip(format!(
+                    "{} (no undo function available)",
+                    action.description
+                ))
+            }
+        }
+    }
+}
+
+/// Registry for tracking compensation actions for workflow tasks.
+///
+/// CompensationRegistry maintains a mapping from task IDs to their
+/// corresponding compensation actions. During rollback, the registry
+/// is consulted to find and execute compensations in reverse order.
+pub struct CompensationRegistry {
+    /// Mapping of task IDs to their compensation actions
+    compensations: HashMap<TaskId, ToolCompensation>,
+}
+
+impl CompensationRegistry {
+    /// Creates a new empty compensation registry.
+    pub fn new() -> Self {
+        Self {
+            compensations: HashMap::new(),
+        }
+    }
+
+    /// Registers a compensation action for a task.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to register compensation for
+    /// * `compensation` - The compensation action to register
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// registry.register(
+    ///     TaskId::new("task-1"),
+    ///     ToolCompensation::file_compensation("/tmp/output.txt")
+    /// );
+    /// ```
+    pub fn register(&mut self, task_id: TaskId, compensation: ToolCompensation) {
+        self.compensations.insert(task_id, compensation);
+    }
+
+    /// Gets the compensation action for a task.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to look up
+    ///
+    /// # Returns
+    ///
+    /// - `Some(&ToolCompensation)` if the task has a compensation
+    /// - `None` if the task has no compensation registered
+    pub fn get(&self, task_id: &TaskId) -> Option<&ToolCompensation> {
+        self.compensations.get(task_id)
+    }
+
+    /// Checks if a task has a compensation action registered.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to check
+    ///
+    /// # Returns
+    ///
+    /// - `true` if the task has compensation
+    /// - `false` if the task has no compensation
+    pub fn has_compensation(&self, task_id: &TaskId) -> bool {
+        self.compensations.contains_key(task_id)
+    }
+
+    /// Removes a compensation action from the registry.
+    ///
+    /// Typically called after successful rollback execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to remove compensation for
+    ///
+    /// # Returns
+    ///
+    /// - `Some(ToolCompensation)` if the task had compensation
+    /// - `None` if the task had no compensation
+    pub fn remove(&mut self, task_id: &TaskId) -> Option<ToolCompensation> {
+        self.compensations.remove(task_id)
+    }
+
+    /// Validates compensation coverage for a set of tasks.
+    ///
+    /// Reports which tasks have compensation actions defined and which don't.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_ids` - The task IDs to validate
+    ///
+    /// # Returns
+    ///
+    /// A CompensationReport showing coverage statistics
+    pub fn validate_coverage(&self, task_ids: &[TaskId]) -> CompensationReport {
+        let mut with_compensation = Vec::new();
+        let mut without_compensation = Vec::new();
+
+        for task_id in task_ids {
+            if self.has_compensation(task_id) {
+                with_compensation.push(task_id.clone());
+            } else {
+                without_compensation.push(task_id.clone());
+            }
+        }
+
+        let total = task_ids.len();
+        let coverage = CompensationReport::calculate(with_compensation.len(), total);
+
+        CompensationReport {
+            tasks_with_compensation: with_compensation,
+            tasks_without_compensation: without_compensation,
+            coverage_percentage: coverage,
+        }
+    }
+
+    /// Registers a file creation compensation for a task.
+    ///
+    /// Convenience method that automatically creates a file deletion compensation.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to register compensation for
+    /// * `file_path` - Path to the file that will be deleted during rollback
+    pub fn register_file_creation(&mut self, task_id: TaskId, file_path: impl Into<String>) {
+        self.register(task_id, ToolCompensation::file_compensation(file_path));
+    }
+
+    /// Registers a process spawn compensation for a task.
+    ///
+    /// Convenience method that automatically creates a process termination compensation.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to register compensation for
+    /// * `pid` - Process ID to terminate during rollback
+    pub fn register_process_spawn(&mut self, task_id: TaskId, pid: u32) {
+        self.register(task_id, ToolCompensation::process_compensation(pid));
+    }
+
+    /// Returns the number of registered compensations.
+    pub fn len(&self) -> usize {
+        self.compensations.len()
+    }
+
+    /// Returns true if the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.compensations.is_empty()
+    }
+
+    /// Returns all task IDs with registered compensations.
+    pub fn task_ids(&self) -> Vec<TaskId> {
+        self.compensations.keys().cloned().collect()
+    }
+}
+
+impl Default for CompensationRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -464,6 +756,207 @@ mod tests {
     use super::*;
     use crate::workflow::task::{TaskContext, TaskError, TaskResult, WorkflowTask};
     use async_trait::async_trait;
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_tool_compensation_creation() {
+        let comp = ToolCompensation::new("Test compensation", |_ctx| Ok(TaskResult::Success));
+        assert_eq!(comp.description, "Test compensation");
+    }
+
+    #[test]
+    fn test_tool_compensation_execute() {
+        let comp = ToolCompensation::new("Execute test", |_ctx| Ok(TaskResult::Success));
+        let context = TaskContext::new("test", TaskId::new("a"));
+        let result = comp.execute(&context).unwrap();
+        assert_eq!(result, TaskResult::Success);
+    }
+
+    #[test]
+    fn test_tool_compensation_execute_error() {
+        let comp = ToolCompensation::new("Execute test", |_ctx| {
+            Err(TaskError::ExecutionFailed("Test error".to_string()))
+        });
+        let context = TaskContext::new("test", TaskId::new("a"));
+        let result = comp.execute(&context);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tool_compensation_skip() {
+        let comp = ToolCompensation::skip("No action needed");
+        let context = TaskContext::new("test", TaskId::new("a"));
+        let result = comp.execute(&context).unwrap();
+        assert_eq!(result, TaskResult::Skipped);
+    }
+
+    #[test]
+    fn test_tool_compensation_retry() {
+        let comp = ToolCompensation::retry("Retry recommended");
+        let context = TaskContext::new("test", TaskId::new("a"));
+        let result = comp.execute(&context).unwrap();
+        assert_eq!(result, TaskResult::Skipped);
+    }
+
+    #[test]
+    fn test_tool_compensation_file() {
+        // Create a temporary file
+        let temp_file = "/tmp/test_tool_compensation.txt";
+        let mut file = File::create(temp_file).unwrap();
+        writeln!(file, "test content").unwrap();
+        drop(file);
+
+        // Verify file exists
+        assert!(Path::new(temp_file).exists());
+
+        // Create file compensation and execute it
+        let comp = ToolCompensation::file_compensation(temp_file);
+        let context = TaskContext::new("test", TaskId::new("a"));
+        let result = comp.execute(&context);
+
+        assert!(result.is_ok());
+        assert!(!Path::new(temp_file).exists()); // File should be deleted
+    }
+
+    #[test]
+    fn test_tool_compensation_from_compensation_action() {
+        let skip_action = CompensationAction::skip("Skip action");
+        let skip_comp: ToolCompensation = skip_action.into();
+        assert_eq!(skip_comp.description, "Skip action");
+
+        let retry_action = CompensationAction::retry("Retry action");
+        let retry_comp: ToolCompensation = retry_action.into();
+        assert_eq!(retry_comp.description, "Retry action");
+
+        let undo_action = CompensationAction::undo("Undo action");
+        let undo_comp: ToolCompensation = undo_action.into();
+        assert!(undo_comp.description.contains("no undo function available"));
+    }
+
+    #[test]
+    fn test_compensation_registry_new() {
+        let registry = CompensationRegistry::new();
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn test_compensation_registry_register() {
+        let mut registry = CompensationRegistry::new();
+        let task_id = TaskId::new("task-1");
+        let comp = ToolCompensation::skip("Test");
+
+        registry.register(task_id.clone(), comp);
+
+        assert_eq!(registry.len(), 1);
+        assert!(registry.has_compensation(&task_id));
+    }
+
+    #[test]
+    fn test_compensation_registry_get() {
+        let mut registry = CompensationRegistry::new();
+        let task_id = TaskId::new("task-1");
+        let comp = ToolCompensation::new("Test", |_ctx| Ok(TaskResult::Success));
+
+        registry.register(task_id.clone(), comp);
+
+        let retrieved = registry.get(&task_id);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().description, "Test");
+
+        // Non-existent task
+        let missing = registry.get(&TaskId::new("missing"));
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_compensation_registry_remove() {
+        let mut registry = CompensationRegistry::new();
+        let task_id = TaskId::new("task-1");
+        let comp = ToolCompensation::skip("Test");
+
+        registry.register(task_id.clone(), comp);
+        assert_eq!(registry.len(), 1);
+
+        let removed = registry.remove(&task_id);
+        assert!(removed.is_some());
+        assert_eq!(registry.len(), 0);
+        assert!(!registry.has_compensation(&task_id));
+
+        // Remove non-existent task
+        let removed_again = registry.remove(&task_id);
+        assert!(removed_again.is_none());
+    }
+
+    #[test]
+    fn test_compensation_registry_validate_coverage() {
+        let mut registry = CompensationRegistry::new();
+
+        let task1 = TaskId::new("task-1");
+        let task2 = TaskId::new("task-2");
+        let task3 = TaskId::new("task-3");
+
+        registry.register(task1.clone(), ToolCompensation::skip("Test 1"));
+        registry.register(task2.clone(), ToolCompensation::skip("Test 2"));
+
+        let report = registry.validate_coverage(&[task1.clone(), task2.clone(), task3.clone()]);
+
+        assert_eq!(report.tasks_with_compensation.len(), 2);
+        assert!(report.tasks_with_compensation.contains(&task1));
+        assert!(report.tasks_with_compensation.contains(&task2));
+
+        assert_eq!(report.tasks_without_compensation.len(), 1);
+        assert!(report.tasks_without_compensation.contains(&task3));
+
+        assert!((report.coverage_percentage - 0.666).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_compensation_registry_register_file_creation() {
+        let mut registry = CompensationRegistry::new();
+        let task_id = TaskId::new("task-1");
+
+        registry.register_file_creation(task_id.clone(), "/tmp/test.txt");
+
+        assert!(registry.has_compensation(&task_id));
+        let comp = registry.get(&task_id).unwrap();
+        assert!(comp.description.contains("Delete file"));
+    }
+
+    #[test]
+    fn test_compensation_registry_register_process_spawn() {
+        let mut registry = CompensationRegistry::new();
+        let task_id = TaskId::new("task-1");
+
+        registry.register_process_spawn(task_id.clone(), 12345);
+
+        assert!(registry.has_compensation(&task_id));
+        let comp = registry.get(&task_id).unwrap();
+        assert!(comp.description.contains("Terminate process"));
+    }
+
+    #[test]
+    fn test_compensation_registry_task_ids() {
+        let mut registry = CompensationRegistry::new();
+
+        let task1 = TaskId::new("task-1");
+        let task2 = TaskId::new("task-2");
+
+        registry.register(task1.clone(), ToolCompensation::skip("Test 1"));
+        registry.register(task2.clone(), ToolCompensation::skip("Test 2"));
+
+        let ids = registry.task_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&task1));
+        assert!(ids.contains(&task2));
+    }
+
+    #[test]
+    fn test_compensation_registry_default() {
+        let registry = CompensationRegistry::default();
+        assert!(registry.is_empty());
+    }
 
     // Mock task with compensation for testing
     struct MockTaskWithCompensation {
