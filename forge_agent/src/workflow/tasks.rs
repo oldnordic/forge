@@ -25,7 +25,7 @@ use std::future::Future;
 ///     |ctx| async {
 ///         // Do work here
 ///         Ok(TaskResult::Success)
-///     }.boxed()
+///     }
 /// );
 /// ```
 pub struct FunctionTask {
@@ -256,7 +256,7 @@ mod tests {
         let task = FunctionTask::new(
             TaskId::new("test_task"),
             "Test Task".to_string(),
-            |_ctx| Box::pin(async { Ok(TaskResult::Success) }),
+            |_ctx| async { Ok(TaskResult::Success) },
         );
 
         let context = TaskContext::new("workflow_1", TaskId::new("test_task"));
