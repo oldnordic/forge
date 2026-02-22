@@ -9,6 +9,7 @@ use crate::workflow::checkpoint::{
     ValidationCheckpoint, ValidationResult, WorkflowCheckpoint, WorkflowCheckpointService,
 };
 use crate::workflow::dag::Workflow;
+use crate::workflow::deadlock::{DeadlockDetector, DeadlockError, DeadlockWarning};
 use crate::workflow::rollback::{CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation};
 use crate::workflow::state::TaskStatus;
 use crate::workflow::task::{CompensationAction, TaskContext, TaskId, TaskResult};
@@ -738,6 +739,9 @@ impl WorkflowExecutor {
         let workflow_id = self.audit_log.tx_id().to_string();
         self.record_workflow_started(&workflow_id).await;
 
+        // Check for deadlocks before execution
+        self.check_for_deadlocks_before_execution(&workflow_id).await?;
+
         // Create thread-safe concurrent state wrapper
         // This allows tasks to read state while executor writes updates
         let initial_state = WorkflowState::new(&workflow_id)
@@ -1172,6 +1176,67 @@ impl WorkflowExecutor {
                 completed_tasks: self.completed_tasks.len(),
             })
             .await;
+    }
+
+    /// Checks for deadlocks before executing the workflow.
+    ///
+    /// This method:
+    /// 1. Detects dependency cycles (hard error - prevents execution)
+    /// 2. Analyzes for resource deadlocks (warning - execution continues)
+    /// 3. Records the check results to the audit log
+    async fn check_for_deadlocks_before_execution(
+        &mut self,
+        workflow_id: &str,
+    ) -> Result<(), crate::workflow::WorkflowError> {
+        let detector = DeadlockDetector::new();
+
+        // Check for dependency cycles (hard error)
+        match detector.validate_workflow(&self.workflow) {
+            Ok(warnings) => {
+                // No cycles - log warnings if any
+                let warning_strings: Vec<String> = warnings
+                    .iter()
+                    .map(|w| w.description())
+                    .collect();
+
+                // Record deadlock check to audit log
+                let _ = self
+                    .audit_log
+                    .record(crate::audit::AuditEvent::WorkflowDeadlockCheck {
+                        timestamp: Utc::now(),
+                        workflow_id: workflow_id.to_string(),
+                        has_cycles: false,
+                        warnings: warning_strings.clone(),
+                    })
+                    .await;
+
+                // Log warnings if any
+                for warning in &warning_strings {
+                    eprintln!("Deadlock warning: {}", warning);
+                }
+
+                Ok(())
+            }
+            Err(DeadlockError::DependencyCycle(cycle)) => {
+                // Record the cycle detection to audit log
+                let _ = self
+                    .audit_log
+                    .record(crate::audit::AuditEvent::WorkflowDeadlockCheck {
+                        timestamp: Utc::now(),
+                        workflow_id: workflow_id.to_string(),
+                        has_cycles: true,
+                        warnings: vec![format!("Dependency cycle detected: {:?}", cycle)],
+                    })
+                    .await;
+
+                // Convert to WorkflowError and return
+                Err(DeadlockError::DependencyCycle(cycle).into())
+            }
+            Err(e) => {
+                // Other deadlock errors
+                Err(e.into())
+            }
+        }
     }
 
     /// Records task timeout event.
@@ -2828,6 +2893,38 @@ mod tests {
 
         // Should have WorkflowCompleted
         assert!(audit_events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCompleted { .. })));
+
+        // Should have WorkflowDeadlockCheck event
+        assert!(audit_events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowDeadlockCheck { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_deadlock_check_before_execution() {
+        // Test that dependency cycles are caught before execution
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+
+        // Create a cycle: a -> b -> c -> a
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        // Directly add the edge to create a cycle
+        let a_idx = workflow.task_map.get(&TaskId::new("a")).copied().unwrap();
+        let c_idx = workflow.task_map.get(&TaskId::new("c")).copied().unwrap();
+        workflow.graph.add_edge(c_idx, a_idx, ());
+
+        let mut executor = WorkflowExecutor::new(workflow);
+        let result = executor.execute_parallel().await;
+
+        assert!(result.is_err());
+        match result {
+            Err(crate::workflow::WorkflowError::CycleDetected(cycle)) => {
+                assert!(!cycle.is_empty());
+            }
+            _ => panic!("Expected CycleDetected error, got: {:?}", result),
+        }
     }
 
     #[tokio::test]

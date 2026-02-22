@@ -174,6 +174,20 @@ pub enum AuditEvent {
         layer_index: usize,
         task_count: usize,
     },
+    /// Workflow deadlock check completed
+    WorkflowDeadlockCheck {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        has_cycles: bool,
+        warnings: Vec<String>,
+    },
+    /// Workflow deadlock timeout occurred
+    WorkflowDeadlockTimeout {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        layer_index: usize,
+        timeout_secs: u64,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.
