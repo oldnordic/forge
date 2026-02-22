@@ -151,6 +151,15 @@ pub enum AuditEvent {
         task_name: String,
         timeout_secs: u64,
     },
+    /// Workflow tool fallback activated
+    WorkflowToolFallback {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        tool_name: String,
+        error: String,
+        fallback_action: String,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.

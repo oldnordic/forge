@@ -754,6 +754,9 @@ impl WorkflowExecutor {
             context = context.with_tool_registry(Arc::clone(registry));
         }
 
+        // Add audit log for task-level event recording (clone for task use)
+        context = context.with_audit_log(self.audit_log.clone());
+
         // Execute the task with timeout if configured
         let execution_result = if let Some(timeout_duration) = context.task_timeout {
             // Execute with task timeout

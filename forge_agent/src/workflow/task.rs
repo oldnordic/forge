@@ -13,6 +13,9 @@ use std::sync::Arc;
 // Import ToolRegistry for task-level tool access
 use crate::workflow::tools::ToolRegistry;
 
+// Import AuditLog for audit event recording
+use crate::audit::AuditLog;
+
 /// Unique identifier for a workflow task.
 ///
 /// TaskId wraps a string identifier and implements the necessary traits
@@ -106,6 +109,8 @@ pub struct TaskContext {
     pub task_timeout: Option<std::time::Duration>,
     /// Optional tool registry for tool invocation
     pub tool_registry: Option<Arc<ToolRegistry>>,
+    /// Optional audit log for recording events (cloned from executor)
+    pub audit_log: Option<AuditLog>,
 }
 
 impl TaskContext {
@@ -118,6 +123,7 @@ impl TaskContext {
             cancellation_token: None,
             task_timeout: None,
             tool_registry: None,
+            audit_log: None,
         }
     }
 
@@ -238,6 +244,48 @@ impl TaskContext {
     /// ```
     pub fn tool_registry(&self) -> Option<&Arc<ToolRegistry>> {
         self.tool_registry.as_ref()
+    }
+
+    /// Sets the audit log for event recording.
+    ///
+    /// # Arguments
+    ///
+    /// * `audit_log` - The audit log to use for event recording
+    ///
+    /// # Returns
+    ///
+    /// The context with audit log set (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use forge_agent::audit::AuditLog;
+    ///
+    /// let audit_log = AuditLog::new();
+    /// let context = TaskContext::new("workflow-1", task_id)
+    ///     .with_audit_log(audit_log);
+    /// ```
+    pub fn with_audit_log(mut self, audit_log: AuditLog) -> Self {
+        self.audit_log = Some(audit_log);
+        self
+    }
+
+    /// Returns a mutable reference to the audit log if set.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(&mut AuditLog)` if audit log is set
+    /// - `None` if no audit log
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(audit_log) = context.audit_log_mut() {
+    ///     // Use audit log
+    /// }
+    /// ```
+    pub fn audit_log_mut(&mut self) -> Option<&mut AuditLog> {
+        self.audit_log.as_mut()
     }
 
     /// Returns the task timeout duration if set.
