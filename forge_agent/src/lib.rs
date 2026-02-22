@@ -33,6 +33,9 @@ pub mod verify;
 // Commit module (Phase 4 - Task 6)
 pub mod commit;
 
+// Loop module (Phase 3 - Task 1)
+pub mod r#loop;
+
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
@@ -311,6 +314,90 @@ impl Agent {
             transaction_id: commit_report.transaction_id,
             files_committed: commit_report.files_committed,
         })
+    }
+}
+
+// Audit module - Placeholder for v0.3
+pub mod audit {
+    use serde::{Deserialize, Serialize};
+
+    /// Audit event for phase transitions.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub enum AuditEvent {
+        /// Observation phase started
+        Observe { timestamp: String, query: String },
+        /// Constraint phase started
+        Constrain { timestamp: String },
+        /// Plan phase started
+        Plan { timestamp: String },
+        /// Mutate phase started
+        Mutate { timestamp: String },
+        /// Verify phase started
+        Verify { timestamp: String },
+        /// Commit phase started
+        Commit { timestamp: String },
+        /// Rollback occurred
+        Rollback { timestamp: String, reason: String },
+    }
+
+    /// Audit log for recording phase transitions.
+    pub struct AuditLog {
+        events: Vec<AuditEvent>,
+    }
+
+    impl AuditLog {
+        /// Creates a new audit log.
+        pub fn new() -> Self {
+            Self { events: Vec::new() }
+        }
+
+        /// Records an audit event.
+        pub async fn record(&mut self, event: AuditEvent) -> std::result::Result<(), crate::AgentError> {
+            self.events.push(event);
+            Ok(())
+        }
+
+        /// Converts the audit log into a vector of events.
+        pub fn into_events(self) -> Vec<AuditEvent> {
+            self.events
+        }
+
+        /// Returns the number of events in the log.
+        #[cfg(test)]
+        pub fn len(&self) -> usize {
+            self.events.len()
+        }
+    }
+
+    impl Clone for AuditLog {
+        fn clone(&self) -> Self {
+            Self {
+                events: self.events.clone(),
+            }
+        }
+    }
+}
+
+// Transaction module - Placeholder for v0.3
+pub mod transaction {
+    /// Transaction for atomic operations.
+    pub struct Transaction;
+
+    impl Transaction {
+        /// Begins a new transaction.
+        pub async fn begin() -> std::result::Result<Self, crate::AgentError> {
+            Ok(Transaction)
+        }
+
+        /// Rolls back the transaction.
+        pub async fn rollback(self) -> std::result::Result<(), crate::AgentError> {
+            Ok(())
+        }
+
+        /// Commits the transaction.
+        pub async fn commit(self) -> std::result::Result<(), crate::AgentError> {
+            Ok(())
+        }
     }
 }
 
