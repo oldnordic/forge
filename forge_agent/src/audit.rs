@@ -124,6 +124,20 @@ pub enum AuditEvent {
         total_tasks: usize,
         completed_tasks: usize,
     },
+    /// Workflow task rolled back
+    WorkflowTaskRolledBack {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        compensation: String,
+    },
+    /// Workflow rolled back
+    WorkflowRolledBack {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        reason: String,
+        rolled_back_tasks: Vec<String>,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.

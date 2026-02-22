@@ -76,6 +76,13 @@ pub enum TaskResult {
     Failed(String),
     /// Task was skipped (e.g., due to failed hard dependency)
     Skipped,
+    /// Task result with compensation action (for Saga rollback)
+    WithCompensation {
+        /// The actual result of task execution
+        result: Box<TaskResult>,
+        /// Compensation action to undo task side effects
+        compensation: CompensationAction,
+    },
 }
 
 /// Execution context provided to workflow tasks.
@@ -106,6 +113,55 @@ impl TaskContext {
         self.forge = Some(forge);
         self
     }
+}
+
+/// Compensation action that undoes task side effects.
+///
+/// Describes how to compensate a task during workflow rollback using the
+/// Saga pattern. This is a simplified version for use in TaskResult.
+/// The full implementation with undo functions is in the rollback module.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompensationAction {
+    /// Type of compensation action
+    pub action_type: CompensationType,
+    /// Human-readable description of the compensation
+    pub description: String,
+}
+
+impl CompensationAction {
+    /// Creates a new CompensationAction.
+    pub fn new(action_type: CompensationType, description: impl Into<String>) -> Self {
+        Self {
+            action_type,
+            description: description.into(),
+        }
+    }
+
+    /// Creates a Skip compensation (no undo needed).
+    pub fn skip(description: impl Into<String>) -> Self {
+        Self::new(CompensationType::Skip, description)
+    }
+
+    /// Creates a Retry compensation (recommends retry instead of undo).
+    pub fn retry(description: impl Into<String>) -> Self {
+        Self::new(CompensationType::Retry, description)
+    }
+
+    /// Creates an UndoFunction compensation.
+    pub fn undo(description: impl Into<String>) -> Self {
+        Self::new(CompensationType::UndoFunction, description)
+    }
+}
+
+/// Type of compensation action for task rollback.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompensationType {
+    /// Execute undo function to compensate (e.g., delete created file)
+    UndoFunction,
+    /// No compensation needed (read-only operation)
+    Skip,
+    /// Recommend retry instead of compensation (transient failure)
+    Retry,
 }
 
 /// Error types for task execution.
@@ -164,6 +220,22 @@ pub trait WorkflowTask: Send + Sync {
     /// Default implementation returns an empty vector (no dependencies).
     fn dependencies(&self) -> Vec<TaskId> {
         Vec::new()
+    }
+
+    /// Returns the compensation action for this task (if any).
+    ///
+    /// Compensation actions are used during workflow rollback to undo
+    /// task side effects using the Saga pattern. Tasks that don't have
+    /// side effects (e.g., read-only queries) should return None.
+    ///
+    /// Default implementation returns None (no compensation).
+    ///
+    /// # Returns
+    ///
+    /// - `Some(CompensationAction)` - Task can be compensated
+    /// - `None` - Task has no compensation (will be skipped during rollback)
+    fn compensation(&self) -> Option<CompensationAction> {
+        None
     }
 }
 

@@ -247,10 +247,13 @@ impl RollbackEngine {
         }
     }
 
-    /// Finds all tasks dependent on the failed task using reverse traversal.
+    /// Finds all tasks dependent on the failed task using forward traversal.
     ///
-    /// Traverses the graph in reverse direction (following edges backwards)
-    /// to find all nodes that depend on the failed task.
+    /// Traverses the graph following edges from the failed task to find
+    /// all nodes that depend on it (directly or transitively).
+    ///
+    /// In the DAG a -> b, edge direction is "a executes before b",
+    /// so b depends on a. If a fails, we traverse forward to find b.
     ///
     /// # Arguments
     ///
@@ -269,7 +272,8 @@ impl RollbackEngine {
         let mut visited = HashSet::new();
         let mut stack = VecDeque::new();
 
-        // Start from failed task, traverse reverse edges (incoming direction)
+        // Start from failed task, traverse forward edges (outgoing direction)
+        // to find all tasks that depend on the failed task
         stack.push_back(failed_idx);
         visited.insert(failed_idx);
 
@@ -280,12 +284,12 @@ impl RollbackEngine {
                 dependent_set.insert(task_id);
             }
 
-            // Find all nodes that depend on current node (reverse traversal)
-            // We want nodes that have an edge TO current node
-            // In petgraph, that's Incoming neighbors
+            // Find all nodes that depend on current node
+            // Edges go FROM prerequisite TO dependent
+            // So Outgoing neighbors are the dependents
             for neighbor in workflow
                 .graph
-                .neighbors_directed(current_idx, Direction::Incoming)
+                .neighbors_directed(current_idx, Direction::Outgoing)
             {
                 if !visited.contains(&neighbor) {
                     visited.insert(neighbor);
