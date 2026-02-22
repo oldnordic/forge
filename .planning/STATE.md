@@ -5,22 +5,22 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Graph-first, deterministic operations — SQLiteGraph database is authoritative ground truth
-**Current focus:** Phase 10: Cancellation and Timeouts
+**Current focus:** Phase 11: Tool Integration
 
 ## Current Position
 
-Phase: 10-cancellation-timeouts
-Plan: 3 of 3 in current phase
+Phase: 11-tool-integration
+Plan: 1 of 3 in current phase
 Status: Complete
-Last activity: 2026-02-22 — Plan 10-03 (Cooperative Cancellation in Async Loops) completed
+Last activity: 2026-02-22 — Plan 11-01 (Shell Command Execution) completed
 
-Progress: [████████] 100%
+Progress: [███░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
-- Average duration: 13.1 min
+- Total plans completed: 17
+- Average duration: 12.9 min
 - Total execution time: 3.7 hours
 
 **By Phase:**
@@ -32,11 +32,12 @@ Progress: [████████] 100%
 | 3     | 4     | 21 min | 5.25 min |
 | 8     | 5     | 182 min | 36.4 min  |
 | 9     | 4     | 50 min | 12.5 min |
-| 10    | 2     | 25 min | 12.5 min |
+| 10    | 3     | 66 min | 22 min    |
+| 11    | 1     | 4 min | 4 min    |
 
 **Recent Trend:**
-- Last 5 plans: 12.6 min avg
-- Trend: State management and cancellation/timeout implementation
+- Last 5 plans: 11.8 min avg
+- Trend: Tool integration implementation
 
 *Updated after each plan completion*
 | Phase 01 P01 | 7min | 3 tasks | 5 files |
@@ -57,6 +58,7 @@ Progress: [████████] 100%
 | Phase 10-cancellation-timeouts P10-01 | 15min | 4 tasks | 5 files |
 | Phase 10-cancellation-timeouts P10-02 | 10min | 5 tasks | 6 files |
 | Phase 10-cancellation-timeouts P10-03 | 41min | 4 tasks | 3 files |
+| Phase 11-tool-integration P11-01 | 4min | 3 tasks | 1 file |
 
 ## Accumulated Context
 
@@ -138,6 +140,11 @@ Recent decisions affecting current work:
 - [Phase 10-cancellation-timeouts]: Use impl Future for wait_cancelled() to return async block directly (simpler than manual Future implementation)
 - [Phase 10-cancellation-timeouts]: Polling with 10ms sleep for cancellation waiting (balances responsiveness and CPU usage)
 - [Phase 10-cancellation-timeouts]: Return TaskResult::Success on cancellation in examples (implicit cancellation, apps can define own convention)
+- [Phase 11-tool-integration]: Use Arc<Mutex<Option<u32>>> for thread-safe PID storage across async execution
+- [Phase 11-tool-integration]: tokio::process::Child::id() returns Option<u32>, handled gracefully with None case
+- [Phase 11-tool-integration]: Convert non-zero exit codes to TaskResult::Failed with stderr capture
+- [Phase 11-tool-integration]: ShellCommandTask compensation returns Skip before execution, UndoFunction after execution
+- [Phase 11-tool-integration]: ShellCommandConfig uses builder pattern for flexible configuration
 
 
 ### Pending Todos
@@ -154,6 +161,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T21:01:00Z
-Stopped at: Completed plan 10-03 (Cooperative Cancellation in Async Loops)
+Last session: 2026-02-22T22:41:00Z
+Stopped at: Completed plan 11-01 (Shell Command Execution with tokio::process)
 Resume file: None
