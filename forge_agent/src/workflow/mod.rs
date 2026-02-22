@@ -96,6 +96,7 @@ pub mod cancellation;
 pub mod checkpoint;
 pub mod combinators;
 pub mod dag;
+pub mod deadlock;
 pub mod examples;
 pub mod executor;
 pub mod rollback;
@@ -121,6 +122,7 @@ pub use checkpoint::{
 };
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};
+pub use deadlock::{DeadlockDetector, DeadlockError, DeadlockWarning, DeadlockWarningType};
 pub use executor::{WorkflowExecutor, WorkflowResult};
 pub use examples::{
     CancellationAwareTask, PollingTask, TimeoutAndCancellationTask,
