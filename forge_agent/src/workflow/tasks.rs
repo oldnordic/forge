@@ -6,9 +6,12 @@
 use crate::workflow::task::{CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::future::Future;
+use std::time::Duration;
 
 /// Task that wraps an async function for easy workflow definition.
 ///
@@ -200,6 +203,98 @@ impl WorkflowTask for AgentLoopTask {
         // AgentLoop is read-only in v0.4 - no compensation needed
         // Future versions may implement undo for mutations
         Some(CompensationAction::skip("Read-only agent loop - no undo needed in v0.4"))
+    }
+}
+
+/// Configuration for shell command execution.
+///
+/// Provides configurable working directory, environment variables,
+/// and timeout settings for shell command tasks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellCommandConfig {
+    /// The command to execute
+    pub command: String,
+    /// Command arguments
+    pub args: Vec<String>,
+    /// Optional working directory for command execution
+    pub working_dir: Option<PathBuf>,
+    /// Environment variables to set for the command
+    pub env: HashMap<String, String>,
+    /// Optional timeout for command execution
+    pub timeout: Option<Duration>,
+}
+
+impl ShellCommandConfig {
+    /// Creates a new ShellCommandConfig with the given command.
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command to execute (e.g., "echo", "ls", "cargo")
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            args: Vec::new(),
+            working_dir: None,
+            env: HashMap::new(),
+            timeout: None,
+        }
+    }
+
+    /// Sets the command arguments.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - Vector of argument strings
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    pub fn args(mut self, args: Vec<String>) -> Self {
+        self.args = args;
+        self
+    }
+
+    /// Sets the working directory for command execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the working directory
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    pub fn working_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.working_dir = Some(path.into());
+        self
+    }
+
+    /// Adds an environment variable for the command.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Environment variable name
+    /// * `value` - Environment variable value
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
+    }
+
+    /// Sets the timeout for command execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `duration` - Timeout duration
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    pub fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout = Some(duration);
+        self
     }
 }
 
