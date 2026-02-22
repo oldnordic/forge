@@ -364,28 +364,11 @@ impl Agent {
     }
 }
 
-// Transaction module - Placeholder for v0.3
-pub mod transaction {
-    /// Transaction for atomic operations.
-    pub struct Transaction;
+// Transaction module (Phase 3 - Plan 3)
+pub mod transaction;
 
-    impl Transaction {
-        /// Begins a new transaction.
-        pub async fn begin() -> std::result::Result<Self, crate::AgentError> {
-            Ok(Transaction)
-        }
-
-        /// Rolls back the transaction.
-        pub async fn rollback(self) -> std::result::Result<(), crate::AgentError> {
-            Ok(())
-        }
-
-        /// Commits the transaction.
-        pub async fn commit(self) -> std::result::Result<(), crate::AgentError> {
-            Ok(())
-        }
-    }
-}
+// Re-export transaction types
+pub use transaction::{FileSnapshot, Transaction, TransactionState};
 
 #[cfg(test)]
 mod tests {
