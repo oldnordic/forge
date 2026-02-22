@@ -39,6 +39,10 @@ pub enum WorkflowError {
     /// Workflow structure has changed since checkpoint
     #[error("Workflow structure changed: {0}")]
     WorkflowChanged(String),
+
+    /// Timeout error
+    #[error("Timeout: {0}")]
+    Timeout(#[from] crate::workflow::timeout::TimeoutError),
 }
 
 /// Node data stored in the workflow graph.
