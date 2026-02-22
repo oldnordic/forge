@@ -47,11 +47,35 @@
 //! - **Forgetting to poll**: If you don't check the token, cancellation won't work
 //! - **Assuming cancellation is immediate**: Cooperative cancellation relies on tasks
 //!   checking the token voluntarily
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use forge_agent::workflow::{
+//!     WorkflowBuilder, CancellationAwareTask,
+//!     TaskId,
+//! };
+//!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Create a cancellation-aware workflow
+//! let task = CancellationAwareTask::new(
+//!     TaskId::new("task1"),
+//!     "Long running task".to_string(),
+//!     1000,
+//!     10,
+//! );
+//!
+//! let workflow = WorkflowBuilder::sequential(vec![Box::new(task)])?;
+//! # Ok(())
+//! # }
+//! ```
 
 use async_trait::async_trait;
 use crate::workflow::{
     builder::WorkflowBuilder,
     cancellation::CancellationToken,
+    dag::WorkflowError,
     task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask},
     tasks::{AgentLoopTask, FunctionTask, GraphQueryTask},
     Workflow,

@@ -77,6 +77,14 @@ use tokio::sync::Notify;
 /// - Polling with [`poll_cancelled()`](Self::poll_cancelled) in loops
 /// - Awaiting with [`wait_cancelled()`](Self::wait_cancelled) in async contexts
 ///
+/// # Examples
+///
+/// See the [`examples`](crate::workflow::examples) module for complete cancellation-aware task
+/// implementations demonstrating:
+/// - [`CancellationAwareTask`](crate::workflow::examples::CancellationAwareTask): Polling pattern
+/// - [`PollingTask`](crate::workflow::examples::PollingTask): tokio::select! pattern
+/// - [`TimeoutAndCancellationTask`](crate::workflow::examples::TimeoutAndCancellationTask): Timeout + cancellation
+///
 /// # Cloning
 ///
 /// Cloning a token creates a new reference to the same cancellation state.

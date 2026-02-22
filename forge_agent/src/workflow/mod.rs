@@ -5,6 +5,8 @@
 //! - Validates workflows for cycles and missing dependencies before execution
 //! - Records all task events to the audit log
 //! - Supports sequential execution with failure handling
+//! - Provides cooperative cancellation for long-running workflows
+//! - Supports timeout configuration for tasks and workflows
 //!
 //! # Architecture
 //!
@@ -13,7 +15,54 @@
 //! - [`WorkflowTask`](crate::workflow::task::WorkflowTask): Async trait for task execution
 //! - [`WorkflowExecutor`](crate::workflow::executor::WorkflowExecutor): Sequential task executor
 //!
-//! # Example
+//! # Cancellation and Timeouts
+//!
+//! ## Cancellation
+//!
+//! Workflows support cooperative cancellation via [`CancellationToken`]:
+//!
+//! ```ignore
+//! use forge_agent::workflow::{CancellationTokenSource, WorkflowExecutor};
+//! use forge_agent::workflow::dag::Workflow;
+//!
+//! let source = CancellationTokenSource::new();
+//! let mut executor = WorkflowExecutor::new(workflow)
+//!     .with_cancellation_source(source);
+//!
+//! // Cancel from anywhere
+//! source.cancel();
+//! ```
+//!
+//! Tasks can cooperatively respond to cancellation by polling the token:
+//!
+//! ```ignore
+//! use forge_agent::workflow::task::TaskContext;
+//!
+//! async fn my_task(context: &TaskContext) -> Result<TaskResult, TaskError> {
+//!     while !context.cancellation_token().map_or(false, |t| t.poll_cancelled()) {
+//!         // Do work
+//!     }
+//!     Ok(TaskResult::Cancelled)
+//! }
+//! ```
+//!
+//! See [`examples`](crate::workflow::examples) for complete cancellation-aware task examples.
+//!
+//! ## Timeouts
+//!
+//! Both tasks and workflows can have timeout limits:
+//!
+//! ```ignore
+//! use std::time::Duration;
+//! use forge_agent::workflow::{WorkflowExecutor, WorkflowTimeout};
+//!
+//! let mut executor = WorkflowExecutor::new(workflow)
+//!     .with_workflow_timeout(WorkflowTimeout::from_secs(300));
+//! ```
+//!
+//! See [`timeout`](crate::workflow::timeout) module for timeout configuration options.
+//!
+//! # Quick Start
 //!
 //! ```ignore
 //! use forge_agent::{Workflow, WorkflowExecutor, MockTask};
@@ -72,6 +121,10 @@ pub use checkpoint::{
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};
 pub use executor::{WorkflowExecutor, WorkflowResult};
+pub use examples::{
+    CancellationAwareTask, PollingTask, TimeoutAndCancellationTask,
+    cooperative_cancellation_example, timeout_cancellation_example,
+};
 pub use rollback::{
     CompensationReport, ExecutableCompensation, RollbackEngine, RollbackError, RollbackReport,
     RollbackStrategy,
