@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 10-cancellation-timeouts
-Plan: 2 of 3 in current phase
+Plan: 3 of 3 in current phase
 Status: Complete
-Last activity: 2026-02-22 — Plan 10-02 (Timeout Handling for Tasks and Workflows) completed
+Last activity: 2026-02-22 — Plan 10-03 (Cooperative Cancellation in Async Loops) completed
 
-Progress: [█████░░] 67%
+Progress: [████████] 100%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [█████░░] 67%
 | Phase 09-state-management P09-04 | 9min | 3 tasks | 3 files |
 | Phase 10-cancellation-timeouts P10-01 | 15min | 4 tasks | 5 files |
 | Phase 10-cancellation-timeouts P10-02 | 10min | 5 tasks | 6 files |
+| Phase 10-cancellation-timeouts P10-03 | 41min | 4 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,9 @@ Recent decisions affecting current work:
 - [Phase 10-cancellation-timeouts]: Task timeout set via TaskContext builder pattern with_task_timeout()
 - [Phase 10-cancellation-timeouts]: TimeoutError variant added to both TaskResult and WorkflowError enums
 - [Phase 10-cancellation-timeouts]: WorkflowTaskTimedOut audit event records timeout with timestamp, IDs, and timeout_secs
+- [Phase 10-cancellation-timeouts]: Use impl Future for wait_cancelled() to return async block directly (simpler than manual Future implementation)
+- [Phase 10-cancellation-timeouts]: Polling with 10ms sleep for cancellation waiting (balances responsiveness and CPU usage)
+- [Phase 10-cancellation-timeouts]: Return TaskResult::Success on cancellation in examples (implicit cancellation, apps can define own convention)
 
 
 ### Pending Todos
@@ -150,6 +154,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T20:16:00Z
-Stopped at: Completed plan 10-02 (Timeout Handling for Tasks and Workflows)
+Last session: 2026-02-22T21:01:00Z
+Stopped at: Completed plan 10-03 (Cooperative Cancellation in Async Loops)
 Resume file: None
