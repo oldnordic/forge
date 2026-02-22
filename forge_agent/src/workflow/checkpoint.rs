@@ -4,6 +4,7 @@
 //! enabling workflow recovery from failures. Uses bincode serialization
 //! for fast snapshots and SHA-256 checksums for integrity validation.
 
+use crate::workflow::dag::Workflow;
 use crate::workflow::executor::WorkflowExecutor;
 use crate::workflow::task::TaskId;
 use chrono::{DateTime, Utc};
@@ -62,6 +63,8 @@ pub struct WorkflowCheckpoint {
     pub total_tasks: usize,
     /// SHA-256 checksum for integrity verification
     pub checksum: String,
+    /// Checksum of task IDs for graph drift detection
+    pub task_ids_checksum: String,
 }
 
 impl WorkflowCheckpoint {
@@ -86,6 +89,10 @@ impl WorkflowCheckpoint {
         let completed = executor.completed_task_ids();
         let failed = executor.failed_task_ids();
 
+        // Compute task IDs checksum for graph drift detection
+        let task_ids = executor.task_ids();
+        let task_ids_checksum = compute_task_ids_checksum(&task_ids);
+
         let mut checkpoint = Self {
             id: CheckpointId::new(),
             workflow_id: workflow_id.into(),
@@ -96,6 +103,7 @@ impl WorkflowCheckpoint {
             current_position: position,
             total_tasks: executor.task_count(),
             checksum: String::new(),
+            task_ids_checksum,
         };
 
         // Compute checksum for integrity validation
@@ -118,6 +126,7 @@ impl WorkflowCheckpoint {
             failed_tasks: &self.failed_tasks,
             current_position: self.current_position,
             total_tasks: self.total_tasks,
+            task_ids_checksum: &self.task_ids_checksum,
         };
 
         let json = serde_json::to_vec(&data_for_hash).unwrap_or_default();
@@ -157,6 +166,108 @@ struct CheckpointDataForHash<'a> {
     failed_tasks: &'a [TaskId],
     current_position: usize,
     total_tasks: usize,
+    task_ids_checksum: &'a str,
+}
+
+/// Computes SHA-256 checksum of sorted task IDs for graph drift detection.
+///
+/// This checksum is used to detect if the workflow structure has changed
+/// (tasks added/removed) between checkpoint creation and resume.
+fn compute_task_ids_checksum(task_ids: &[TaskId]) -> String {
+    let mut sorted_ids: Vec<&TaskId> = task_ids.iter().collect();
+    sorted_ids.sort_by_key(|id| id.as_str());
+
+    let json = serde_json::to_vec(&sorted_ids).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(&json);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Validates workflow consistency against a checkpoint.
+///
+/// Ensures that the workflow structure has not changed since the checkpoint
+/// was created. This prevents resuming a workflow that has been modified.
+///
+/// # Arguments
+///
+/// * `workflow` - The workflow to validate
+/// * `checkpoint` - The checkpoint to validate against
+///
+/// # Returns
+///
+/// - `Ok(())` if workflow is consistent with checkpoint
+/// - `Err(WorkflowError)` if validation fails
+///
+/// # Validation Checks
+///
+/// 1. Task count matches: workflow.task_count() == checkpoint.total_tasks
+/// 2. All checkpointed completed_tasks still exist in workflow
+/// 3. All checkpointed failed_tasks still exist in workflow
+/// 4. Current position is within valid range (0..task_count)
+/// 5. Task IDs checksum matches (graph drift detection)
+pub fn validate_workflow_consistency(
+    workflow: &Workflow,
+    checkpoint: &WorkflowCheckpoint,
+) -> Result<(), crate::workflow::WorkflowError> {
+    // Check 1: Task count matches
+    if workflow.task_count() != checkpoint.total_tasks {
+        return Err(crate::workflow::WorkflowError::WorkflowChanged(
+            format!(
+                "Task count mismatch: checkpoint has {} tasks, current workflow has {} tasks",
+                checkpoint.total_tasks,
+                workflow.task_count()
+            ),
+        ));
+    }
+
+    // Check 2 & 3: All checkpointed tasks still exist
+    let workflow_task_ids: HashSet<_> = workflow.task_ids().into_iter().collect();
+
+    for task_id in &checkpoint.completed_tasks {
+        if !workflow_task_ids.contains(task_id) {
+            return Err(crate::workflow::WorkflowError::WorkflowChanged(
+                format!(
+                    "Completed task from checkpoint not found in workflow: {}",
+                    task_id
+                ),
+            ));
+        }
+    }
+
+    for task_id in &checkpoint.failed_tasks {
+        if !workflow_task_ids.contains(task_id) {
+            return Err(crate::workflow::WorkflowError::WorkflowChanged(
+                format!(
+                    "Failed task from checkpoint not found in workflow: {}",
+                    task_id
+                ),
+            ));
+        }
+    }
+
+    // Check 4: Current position is within valid range
+    if checkpoint.current_position >= checkpoint.total_tasks {
+        return Err(crate::workflow::WorkflowError::CheckpointCorrupted(
+            format!(
+                "Invalid checkpoint position: {} exceeds total tasks {}",
+                checkpoint.current_position, checkpoint.total_tasks
+            ),
+        ));
+    }
+
+    // Check 5: Task IDs checksum matches (graph drift detection)
+    let current_task_ids = workflow.task_ids();
+    let current_checksum = compute_task_ids_checksum(&current_task_ids);
+    if current_checksum != checkpoint.task_ids_checksum {
+        return Err(crate::workflow::WorkflowError::WorkflowChanged(
+            format!(
+                "Workflow structure changed: task IDs checksum mismatch. Expected: {}, Got: {}",
+                checkpoint.task_ids_checksum, current_checksum
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Summary of a checkpoint (for listing).
@@ -485,6 +596,7 @@ mod tests {
         assert_eq!(checkpoint.completed_tasks.len(), 0);
         assert_eq!(checkpoint.failed_tasks.len(), 0);
         assert!(!checkpoint.checksum.is_empty());
+        assert!(!checkpoint.task_ids_checksum.is_empty());
     }
 
     #[test]
@@ -723,5 +835,155 @@ mod tests {
         // Should fail validation on save
         let save_result = service.save(&checkpoint);
         assert!(save_result.is_err());
+    }
+
+    // Tests for validate_workflow_consistency
+
+    #[test]
+    fn test_validate_workflow_consistency_success() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        workflow.add_task(Box::new(MockTask::new("task-3", "Task 3")));
+
+        let executor = WorkflowExecutor::new(workflow);
+        let checkpoint = WorkflowCheckpoint::from_executor("workflow-1", 0, &executor, 0);
+
+        // Create a matching workflow for validation
+        let mut validation_workflow = Workflow::new();
+        validation_workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-3", "Task 3")));
+
+        // Should validate successfully
+        let result = validate_workflow_consistency(&validation_workflow, &checkpoint);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_workflow_consistency_task_count_mismatch() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+
+        let executor = WorkflowExecutor::new(workflow);
+        let checkpoint = WorkflowCheckpoint::from_executor("workflow-1", 0, &executor, 0);
+
+        // Create workflow with different task count
+        let mut validation_workflow = Workflow::new();
+        validation_workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-3", "Task 3"))); // Extra task
+
+        let result = validate_workflow_consistency(&validation_workflow, &checkpoint);
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::workflow::WorkflowError::WorkflowChanged(msg)) => {
+                assert!(msg.contains("Task count mismatch"));
+            }
+            _ => panic!("Expected WorkflowChanged error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_workflow_consistency_missing_completed_task() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        workflow.add_task(Box::new(MockTask::new("task-3", "Task 3")));
+
+        let mut executor = WorkflowExecutor::new(workflow);
+
+        // Simulate task-1 completion
+        executor.completed_tasks.insert(TaskId::new("task-1"));
+
+        // Create checkpoint after task-1 completion
+        let checkpoint = WorkflowCheckpoint::from_executor("workflow-1", 0, &executor, 1);
+
+        // Create workflow with same count but different tasks (task-1 removed, task-4 added)
+        let mut validation_workflow = Workflow::new();
+        validation_workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-3", "Task 3")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-4", "Task 4")));
+
+        let result = validate_workflow_consistency(&validation_workflow, &checkpoint);
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::workflow::WorkflowError::WorkflowChanged(msg)) => {
+                assert!(msg.contains("not found in workflow"));
+            }
+            _ => panic!("Expected WorkflowChanged error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_validate_workflow_consistency_invalid_position() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+
+        let executor = WorkflowExecutor::new(workflow);
+
+        // Create checkpoint with invalid position
+        let mut checkpoint = WorkflowCheckpoint::from_executor("workflow-1", 0, &executor, 0);
+        checkpoint.current_position = 5; // Exceeds total_tasks
+
+        let mut validation_workflow = Workflow::new();
+        validation_workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+
+        let result = validate_workflow_consistency(&validation_workflow, &checkpoint);
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::workflow::WorkflowError::CheckpointCorrupted(msg)) => {
+                assert!(msg.contains("Invalid checkpoint position"));
+            }
+            _ => panic!("Expected CheckpointCorrupted error"),
+        }
+    }
+
+    #[test]
+    fn test_graph_drift_detection() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        workflow.add_task(Box::new(MockTask::new("task-3", "Task 3")));
+
+        let executor = WorkflowExecutor::new(workflow);
+        let checkpoint = WorkflowCheckpoint::from_executor("workflow-1", 0, &executor, 0);
+
+        // Create workflow with different task IDs (same count but different tasks)
+        let mut validation_workflow = Workflow::new();
+        validation_workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-2", "Task 2")));
+        validation_workflow.add_task(Box::new(MockTask::new("task-4", "Task 4"))); // Different task
+
+        let result = validate_workflow_consistency(&validation_workflow, &checkpoint);
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::workflow::WorkflowError::WorkflowChanged(msg)) => {
+                assert!(msg.contains("task IDs checksum mismatch"));
+            }
+            _ => panic!("Expected WorkflowChanged error"),
+        }
+    }
+
+    #[test]
+    fn test_task_ids_checksum_deterministic() {
+        let workflow1 = Workflow::new();
+        let workflow2 = Workflow::new();
+
+        let ids1 = vec![TaskId::new("task-3"), TaskId::new("task-1"), TaskId::new("task-2")];
+        let ids2 = vec![TaskId::new("task-1"), TaskId::new("task-2"), TaskId::new("task-3")];
+
+        let checksum1 = compute_task_ids_checksum(&ids1);
+        let checksum2 = compute_task_ids_checksum(&ids2);
+
+        // Checksums should be identical regardless of order
+        assert_eq!(checksum1, checksum2);
     }
 }

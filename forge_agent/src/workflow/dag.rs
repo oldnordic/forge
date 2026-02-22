@@ -31,6 +31,14 @@ pub enum WorkflowError {
     /// Checkpoint data is corrupted or has invalid checksum
     #[error("Checkpoint corrupted: {0}")]
     CheckpointCorrupted(String),
+
+    /// Checkpoint not found
+    #[error("Checkpoint not found: {0}")]
+    CheckpointNotFound(String),
+
+    /// Workflow structure has changed since checkpoint
+    #[error("Workflow structure changed: {0}")]
+    WorkflowChanged(String),
 }
 
 /// Node data stored in the workflow graph.
