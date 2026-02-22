@@ -540,6 +540,170 @@ impl WorkflowExecutor {
 
         Ok(())
     }
+
+    /// Checks if workflow has a valid checkpoint to resume from.
+    ///
+    /// Returns true if a checkpoint exists for this workflow and the
+    /// workflow structure is consistent with the checkpoint.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if workflow can be resumed
+    /// - `false` if no checkpoint exists or validation fails
+    pub fn can_resume(&self) -> bool {
+        // No checkpoint service configured
+        let service = match &self.checkpoint_service {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // Get workflow ID from audit log
+        let workflow_id = self.audit_log.tx_id().to_string();
+
+        // Try to load latest checkpoint
+        let checkpoint = match service.get_latest(&workflow_id) {
+            Ok(Some(cp)) => cp,
+            _ => return false,
+        };
+
+        // Validate checkpoint checksum
+        if checkpoint.validate().is_err() {
+            return false;
+        }
+
+        // Validate workflow consistency
+        validate_workflow_consistency(&self.workflow, &checkpoint).is_ok()
+    }
+
+    /// Resumes workflow execution from the latest checkpoint.
+    ///
+    /// Finds the latest checkpoint for the workflow, validates it,
+    /// restores state, and continues execution from the checkpoint position.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(WorkflowResult)` - Execution completed (may have partial completion)
+    /// - `Err(WorkflowError)` - If checkpoint not found, corrupted, or workflow changed
+    pub async fn resume(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+        // Get checkpoint service
+        let service = self.checkpoint_service.as_ref()
+            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
+                "No checkpoint service configured".to_string()
+            ))?;
+
+        // Get workflow ID
+        let workflow_id = self.audit_log.tx_id().to_string();
+
+        // Load latest checkpoint
+        let checkpoint = service.get_latest(&workflow_id)?
+            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
+                format!("No checkpoint found for workflow: {}", workflow_id)
+            ))?;
+
+        // Resume from checkpoint
+        self.resume_from_checkpoint_id(&checkpoint.id).await
+    }
+
+    /// Resumes workflow execution from a specific checkpoint.
+    ///
+    /// Loads the checkpoint by ID, validates it, restores state, and
+    /// continues execution from the checkpoint position.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint_id` - The checkpoint ID to resume from
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(WorkflowResult)` - Execution completed (may have partial completion)
+    /// - `Err(WorkflowError)` - If checkpoint not found, corrupted, or workflow changed
+    pub async fn resume_from_checkpoint_id(
+        &mut self,
+        checkpoint_id: &crate::workflow::checkpoint::CheckpointId,
+    ) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+        // Get checkpoint service
+        let service = self.checkpoint_service.as_ref()
+            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
+                "No checkpoint service configured".to_string()
+            ))?;
+
+        // Load checkpoint
+        let checkpoint = service.load(checkpoint_id)?
+            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
+                format!("Checkpoint not found: {}", checkpoint_id)
+            ))?;
+
+        // Validate checkpoint checksum
+        checkpoint.validate()?;
+
+        // Validate workflow consistency
+        validate_workflow_consistency(&self.workflow, &checkpoint)?;
+
+        // Restore state
+        self.restore_state_from_checkpoint(&checkpoint)?;
+
+        // Get workflow ID
+        let workflow_id = self.audit_log.tx_id().to_string();
+
+        // Check if all tasks are already completed
+        if checkpoint.completed_tasks.len() == checkpoint.total_tasks {
+            // All tasks completed - return success immediately
+            return Ok(WorkflowResult::new(checkpoint.completed_tasks));
+        }
+
+        // Get execution order
+        let execution_order = self.workflow.execution_order()?;
+
+        // Start from checkpoint position + 1 (skip completed tasks)
+        let start_position = checkpoint.current_position + 1;
+
+        // Execute remaining tasks
+        for position in start_position..execution_order.len() {
+            let task_id = &execution_order[position];
+
+            if let Err(e) = self.execute_task(&workflow_id, task_id).await {
+                // Task failed - trigger rollback
+                let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
+
+                // Find rollback set based on strategy
+                let rollback_set = self
+                    .rollback_engine
+                    .find_rollback_set(&self.workflow, task_id, self.rollback_strategy)
+                    .map_err(|err| {
+                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    })?;
+
+                // Execute rollback
+                let rollback_report = self
+                    .rollback_engine
+                    .execute_rollback(&self.workflow, rollback_set, &workflow_id, &mut self.audit_log)
+                    .await
+                    .map_err(|err| {
+                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    })?;
+
+                // Record workflow failed
+                self.record_workflow_failed(&workflow_id, task_id, &e.to_string())
+                    .await;
+
+                return Ok(WorkflowResult::new_failed_with_rollback(
+                    completed,
+                    task_id.clone(),
+                    e.to_string(),
+                    rollback_report,
+                ));
+            }
+
+            // Task completed successfully - create checkpoint
+            self.create_checkpoint(&workflow_id, position).await;
+        }
+
+        // All tasks completed
+        self.record_workflow_completed(&workflow_id).await;
+
+        let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
+        Ok(WorkflowResult::new(completed))
+    }
 }
 
 #[cfg(test)]
@@ -986,6 +1150,210 @@ mod tests {
                 // Expected
             }
             _ => panic!("Expected WorkflowChanged error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_can_resume() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+
+        workflow.add_dependency("a", "b").unwrap();
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // No checkpoint initially
+        assert!(!executor.can_resume());
+
+        // Create a new workflow and execute it
+        let mut workflow2 = Workflow::new();
+        workflow2.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow2.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        workflow2.add_dependency("a", "b").unwrap();
+
+        let mut executor2 = WorkflowExecutor::new(workflow2)
+            .with_checkpoint_service(checkpoint_service.clone());
+        executor2.execute().await.unwrap();
+
+        // Now can resume
+        assert!(executor2.can_resume());
+    }
+
+    #[tokio::test]
+    async fn test_can_resume_returns_false_without_service() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let executor = WorkflowExecutor::new(workflow);
+
+        // No checkpoint service
+        assert!(!executor.can_resume());
+    }
+
+    #[tokio::test]
+    async fn test_resume_from_checkpoint() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("a")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("a", "c").unwrap();
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Execute workflow
+        executor.execute().await.unwrap();
+
+        // Get checkpoint ID
+        let workflow_id = executor.audit_log.tx_id().to_string();
+        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint_id = checkpoint.id;
+
+        // Create new executor and resume
+        let mut new_workflow = Workflow::new();
+        new_workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        new_workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        new_workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("a")));
+
+        new_workflow.add_dependency("a", "b").unwrap();
+        new_workflow.add_dependency("a", "c").unwrap();
+
+        let mut new_executor = WorkflowExecutor::new(new_workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Resume from checkpoint
+        let result = new_executor.resume_from_checkpoint_id(&checkpoint_id).await;
+
+        assert!(result.is_ok());
+        let workflow_result = result.unwrap();
+
+        // All tasks should be completed
+        assert!(workflow_result.success);
+        assert_eq!(workflow_result.completed_tasks.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_resume_skip_completed() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("b")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Execute workflow partially (only task A completes)
+        let workflow_id = executor.audit_log.tx_id().to_string();
+
+        // Manually create checkpoint after task A
+        executor.completed_tasks.insert(TaskId::new("a"));
+        let partial_checkpoint = WorkflowCheckpoint::from_executor(
+            &workflow_id,
+            0,
+            &executor,
+            0,
+        );
+        checkpoint_service.save(&partial_checkpoint).unwrap();
+
+        let checkpoint_id = partial_checkpoint.id;
+
+        // Create new executor and resume
+        let mut new_workflow = Workflow::new();
+        new_workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        new_workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        new_workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("b")));
+
+        new_workflow.add_dependency("a", "b").unwrap();
+        new_workflow.add_dependency("b", "c").unwrap();
+
+        let mut new_executor = WorkflowExecutor::new(new_workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Resume should skip task A and execute B and C
+        let result = new_executor.resume_from_checkpoint_id(&checkpoint_id).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.completed_tasks.len(), 3);
+
+        // Task A should be in completed tasks (from checkpoint)
+        assert!(result.completed_tasks.contains(&TaskId::new("a")));
+        assert!(result.completed_tasks.contains(&TaskId::new("b")));
+        assert!(result.completed_tasks.contains(&TaskId::new("c")));
+    }
+
+    #[tokio::test]
+    async fn test_resume_returns_immediately_if_all_completed() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Execute workflow to completion
+        executor.execute().await.unwrap();
+
+        // Get checkpoint ID
+        let workflow_id = executor.audit_log.tx_id().to_string();
+        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint_id = checkpoint.id;
+
+        // Create new executor and resume
+        let mut new_workflow = Workflow::new();
+        new_workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        new_workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        let mut new_executor = WorkflowExecutor::new(new_workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Resume should return immediately (all tasks already completed)
+        let result = new_executor.resume_from_checkpoint_id(&checkpoint_id).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.completed_tasks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_resume_fails_with_invalid_checkpoint() {
+        use crate::workflow::checkpoint::{CheckpointId, WorkflowCheckpointService};
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Try to resume from non-existent checkpoint
+        let fake_checkpoint_id = CheckpointId::new();
+        let result = executor.resume_from_checkpoint_id(&fake_checkpoint_id).await;
+
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::workflow::WorkflowError::CheckpointNotFound(_)) => {
+                // Expected
+            }
+            _ => panic!("Expected CheckpointNotFound error"),
         }
     }
 }
