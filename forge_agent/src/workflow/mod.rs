@@ -43,6 +43,7 @@
 
 pub mod auto_detect;
 pub mod builder;
+pub mod cancellation;
 pub mod checkpoint;
 pub mod combinators;
 pub mod dag;
