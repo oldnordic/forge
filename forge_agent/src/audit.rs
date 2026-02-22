@@ -143,6 +143,14 @@ pub enum AuditEvent {
         timestamp: DateTime<Utc>,
         workflow_id: String,
     },
+    /// Workflow task timed out
+    WorkflowTaskTimedOut {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        task_name: String,
+        timeout_secs: u64,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.
@@ -457,8 +465,18 @@ mod tests {
         .await
         .unwrap();
 
+        log.record(AuditEvent::WorkflowTaskTimedOut {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-3".to_string(),
+            task_name: "Task 3".to_string(),
+            timeout_secs: 30,
+        })
+        .await
+        .unwrap();
+
         let events = log.replay();
-        assert_eq!(events.len(), 12);
+        assert_eq!(events.len(), 13);
     }
 
     #[tokio::test]
@@ -481,6 +499,37 @@ mod tests {
             } => {
                 assert_eq!(workflow_id, "workflow-1");
                 assert_eq!(task_count, 3);
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_task_timed_out_event_serialization() {
+        let event = AuditEvent::WorkflowTaskTimedOut {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-1".to_string(),
+            task_name: "Task 1".to_string(),
+            timeout_secs: 30,
+        };
+
+        // Serialize and deserialize
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::WorkflowTaskTimedOut {
+                workflow_id,
+                task_id,
+                task_name,
+                timeout_secs,
+                ..
+            } => {
+                assert_eq!(workflow_id, "workflow-1");
+                assert_eq!(task_id, "task-1");
+                assert_eq!(task_name, "Task 1");
+                assert_eq!(timeout_secs, 30);
             }
             _ => panic!("Wrong event type"),
         }
