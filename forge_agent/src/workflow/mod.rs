@@ -41,13 +41,17 @@
 //! 3. Execute each task with audit logging
 //! 4. Stop on first failure (rollback is deferred to phase 08-05)
 
+pub mod builder;
 pub mod dag;
 pub mod executor;
 pub mod task;
+pub mod tasks;
 pub mod validate;
 
 // Re-export core types for public API
+pub use builder::WorkflowBuilder;
 pub use dag::{Workflow, WorkflowError};
 pub use executor::{WorkflowExecutor, WorkflowResult};
 pub use task::{Dependency, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
+pub use tasks::{AgentLoopTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask};
 pub use validate::{ValidationReport, WorkflowValidator};

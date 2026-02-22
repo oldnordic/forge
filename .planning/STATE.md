@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Graph-first, deterministic operations — SQLiteGraph database is authoritative ground truth
-**Current focus:** Phase 3: Agent Orchestration
+**Current focus:** Phase 08: Workflow Foundation
 
 ## Current Position
 
-Phase: 3 of 4 (Agent Orchestration)
-Plan: 4 of 4 in current phase
+Phase: 08-workflow-foundation
+Plan: 1 of 5 in current phase
 Status: Complete
-Last activity: 2026-02-22 — Plan 03-04 (Runtime Integration) completed
+Last activity: 2026-02-22 — Plan 08-01 (DAG Scheduler) completed
 
-Progress: [██████████] 100%
+Progress: [███░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 5.5 min
-- Total execution time: 0.6 hours
+- Total plans completed: 7
+- Average duration: 10 min
+- Total execution time: 1.2 hours
 
 **By Phase:**
 
@@ -29,11 +29,12 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 1     | 1     | 7 min | 7 min    |
 | 2     | 1     | 6 min | 6 min    |
-| 3     | 4     | 21 min | 5.25 min    |
+| 3     | 4     | 21 min | 5.25 min |
+| 8     | 1     | 71 min | 71 min  |
 
 **Recent Trend:**
-- Last 5 plans: 5.5 min avg
-- Trend: Agent orchestration layer implementation complete
+- Last 5 plans: 18 min avg
+- Trend: Workflow foundation implementation started
 
 *Updated after each plan completion*
 | Phase 01 P01 | 7min | 3 tasks | 5 files |
@@ -42,6 +43,7 @@ Progress: [██████████] 100%
 | Phase 03 P02 | 8min | 2 tasks | 4 files |
 | Phase 03 P03 | 4min | 3 tasks | 4 files |
 | Phase 03 P04 | 3min | 2 tasks | 4 files |
+| Phase 08 P01 | 71min | 7 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -69,6 +71,12 @@ Recent decisions affecting current work:
 - [Phase 03]: Agent::with_runtime() creates Agent and ForgeRuntime together sharing same graph store
 - [Phase 03]: Placeholder methods runtime_cache() and runtime_stats() return None (Phase 3.1 implementation)
 - [Phase 03]: Backward compatibility maintained - Agent works standalone without runtime
+- [Phase 08]: DAG stores task metadata (id, name, dependencies) not boxed trait objects for simplified graph operations
+- [Phase 08]: Immediate cycle detection via topological sort on each add_dependency() for fail-fast validation
+- [Phase 08]: Sequential task execution only - parallelism deferred to Phase 12
+- [Phase 08]: Granular audit events (start/completion/failed per task) for complete audit trail
+- [Phase 08]: petgraph 0.8 for topological sort and SCC-based cycle detection
+- [Phase 08]: async-trait 0.1 for WorkflowTask trait with async execute() method
 
 ### Pending Todos
 
@@ -84,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T01:57:00Z
-Stopped at: Completed plan 03-04 (Runtime Integration)
+Last session: 2026-02-22T15:33:00Z
+Stopped at: Completed plan 08-01 (DAG Scheduler)
 Resume file: None
