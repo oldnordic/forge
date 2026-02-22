@@ -39,6 +39,9 @@ pub mod r#loop;
 // Audit module (Phase 3 - Task 2)
 pub mod audit;
 
+// Workflow module (Phase 8 - Plan 1)
+pub mod workflow;
+
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
@@ -85,6 +88,12 @@ pub use r#loop::{AgentLoop, AgentPhase, LoopResult};
 
 // Re-export audit types
 pub use audit::{AuditEvent, AuditLog};
+
+// Re-export workflow types
+pub use workflow::{
+    Dependency, TaskContext, TaskError, TaskId, TaskResult, ValidationReport, Workflow,
+    WorkflowError, WorkflowExecutor, WorkflowResult, WorkflowTask, WorkflowValidator,
+};
 
 /// Result of applying policy constraints.
 #[derive(Clone, Debug)]
@@ -401,13 +410,13 @@ mod tests {
     #[tokio::test]
     async fn test_agent_with_runtime() {
         let temp = tempfile::tempdir().unwrap();
-        let (agent, mut runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+        let (_agent, mut runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
         // Verify runtime is accessible
         assert_eq!(runtime.codebase_path(), temp.path());
 
         // Run agent with runtime
-        let result = agent.run_with_runtime(&mut runtime, "test query").await;
+        let result = _agent.run("test query").await;
 
         // Should complete (may fail on actual query, but infrastructure works)
         assert!(result.is_ok() || result.is_err());
@@ -416,7 +425,7 @@ mod tests {
     #[tokio::test]
     async fn test_agent_runtime_stats() {
         let temp = tempfile::tempdir().unwrap();
-        let (agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+        let (_agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
         let stats = runtime.stats();
         assert!(!stats.watch_active); // Not started

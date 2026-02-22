@@ -88,6 +88,42 @@ pub enum AuditEvent {
         reason: String,
         phase: String,
     },
+    /// Workflow execution started
+    WorkflowStarted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_count: usize,
+    },
+    /// Workflow task started
+    WorkflowTaskStarted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        task_name: String,
+    },
+    /// Workflow task completed
+    WorkflowTaskCompleted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        task_name: String,
+        result: String,
+    },
+    /// Workflow task failed
+    WorkflowTaskFailed {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        task_name: String,
+        error: String,
+    },
+    /// Workflow execution completed
+    WorkflowCompleted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        total_tasks: usize,
+        completed_tasks: usize,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.
@@ -355,8 +391,144 @@ mod tests {
         .await
         .unwrap();
 
+        // Test workflow events
+        log.record(AuditEvent::WorkflowStarted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_count: 3,
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowTaskStarted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-1".to_string(),
+            task_name: "Task 1".to_string(),
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowTaskCompleted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-1".to_string(),
+            task_name: "Task 1".to_string(),
+            result: "Success".to_string(),
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowTaskFailed {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-2".to_string(),
+            task_name: "Task 2".to_string(),
+            error: "Task failed".to_string(),
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowCompleted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            total_tasks: 3,
+            completed_tasks: 2,
+        })
+        .await
+        .unwrap();
+
         let events = log.replay();
-        assert_eq!(events.len(), 7);
+        assert_eq!(events.len(), 12);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_event_serialization() {
+        let event = AuditEvent::WorkflowStarted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_count: 3,
+        };
+
+        // Serialize and deserialize
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::WorkflowStarted {
+                workflow_id,
+                task_count,
+                ..
+            } => {
+                assert_eq!(workflow_id, "workflow-1");
+                assert_eq!(task_count, 3);
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_execution_audit_trail() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = AuditLog::with_dir(temp_dir.path().to_path_buf());
+
+        // Simulate workflow execution
+        log.record(AuditEvent::WorkflowStarted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_count: 2,
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowTaskStarted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-1".to_string(),
+            task_name: "Task 1".to_string(),
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowTaskCompleted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            task_id: "task-1".to_string(),
+            task_name: "Task 1".to_string(),
+            result: "Success".to_string(),
+        })
+        .await
+        .unwrap();
+
+        log.record(AuditEvent::WorkflowCompleted {
+            timestamp: Utc::now(),
+            workflow_id: "workflow-1".to_string(),
+            total_tasks: 2,
+            completed_tasks: 2,
+        })
+        .await
+        .unwrap();
+
+        let events = log.replay();
+
+        // Verify workflow started is first
+        assert!(matches!(events[0], AuditEvent::WorkflowStarted { .. }));
+
+        // Verify workflow completed is last
+        assert!(matches!(events[events.len() - 1], AuditEvent::WorkflowCompleted { .. }));
+
+        // Count workflow task events
+        let task_events: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    AuditEvent::WorkflowTaskStarted { .. } | AuditEvent::WorkflowTaskCompleted { .. }
+                )
+            })
+            .collect();
+
+        assert_eq!(task_events.len(), 2);
     }
 
     #[tokio::test]

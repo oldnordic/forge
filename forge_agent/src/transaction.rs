@@ -61,6 +61,7 @@ pub enum TransactionState {
 /// The Transaction manages file snapshots and provides rollback capability.
 /// Files are snapshot before mutation, and can be restored to their
 /// original state if the transaction fails.
+#[derive(Clone)]
 pub struct Transaction {
     /// Unique transaction ID
     id: Uuid,
