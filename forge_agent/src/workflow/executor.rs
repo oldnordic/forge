@@ -4,7 +4,7 @@
 //! On failure, triggers selective rollback of dependent tasks using Saga compensation.
 
 use crate::audit::AuditLog;
-use crate::workflow::checkpoint::{WorkflowCheckpoint, WorkflowCheckpointService};
+use crate::workflow::checkpoint::{validate_workflow_consistency, WorkflowCheckpoint, WorkflowCheckpointService};
 use crate::workflow::dag::Workflow;
 use crate::workflow::rollback::{RollbackEngine, RollbackReport, RollbackStrategy};
 use crate::workflow::task::{TaskContext, TaskId};
@@ -479,6 +479,67 @@ impl WorkflowExecutor {
             self.checkpoint_sequence += 1;
         }
     }
+
+    /// Restores executor state from a checkpoint.
+    ///
+    /// Restores completed_tasks and failed_tasks from checkpoint data.
+    /// Does not overwrite audit_log. State restoration is idempotent.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint` - The checkpoint to restore state from
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if state was restored successfully
+    /// - `Err(WorkflowError)` if restoration fails
+    fn restore_state_from_checkpoint(
+        &mut self,
+        checkpoint: &WorkflowCheckpoint,
+    ) -> Result<(), crate::workflow::WorkflowError> {
+        // Clear existing state
+        self.completed_tasks.clear();
+        self.failed_tasks.clear();
+
+        // Restore completed tasks
+        for task_id in &checkpoint.completed_tasks {
+            self.completed_tasks.insert(task_id.clone());
+        }
+
+        // Restore failed tasks
+        self.failed_tasks = checkpoint.failed_tasks.clone();
+
+        // Update checkpoint sequence
+        self.checkpoint_sequence = checkpoint.sequence + 1;
+
+        Ok(())
+    }
+
+    /// Validates and restores checkpoint state.
+    ///
+    /// This is a convenience method that validates workflow consistency
+    /// and then restores state from the checkpoint.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint` - The checkpoint to restore
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if validation passed and state was restored
+    /// - `Err(WorkflowError)` if validation fails
+    pub fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &WorkflowCheckpoint,
+    ) -> Result<(), crate::workflow::WorkflowError> {
+        // Validate workflow consistency first
+        validate_workflow_consistency(&self.workflow, checkpoint)?;
+
+        // Restore state
+        self.restore_state_from_checkpoint(checkpoint)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -797,5 +858,134 @@ mod tests {
         assert_eq!(checkpoint.completed_tasks.len(), 2);
         assert!(checkpoint.completed_tasks.contains(&TaskId::new("a")));
         assert!(checkpoint.completed_tasks.contains(&TaskId::new("b")));
+    }
+
+    #[tokio::test]
+    async fn test_restore_state_from_checkpoint() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("a")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("a", "c").unwrap();
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Execute workflow
+        executor.execute().await.unwrap();
+
+        // Get the checkpoint
+        let workflow_id = executor.audit_log.tx_id().to_string();
+        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+
+        // Create new executor and restore state
+        let mut new_workflow = Workflow::new();
+        new_workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        new_workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        new_workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("a")));
+
+        new_workflow.add_dependency("a", "b").unwrap();
+        new_workflow.add_dependency("a", "c").unwrap();
+
+        let mut new_executor = WorkflowExecutor::new(new_workflow);
+
+        // Restore state
+        let result = new_executor.restore_checkpoint_state(&checkpoint);
+        assert!(result.is_ok());
+
+        // Verify state was restored
+        assert_eq!(new_executor.completed_tasks.len(), checkpoint.completed_tasks.len());
+        assert!(new_executor.completed_tasks.contains(&TaskId::new("a")));
+        assert!(new_executor.completed_tasks.contains(&TaskId::new("b")));
+        assert!(new_executor.completed_tasks.contains(&TaskId::new("c")));
+        assert_eq!(new_executor.checkpoint_sequence, checkpoint.sequence + 1);
+    }
+
+    #[tokio::test]
+    async fn test_state_restoration_idempotent() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+
+        workflow.add_dependency("a", "b").unwrap();
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Execute workflow
+        executor.execute().await.unwrap();
+
+        // Get the checkpoint
+        let workflow_id = executor.audit_log.tx_id().to_string();
+        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+
+        // Create new executor and restore state twice
+        let mut new_workflow = Workflow::new();
+        new_workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        new_workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+
+        new_workflow.add_dependency("a", "b").unwrap();
+
+        let mut new_executor = WorkflowExecutor::new(new_workflow);
+
+        // First restore
+        let result1 = new_executor.restore_checkpoint_state(&checkpoint);
+        assert!(result1.is_ok());
+        let completed_count_after_first = new_executor.completed_tasks.len();
+
+        // Second restore (should be idempotent)
+        let result2 = new_executor.restore_checkpoint_state(&checkpoint);
+        assert!(result2.is_ok());
+        let completed_count_after_second = new_executor.completed_tasks.len();
+
+        // State should be identical after both restores
+        assert_eq!(completed_count_after_first, completed_count_after_second);
+        assert_eq!(completed_count_after_first, checkpoint.completed_tasks.len());
+    }
+
+    #[tokio::test]
+    async fn test_restore_checkpoint_state_validates_workflow() {
+        use crate::workflow::checkpoint::WorkflowCheckpointService;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        let checkpoint_service = WorkflowCheckpointService::default();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_checkpoint_service(checkpoint_service.clone());
+
+        // Execute workflow
+        executor.execute().await.unwrap();
+
+        // Get the checkpoint
+        let workflow_id = executor.audit_log.tx_id().to_string();
+        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+
+        // Create different workflow (different tasks)
+        let mut different_workflow = Workflow::new();
+        different_workflow.add_task(Box::new(MockTask::new("x", "Task X")));
+        different_workflow.add_task(Box::new(MockTask::new("y", "Task Y")));
+
+        let mut different_executor = WorkflowExecutor::new(different_workflow);
+
+        // Should fail validation
+        let result = different_executor.restore_checkpoint_state(&checkpoint);
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::workflow::WorkflowError::WorkflowChanged(_)) => {
+                // Expected
+            }
+            _ => panic!("Expected WorkflowChanged error"),
+        }
     }
 }
