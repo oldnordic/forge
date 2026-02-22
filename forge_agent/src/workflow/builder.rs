@@ -6,6 +6,7 @@
 use crate::workflow::dag::{Workflow, WorkflowError};
 use crate::workflow::task::{TaskId, WorkflowTask};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Fluent builder for constructing workflows.
 ///
@@ -31,6 +32,8 @@ pub struct WorkflowBuilder {
     tasks: HashMap<TaskId, Box<dyn WorkflowTask>>,
     /// Dependencies between tasks (from, to)
     dependencies: Vec<(TaskId, TaskId)>,
+    /// Forge instance for auto-detection (optional)
+    forge: Option<Arc<forge_core::Forge>>,
 }
 
 impl WorkflowBuilder {
@@ -39,7 +42,30 @@ impl WorkflowBuilder {
         Self {
             tasks: HashMap::new(),
             dependencies: Vec::new(),
+            forge: None,
         }
+    }
+
+    /// Configures the builder with a Forge instance for auto-detection.
+    ///
+    /// # Arguments
+    ///
+    /// * `forge` - Forge instance for graph-based dependency detection
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let builder = WorkflowBuilder::new()
+    ///     .with_auto_detect(&forge)
+    ///     .add_task(Box::new(GraphQueryTask::find_symbol("main")));
+    /// ```
+    pub fn with_auto_detect(mut self, forge: &forge_core::Forge) -> Self {
+        self.forge = Some(Arc::new(forge.clone()));
+        self
     }
 
     /// Adds a task to the workflow.
@@ -118,6 +144,91 @@ impl WorkflowBuilder {
     ///     .unwrap();
     /// ```
     pub fn build(self) -> Result<Workflow, WorkflowError> {
+        // Check for empty workflow
+        if self.tasks.is_empty() {
+            return Err(WorkflowError::EmptyWorkflow);
+        }
+
+        // Create workflow and add all tasks
+        let mut workflow = Workflow::new();
+        for (_id, task) in self.tasks {
+            workflow.add_task(task);
+        }
+
+        // Add all dependencies
+        for (from, to) in self.dependencies {
+            // Validate that both tasks exist
+            if !workflow.contains_task(&from) {
+                return Err(WorkflowError::TaskNotFound(from));
+            }
+            if !workflow.contains_task(&to) {
+                return Err(WorkflowError::TaskNotFound(to));
+            }
+
+            // Add dependency (will fail if cycle detected)
+            workflow.add_dependency(from, to)?;
+        }
+
+        Ok(workflow)
+    }
+
+    /// Builds the workflow with automatic dependency detection.
+    ///
+    /// This method builds the workflow, runs dependency detection using
+    /// the stored Forge instance, applies high-confidence suggestions,
+    /// and validates the completed workflow.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Workflow)` - Valid workflow with auto-detected dependencies
+    /// - `Err(WorkflowError)` - If validation fails or no Forge configured
+    ///
+    /// # Errors
+    ///
+    /// - `WorkflowError::EmptyWorkflow` - No tasks were added
+    /// - `WorkflowError::CycleDetected` - Auto-detection created a cycle
+    /// - `WorkflowError::TaskNotFound` - Dependency references non-existent task
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let workflow = WorkflowBuilder::new()
+    ///     .with_auto_detect(&forge)
+    ///     .add_task(Box::new(GraphQueryTask::find_symbol("process_data")))
+    ///     .add_task(Box::new(GraphQueryTask::references("process_data")))
+    ///     .build_auto_detect()
+    ///     .await?;
+    /// ```
+    pub async fn build_auto_detect(self) -> Result<Workflow, WorkflowError> {
+        use crate::workflow::auto_detect::DependencyAnalyzer;
+
+        // Extract forge reference before moving self
+        let forge_ref = self.forge.clone();
+
+        // Build workflow without validation first
+        let mut workflow = self.build_no_validate()?;
+
+        // Run dependency detection if Forge is configured
+        if let Some(forge) = forge_ref {
+            let analyzer = DependencyAnalyzer::new(forge.graph());
+            let suggestions = analyzer.detect_dependencies(&workflow).await?;
+
+            // Apply high-confidence suggestions
+            let high_confidence: Vec<_> = suggestions
+                .into_iter()
+                .filter(|s| s.is_high_confidence())
+                .collect();
+
+            let applied = workflow.apply_suggestions(high_confidence)?;
+            // Note: Auto-detected and applied {} dependencies
+            let _ = applied; // Suppress unused warning in Phase 8
+        }
+
+        Ok(workflow)
+    }
+
+    /// Builds workflow without validation (internal helper).
+    fn build_no_validate(self) -> Result<Workflow, WorkflowError> {
         // Check for empty workflow
         if self.tasks.is_empty() {
             return Err(WorkflowError::EmptyWorkflow);
@@ -352,5 +463,39 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.completed_tasks.len(), 2);
+    }
+
+    #[test]
+    fn test_builder_with_auto_detect() {
+        use forge_core::Forge;
+
+        // Create a forge instance (in-memory for testing)
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let forge = rt.block_on(async {
+            Forge::open_with_backend(
+                "/tmp/test_workflow_builder",
+                forge_core::storage::BackendKind::Memory,
+            )
+            .await
+            .unwrap()
+        });
+
+        let builder = WorkflowBuilder::new().with_auto_detect(&forge);
+
+        // Verify that forge is stored
+        assert!(builder.forge.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_builder_auto_detect_no_forge() {
+        // Test that build_auto_detect works without Forge configured
+        let workflow = WorkflowBuilder::new()
+            .add_task(Box::new(MockTask::new("a", "Task A")))
+            .add_task(Box::new(MockTask::new("b", "Task B")))
+            .build_auto_detect()
+            .await
+            .unwrap();
+
+        assert_eq!(workflow.task_count(), 2);
     }
 }

@@ -55,7 +55,10 @@ pub mod validate;
 pub mod yaml;
 
 // Re-export core types for public API
-pub use auto_detect::{AutoDetectConfig, DependencyAnalyzer, DependencyReason, DependencySuggestion};
+pub use auto_detect::{
+    AutoDetectConfig, DependencyAnalyzer, DependencyReason, DependencySuggestion, SuggestedTaskType,
+    TaskSuggestion,
+};
 pub use builder::WorkflowBuilder;
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};

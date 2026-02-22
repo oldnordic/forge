@@ -248,6 +248,84 @@ impl Workflow {
             .map(|node| node.name.clone())
     }
 
+    /// Applies dependency suggestions to the workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `suggestions` - Vector of dependency suggestions to apply
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(usize)` - Number of dependencies applied
+    /// - `Err(WorkflowError)` - If a cycle is detected
+    ///
+    /// # Note
+    ///
+    /// Dependencies that already exist are skipped.
+    pub fn apply_suggestions(
+        &mut self,
+        suggestions: Vec<crate::workflow::auto_detect::DependencySuggestion>,
+    ) -> Result<usize, WorkflowError> {
+        use crate::workflow::auto_detect::DependencyReason;
+
+        let mut applied = 0;
+
+        for suggestion in suggestions {
+            // Check if dependency already exists
+            if self.task_dependencies(&suggestion.to_task)
+                .as_ref()
+                .map(|deps| deps.contains(&suggestion.from_task))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            // Add the dependency
+            self.add_dependency(suggestion.from_task, suggestion.to_task)?;
+            applied += 1;
+        }
+
+        Ok(applied)
+    }
+
+    /// Generates human-readable preview of dependency suggestions.
+    ///
+    /// # Arguments
+    ///
+    /// * `suggestions` - Vector of dependency suggestions to preview
+    ///
+    /// # Returns
+    ///
+    /// Vector of human-readable strings describing each suggestion
+    pub fn preview_suggestions(
+        &self,
+        suggestions: &[crate::workflow::auto_detect::DependencySuggestion],
+    ) -> Vec<String> {
+        use crate::workflow::auto_detect::DependencyReason;
+
+        suggestions
+            .iter()
+            .map(|s| {
+                let reason_text = match &s.reason {
+                    DependencyReason::SymbolImpact { symbol, hops } => {
+                        format!("symbol '{}' impact ({} hops)", symbol, hops)
+                    }
+                    DependencyReason::Reference { symbol } => {
+                        format!("reference to '{}'", symbol)
+                    }
+                    DependencyReason::Call { function } => {
+                        format!("call to '{}'", function)
+                    }
+                };
+
+                format!(
+                    "Task '{}' should depend on task '{}' (reason: {}, confidence: {:.2})",
+                    s.to_task, s.from_task, reason_text, s.confidence
+                )
+            })
+            .collect()
+    }
+
     /// Finds the cycle path for error reporting.
     ///
     /// Simple DFS-based cycle detection starting from the problematic edge.
@@ -508,5 +586,110 @@ mod tests {
         // The behavior depends on petgraph's implementation
         // We just verify it doesn't panic
         let _ = result;
+    }
+
+    #[test]
+    fn test_apply_suggestions() {
+        use crate::workflow::auto_detect::{DependencySuggestion, DependencyReason};
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+
+        let suggestions = vec![
+            DependencySuggestion {
+                from_task: TaskId::new("a"),
+                to_task: TaskId::new("b"),
+                reason: DependencyReason::SymbolImpact {
+                    symbol: "test".to_string(),
+                    hops: 1,
+                },
+                confidence: 0.9,
+            },
+            DependencySuggestion {
+                from_task: TaskId::new("b"),
+                to_task: TaskId::new("c"),
+                reason: DependencyReason::Reference {
+                    symbol: "test".to_string(),
+                },
+                confidence: 0.85,
+            },
+        ];
+
+        let applied = workflow.apply_suggestions(suggestions).unwrap();
+        assert_eq!(applied, 2);
+
+        // Verify dependencies were added
+        let deps_b = workflow.task_dependencies(&TaskId::new("b")).unwrap();
+        assert!(deps_b.contains(&TaskId::new("a")));
+
+        let deps_c = workflow.task_dependencies(&TaskId::new("c")).unwrap();
+        assert!(deps_c.contains(&TaskId::new("b")));
+    }
+
+    #[test]
+    fn test_apply_suggestions_skips_existing() {
+        use crate::workflow::auto_detect::{DependencySuggestion, DependencyReason};
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        // Add existing dependency
+        workflow.add_dependency("a", "b").unwrap();
+
+        let suggestions = vec![
+            DependencySuggestion {
+                from_task: TaskId::new("a"),
+                to_task: TaskId::new("b"),
+                reason: DependencyReason::SymbolImpact {
+                    symbol: "test".to_string(),
+                    hops: 1,
+                },
+                confidence: 0.9,
+            },
+        ];
+
+        let applied = workflow.apply_suggestions(suggestions).unwrap();
+        assert_eq!(applied, 0); // Should skip existing dependency
+    }
+
+    #[test]
+    fn test_preview_suggestions() {
+        use crate::workflow::auto_detect::{DependencySuggestion, DependencyReason};
+
+        let workflow = Workflow::new();
+
+        let suggestions = vec![
+            DependencySuggestion {
+                from_task: TaskId::new("a"),
+                to_task: TaskId::new("b"),
+                reason: DependencyReason::SymbolImpact {
+                    symbol: "test_func".to_string(),
+                    hops: 2,
+                },
+                confidence: 0.85,
+            },
+            DependencySuggestion {
+                from_task: TaskId::new("b"),
+                to_task: TaskId::new("c"),
+                reason: DependencyReason::Reference {
+                    symbol: "test_struct".to_string(),
+                },
+                confidence: 0.9,
+            },
+        ];
+
+        let preview = workflow.preview_suggestions(&suggestions);
+        assert_eq!(preview.len(), 2);
+
+        assert!(preview[0].contains("'b' should depend on task 'a'"));
+        assert!(preview[0].contains("test_func"));
+        assert!(preview[0].contains("2 hops"));
+
+        assert!(preview[1].contains("'c' should depend on task 'b'"));
+        assert!(preview[1].contains("test_struct"));
+        assert!(preview[1].contains("reference"));
     }
 }
