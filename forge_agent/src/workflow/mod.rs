@@ -61,7 +61,7 @@ pub use auto_detect::{
     TaskSuggestion,
 };
 pub use builder::WorkflowBuilder;
-pub use checkpoint::{CheckpointId, CheckpointSummary, WorkflowCheckpoint};
+pub use checkpoint::{CheckpointId, CheckpointSummary, WorkflowCheckpoint, WorkflowCheckpointService};
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};
 pub use executor::{WorkflowExecutor, WorkflowResult};
