@@ -87,8 +87,8 @@ pub enum TaskResult {
 
 /// Execution context provided to workflow tasks.
 ///
-/// Provides access to the Forge SDK for graph operations and
-/// metadata about the current workflow execution.
+/// Provides access to the Forge SDK for graph operations,
+/// metadata about the current workflow execution, and cancellation token.
 pub struct TaskContext {
     /// Optional Forge instance for graph queries
     pub forge: Option<Forge>,
@@ -96,6 +96,8 @@ pub struct TaskContext {
     pub workflow_id: String,
     /// Task identifier for this execution
     pub task_id: TaskId,
+    /// Optional cancellation token for cooperative cancellation
+    cancellation_token: Option<crate::workflow::cancellation::CancellationToken>,
 }
 
 impl TaskContext {
@@ -105,6 +107,7 @@ impl TaskContext {
             forge: None,
             workflow_id: workflow_id.into(),
             task_id,
+            cancellation_token: None,
         }
     }
 
@@ -112,6 +115,53 @@ impl TaskContext {
     pub fn with_forge(mut self, forge: Forge) -> Self {
         self.forge = Some(forge);
         self
+    }
+
+    /// Sets the cancellation token for cooperative cancellation.
+    ///
+    /// # Arguments
+    ///
+    /// * `token` - The cancellation token to check during task execution
+    ///
+    /// # Returns
+    ///
+    /// The context with cancellation token set (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use forge_agent::workflow::{CancellationTokenSource, TaskContext};
+    ///
+    /// let source = CancellationTokenSource::new();
+    /// let context = TaskContext::new("workflow-1", task_id)
+    ///     .with_cancellation_token(source.token());
+    /// ```
+    pub fn with_cancellation_token(
+        mut self,
+        token: crate::workflow::cancellation::CancellationToken,
+    ) -> Self {
+        self.cancellation_token = Some(token);
+        self
+    }
+
+    /// Returns a reference to the cancellation token if set.
+    ///
+    /// Tasks can use this to check for cancellation during execution.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+    ///     if let Some(token) = context.cancellation_token() {
+    ///         if token.is_cancelled() {
+    ///             return Ok(TaskResult::Skipped);
+    ///         }
+    ///     }
+    ///     // ... do work
+    /// }
+    /// ```
+    pub fn cancellation_token(&self) -> Option<&crate::workflow::cancellation::CancellationToken> {
+        self.cancellation_token.as_ref()
     }
 }
 
@@ -307,6 +357,55 @@ mod tests {
         assert_eq!(context.workflow_id, "workflow-1");
         assert_eq!(context.task_id, task_id);
         assert!(context.forge.is_none());
+    }
+
+    #[test]
+    fn test_context_without_cancellation_token() {
+        use crate::workflow::cancellation::CancellationToken;
+
+        let task_id = TaskId::new("task-1");
+        let context = TaskContext::new("workflow-1", task_id);
+
+        // Cancellation token should be None by default
+        assert!(context.cancellation_token().is_none());
+    }
+
+    #[test]
+    fn test_context_with_cancellation_token() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+
+        let task_id = TaskId::new("task-1");
+        let source = CancellationTokenSource::new();
+        let token = source.token();
+
+        let context = TaskContext::new("workflow-1", task_id)
+            .with_cancellation_token(token.clone());
+
+        // Cancellation token should be accessible
+        assert!(context.cancellation_token().is_some());
+        let retrieved_token = context.cancellation_token().unwrap();
+        assert!(!retrieved_token.is_cancelled());
+
+        // Cancel source
+        source.cancel();
+
+        // Retrieved token should see cancellation
+        assert!(retrieved_token.is_cancelled());
+    }
+
+    #[test]
+    fn test_context_builder_pattern() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+
+        let task_id = TaskId::new("task-1");
+        let source = CancellationTokenSource::new();
+
+        // Test builder pattern chaining
+        let context = TaskContext::new("workflow-1", task_id)
+            .with_cancellation_token(source.token());
+
+        assert!(context.cancellation_token().is_some());
+        assert_eq!(context.workflow_id, "workflow-1");
     }
 
     // Mock task for testing WorkflowTask trait
