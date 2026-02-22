@@ -11,6 +11,36 @@
 //! - [`CancellationTokenSource`]: Owner of the parent token with cancel() method
 //! - [`ChildToken`]: Derived child token for task-level cancellation
 //!
+//! # Cooperative Cancellation Patterns
+//!
+//! This module supports two main patterns for cooperative cancellation:
+//!
+//! ## 1. Polling Pattern
+//!
+//! Poll the cancellation token in long-running loops:
+//!
+//! ```ignore
+//! while !token.poll_cancelled() {
+//!     // Do work
+//!     tokio::time::sleep(Duration::from_millis(100)).await;
+//! }
+//! ```
+//!
+//! ## 2. Async Wait Pattern
+//!
+//! Wait for cancellation signal asynchronously:
+//!
+//! ```ignore
+//! tokio::select! {
+//!     _ = token.wait_cancelled() => {
+//!         // Handle cancellation
+//!     }
+//!     result = do_work() => {
+//!         // Handle completion
+//!     }
+//! }
+//! ```
+//!
 //! # Example
 //!
 //! ```ignore
@@ -31,13 +61,21 @@
 //! source.cancel();
 //! ```
 
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 /// Thread-safe cancellation token.
 ///
 /// Wraps an Arc<AtomicBool> for thread-safe cancellation state.
 /// Tokens can be cheaply cloned and shared across tasks.
+///
+/// # Cooperative Cancellation
+///
+/// Tasks can cooperatively respond to cancellation by:
+/// - Polling with [`poll_cancelled()`](Self::poll_cancelled) in loops
+/// - Awaiting with [`wait_cancelled()`](Self::wait_cancelled) in async contexts
 ///
 /// # Cloning
 ///
@@ -63,6 +101,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
+    notify: Arc<Notify>,
 }
 
 impl CancellationToken {
@@ -70,6 +109,7 @@ impl CancellationToken {
     pub(crate) fn new() -> Self {
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
+            notify: Arc::new(Notify::new()),
         }
     }
 
@@ -91,6 +131,77 @@ impl CancellationToken {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
+
+    /// Polls the cancellation state - semantic alias for [`is_cancelled()`].
+    ///
+    /// This method is intended for use in long-running loops where tasks
+    /// cooperatively check for cancellation. The naming makes the intent
+    /// clearer than [`is_cancelled()`] in polling contexts.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Polling pattern in a loop
+    /// while !token.poll_cancelled() {
+    ///     // Do work
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
+    /// }
+    /// ```
+    pub fn poll_cancelled(&self) -> bool {
+        self.is_cancelled()
+    }
+
+    /// Async method that waits until the token is cancelled.
+    ///
+    /// This uses polling with tokio::time::sleep to avoid busy-waiting.
+    /// Multiple tasks can wait simultaneously.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Wait for cancellation
+    /// token.wait_until_cancelled().await;
+    /// println!("Token was cancelled!");
+    /// ```
+    ///
+    /// # Use with tokio::select!
+    ///
+    /// ```ignore
+    /// tokio::select! {
+    ///     _ = token.wait_until_cancelled() => {
+    ///         println!("Cancelled!");
+    ///     }
+    ///     result = do_work() => {
+    ///         println!("Work completed: {:?}", result);
+    ///     }
+    /// }
+    /// ```
+    pub async fn wait_until_cancelled(&self) {
+        while !self.is_cancelled() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Returns a Future that completes when this token is cancelled.
+    ///
+    /// This is equivalent to [`wait_until_cancelled()`] but returns a named future type
+    /// that can be stored and passed around.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let future = token.wait_cancelled();
+    /// // ... later
+    /// future.await;
+    /// ```
+    pub fn wait_cancelled(&self) -> impl Future<Output = ()> + Send + Sync + 'static {
+        let cancelled = self.cancelled.clone();
+        async move {
+            while !cancelled.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+    }
 }
 
 /// Source that owns a cancellation token and can trigger cancellation.
@@ -103,6 +214,11 @@ impl CancellationToken {
 ///
 /// The source can create child tokens via child_token(), which allows for
 /// hierarchical cancellation. Children inherit the parent's cancellation state.
+///
+/// # Cloning
+///
+/// Cloning a source creates a new handle to the same underlying token.
+/// This allows multiple parts of the code to share cancellation control.
 ///
 /// # Example
 ///
@@ -120,6 +236,7 @@ impl CancellationToken {
 /// // Cancel workflow from main thread
 /// source.cancel();
 /// ```
+#[derive(Clone)]
 pub struct CancellationTokenSource {
     token: CancellationToken,
 }
@@ -158,6 +275,7 @@ impl CancellationTokenSource {
     /// Cancels the token, propagating to all child tokens and clones.
     ///
     /// This method is idempotent - calling it multiple times has no additional effect.
+    /// All tasks waiting via [`wait_cancelled()`](CancellationToken::wait_cancelled) will be woken.
     ///
     /// # Example
     ///
@@ -173,6 +291,7 @@ impl CancellationTokenSource {
     /// ```
     pub fn cancel(&self) {
         self.token.cancelled.store(true, Ordering::SeqCst);
+        self.token.notify.notify_waiters();
     }
 
     /// Creates a child token that inherits parent cancellation.
@@ -458,6 +577,130 @@ mod tests {
         let token = source.token();
 
         assert!(!token.is_cancelled());
+    }
+
+    // Tests for cooperative cancellation
+
+    #[test]
+    fn test_poll_cancelled_returns_false_initially() {
+        let source = CancellationTokenSource::new();
+        let token = source.token();
+
+        assert!(!token.poll_cancelled());
+    }
+
+    #[test]
+    fn test_poll_cancelled_returns_true_after_cancel() {
+        let source = CancellationTokenSource::new();
+        let token = source.token();
+
+        source.cancel();
+        assert!(token.poll_cancelled());
+    }
+
+    #[tokio::test]
+    async fn test_wait_cancelled_completes_on_cancel() {
+        let source = CancellationTokenSource::new();
+        let token = source.token();
+
+        // Spawn a task to cancel after a delay
+        let source_clone = source.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            source_clone.cancel();
+        });
+
+        // Wait for cancellation - should complete within 200ms
+        let start = std::time::Instant::now();
+        token.wait_cancelled().await;
+        let elapsed = start.elapsed();
+
+        assert!(elapsed < tokio::time::Duration::from_millis(200));
+        assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn test_wait_cancelled_multiple_waiters() {
+        let source = CancellationTokenSource::new();
+        let token1 = source.token();
+        let token2 = source.token();
+        let token3 = source.token();
+
+        // Spawn multiple waiters
+        let handle1 = tokio::spawn(async move {
+            token1.wait_cancelled().await;
+        });
+
+        let handle2 = tokio::spawn(async move {
+            token2.wait_cancelled().await;
+        });
+
+        let handle3 = tokio::spawn(async move {
+            token3.wait_cancelled().await;
+        });
+
+        // Cancel after a delay
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        source.cancel();
+
+        // All waiters should complete
+        let start = std::time::Instant::now();
+        let (r1, r2, r3) = tokio::join!(handle1, handle2, handle3);
+        let elapsed = start.elapsed();
+
+        assert!(r1.is_ok());
+        assert!(r2.is_ok());
+        assert!(r3.is_ok());
+        assert!(elapsed < tokio::time::Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn test_wait_cancelled_idempotent() {
+        let source = CancellationTokenSource::new();
+        let token = source.token();
+
+        // Cancel immediately
+        source.cancel();
+
+        // Multiple waits should all complete immediately
+        let start = std::time::Instant::now();
+        token.wait_cancelled().await;
+        token.wait_cancelled().await;
+        token.wait_cancelled().await;
+        let elapsed = start.elapsed();
+
+        assert!(elapsed < tokio::time::Duration::from_millis(10));
+    }
+
+    #[tokio::test]
+    async fn test_cooperative_cancellation_pattern() {
+        let source = CancellationTokenSource::new();
+        let token = source.token();
+
+        // Simulate a task that cooperatively polls for cancellation
+        let token_clone = token.clone();
+        let handle = tokio::spawn(async move {
+            let mut iterations = 0;
+            while !token_clone.poll_cancelled() {
+                iterations += 1;
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+                // Safety limit to avoid infinite loop in test
+                if iterations >= 100 {
+                    break;
+                }
+            }
+            iterations
+        });
+
+        // Cancel after 50ms
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        source.cancel();
+
+        // Task should exit early due to cancellation
+        let iterations = handle.await.unwrap();
+        assert!(iterations < 100); // Should not complete all 100 iterations
+        assert!(iterations > 2); // Should have done some work
     }
 
     // Integration test with WorkflowExecutor
