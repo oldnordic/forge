@@ -86,6 +86,11 @@ impl WorkflowTask for ConditionalTask {
                     Ok(condition_result)
                 }
             }
+            TaskResult::WithCompensation { .. } => {
+                // For now, treat WithCompensation as Success and execute then task
+                // TODO: Consider if compensation should propagate
+                self.then_task.execute(context).await
+            }
         }
     }
 
@@ -154,6 +159,11 @@ impl WorkflowTask for TryCatchTask {
             Ok(TaskResult::Success) => try_result,
             Ok(TaskResult::Failed(_)) | Ok(TaskResult::Skipped) => {
                 // Execute catch task on failure
+                self.catch_task.execute(context).await
+            }
+            Ok(TaskResult::WithCompensation { .. }) => {
+                // For now, execute catch task on compensation result
+                // TODO: Consider if compensation should execute before catch
                 self.catch_task.execute(context).await
             }
             Err(_) => {
