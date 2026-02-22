@@ -45,7 +45,7 @@ ForgeKit is a deterministic code intelligence SDK for Rust - "LLVM for AI Code A
   6. User can define simple workflows in YAML, complex workflows via Rust API
   7. User can inspect workflow state including current step, completed steps, and pending work
   8. Workflow execution events are logged to audit trail
-**Plans**: 3 plans
+**Plans**: 5 plans
 
 Plans:
 - [ ] 08-01: DAG scheduler with topological sort and cycle detection
@@ -63,7 +63,7 @@ Plans:
   2. Failed workflow can resume from last checkpoint instead of restarting
   3. External tool side effects use compensation transactions for rollback (Saga pattern)
   4. Validation checkpoints between steps check confidence scores and trigger rollback if needed
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [ ] 09-01: State checkpointing with forge-reasoning integration (Wave 1)
@@ -81,9 +81,11 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 10-01: CancellationToken integration with parent-child hierarchy
-- [ ] 10-02: Timeout handling for tasks and workflows
+- [x] 10-01: CancellationToken integration with parent-child hierarchy
+- [x] 10-02: Timeout handling for tasks and workflows
 - [ ] 10-03: Cooperative cancellation in async loops
+
+**Status**: 2/3 plans complete (67%)
 
 #### Phase 11: Tool Integration
 **Goal**: External tool execution with fallback handlers
@@ -129,6 +131,6 @@ Phases execute in numeric order: 8 → 9 → 10 → 11 → 12
 | 7. Code Cleanup | v0.3 | 1/1 | Complete | 2026-02-22 |
 | 8. Workflow Foundation | v0.4 | 0/5 | Not started | - |
 | 9. State Management | v0.4 | 0/4 | Not started | - |
-| 10. Cancellation & Timeouts | v0.4 | 0/3 | Not started | - |
-| 11. Tool Integration | v0.4 | 0/3 | Not started | - |
+| 10. Cancellation & Timeouts | v0.4 | 2/3 | In progress | 2026-02-22 |
+| 11. Tool Integration | v0.4 | 0/3 | Planned | - |
 | 12. Parallel Execution | v0.4 | 0/3 | Not started | - |
