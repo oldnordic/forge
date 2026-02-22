@@ -94,6 +94,67 @@ cargo test test_name
 
 ---
 
+### Rule #4a: GRAPH-TOOLS-FIRST MANDATE (2026-02-22)
+
+**When analyzing code, ALWAYS use graph tools before falling back to grep/file reads.**
+
+#### Decision Matrix
+
+| What you're looking for | Tool to use | Example |
+|------------------------|-------------|---------|
+| Function/struct by name | `llmgrep search --query <name>` | `llmgrep search --query forward_slice` |
+| Symbol with specific ID | `magellan find --symbol-id <id>` | `magellan find --symbol-id abc123...` |
+| All callers of a function | `mirage blast-zone --function <name>` | `mirage blast-zone --function main` |
+| CFG structure | `mirage cfg --function <name>` | `mirage cfg --function process_request` |
+| Execution paths | `mirage paths --function <name>` | `mirage paths --function handle_data` |
+| Dead code detection | `mirage unreachable --function <name>` | `mirage unreachable --function old_func` |
+| Impact analysis | `mirage slice --function <name>` | `mirage slice --function auth_check` |
+
+#### Why Graph Tools Are Superior
+
+**Using grep:**
+```bash
+$ grep -rn "forward_slice" src/
+# Returns: 47 matches including:
+# - Comments mentioning forward_slice
+# - Variable names like forward_slice_result
+# - String literals
+# - False positives in unrelated files
+# - No semantic context (is it a call? definition?)
+```
+
+**Using llmgrep:**
+```bash
+$ llmgrep search --query forward_slice --db codegraph.db
+# Returns: 3 symbols with:
+# - Exact type (Function)
+# - File location + byte spans
+# - Symbol ID for precise references
+# - AST context
+# - Complexity metrics
+# - No false positives
+```
+
+#### Enforcement
+
+**BEFORE using grep, ask yourself:**
+1. Is the database indexed? (`magellan status --db .codemcp/codegraph.db`)
+2. Can llmgrep/magellan find this symbol?
+3. Do I need semantic context or just text?
+
+**ONLY use grep when:**
+- Searching for TODO/FIXME comments
+- Finding string literals or log messages
+- Pattern matching in non-code files
+- The database doesn't exist yet
+
+**Token Savings:**
+- Manual grep + analysis: ~500-1000 tokens
+- Graph tool query + structured result: ~100-200 tokens
+- **Savings: 60-80% fewer tokens**
+
+---
+
 ### Rule #5: CITE YOUR SOURCES
 
 Before making changes, cite EXACTLY what you read:
