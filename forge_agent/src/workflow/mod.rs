@@ -62,6 +62,7 @@ pub use auto_detect::{
     TaskSuggestion,
 };
 pub use builder::WorkflowBuilder;
+pub use cancellation::{CancellationToken, CancellationTokenSource, ChildToken};
 pub use checkpoint::{
     can_proceed, extract_confidence, requires_rollback, validate_checkpoint, CheckpointId,
     CheckpointSummary, RollbackRecommendation, ValidationCheckpoint, ValidationResult, ValidationStatus,

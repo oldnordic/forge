@@ -459,4 +459,65 @@ mod tests {
 
         assert!(!token.is_cancelled());
     }
+
+    // Integration test with WorkflowExecutor
+
+    #[tokio::test]
+    async fn test_workflow_cancellation_with_executor() {
+        use crate::workflow::dag::Workflow;
+        use crate::workflow::executor::WorkflowExecutor;
+        use crate::workflow::task::{TaskContext, TaskId, TaskResult, WorkflowTask};
+        use async_trait::async_trait;
+
+        // Create a simple task for testing
+        struct SimpleTask {
+            id: TaskId,
+            name: String,
+        }
+
+        #[async_trait]
+        impl WorkflowTask for SimpleTask {
+            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+                // Simulate some work
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                Ok(TaskResult::Success)
+            }
+
+            fn id(&self) -> TaskId {
+                self.id.clone()
+            }
+
+            fn name(&self) -> &str {
+                &self.name
+            }
+        }
+
+        // Create workflow with 5 sequential tasks
+        let mut workflow = Workflow::new();
+        for i in 1..=5 {
+            workflow.add_task(Box::new(SimpleTask {
+                id: TaskId::new(format!("task-{}", i)),
+                name: format!("Task {}", i),
+            }));
+        }
+
+        // Create cancellation source and cancel before execution
+        let source = CancellationTokenSource::new();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_cancellation_source(source);
+
+        // Cancel immediately
+        executor.cancel();
+
+        // Execute workflow (should be cancelled immediately)
+        let result = executor.execute().await.unwrap();
+
+        // Workflow should be cancelled with no tasks completed
+        assert!(!result.success);
+        assert_eq!(result.completed_tasks.len(), 0);
+
+        // Verify cancellation was recorded in audit log
+        let events = executor.audit_log().replay();
+        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCancelled { .. })));
+    }
 }
