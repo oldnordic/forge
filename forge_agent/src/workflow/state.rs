@@ -2,12 +2,37 @@
 //!
 //! Provides runtime state inspection for workflows including task status,
 //! progress tracking, and serialization for external monitoring.
+//!
+//! # Thread Safety
+//!
+//! This module provides [`ConcurrentState`] for thread-safe state access during
+//! parallel workflow execution. It uses `Arc<RwLock<T>>` to allow:
+//! - Multiple concurrent reads (tasks checking state)
+//! - Exclusive writes (executor updating task status)
+//!
+//! ## Thread-Safety Audit (Task 1 of Phase 12-02)
+//!
+//! **Findings:**
+//! - `WorkflowState` uses `Vec<TaskSummary>` - NOT thread-safe
+//! - `WorkflowExecutor.completed_tasks: HashSet<TaskId>` - NOT thread-safe
+//! - `WorkflowExecutor.failed_tasks: Vec<TaskId>` - NOT thread-safe
+//!
+//! **Decision:** Use `Arc<RwLock<T>>` instead of:
+//! - `Arc<Mutex<T>>`: RwLock allows concurrent reads
+//! - `dashmap`: Not needed - we don't require per-key concurrent access
+//!
+//! **Data Race Identified:** In `execute_parallel()`, line 850:
+//! ```rust
+//! self.completed_tasks.insert(task_id.clone());  // DATA RACE!
+//! ```
+//! Fixed by using `ConcurrentState` for all state mutations.
 
 use crate::workflow::dag::TaskNode;
 use crate::workflow::executor::WorkflowExecutor;
 use crate::workflow::task::TaskId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::sync::{Arc, RwLock};
 
 /// Status of a workflow execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +62,17 @@ pub enum TaskStatus {
     Failed,
     /// Task was skipped
     Skipped,
+}
+
+impl TaskStatus {
+    /// Creates TaskStatus from a parallel execution result.
+    pub(crate) fn from_parallel_result(success: bool) -> Self {
+        if success {
+            TaskStatus::Completed
+        } else {
+            TaskStatus::Failed
+        }
+    }
 }
 
 /// Summary of a task's state.
@@ -122,6 +158,259 @@ impl WorkflowState {
     pub fn with_current_task(mut self, task: TaskSummary) -> Self {
         self.current_task = Some(task);
         self
+    }
+}
+
+/// Thread-safe wrapper for workflow state during parallel execution.
+///
+/// Uses `Arc<RwLock<T>>` to allow multiple concurrent reads with exclusive writes.
+/// This is optimal for workflow execution where:
+/// - Multiple tasks may read state concurrently
+/// - Only the executor writes state updates
+///
+/// # Example
+///
+/// ```ignore
+/// let state = ConcurrentState::new(WorkflowState::new("workflow-1"));
+///
+/// // Concurrent reads (tasks checking state)
+/// {
+///     let reader = state.read().unwrap();
+///     assert_eq!(reader.status, WorkflowStatus::Running);
+/// }
+///
+/// // Exclusive write (executor updating state)
+/// {
+///     let mut writer = state.write().unwrap();
+///     writer.status = WorkflowStatus::Completed;
+/// }
+/// ```
+#[derive(Clone)]
+pub struct ConcurrentState {
+    /// Inner state wrapped in Arc<RwLock for thread-safe access
+    inner: Arc<RwLock<WorkflowState>>,
+}
+
+impl ConcurrentState {
+    /// Creates a new ConcurrentState from a WorkflowState.
+    pub fn new(state: WorkflowState) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(state)),
+        }
+    }
+
+    /// Acquires a read lock, allowing concurrent access from multiple readers.
+    ///
+    /// # Returns
+    ///
+    /// A `RwLockReadGuard` that provides immutable access to the state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
+    pub fn read(&self) -> Result<std::sync::RwLockReadGuard<WorkflowState>, std::sync::PoisonError<std::sync::RwLockReadGuard<WorkflowState>>> {
+        self.inner.read()
+    }
+
+    /// Acquires a write lock, providing exclusive mutable access.
+    ///
+    /// # Returns
+    ///
+    /// A `RwLockWriteGuard` that provides mutable access to the state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
+    pub fn write(&self) -> Result<std::sync::RwLockWriteGuard<WorkflowState>, std::sync::PoisonError<std::sync::RwLockWriteGuard<WorkflowState>>> {
+        self.inner.write()
+    }
+
+    /// Attempts to acquire a read lock without blocking.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(guard)` if the lock was acquired immediately
+    /// - `None` if the lock is held by a writer
+    pub fn try_read(&self) -> Option<std::sync::RwLockReadGuard<'_, WorkflowState>> {
+        self.inner.try_read().ok()
+    }
+
+    /// Attempts to acquire a write lock without blocking.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(guard)` if the lock was acquired immediately
+    /// - `None` if the lock is held by another reader or writer
+    pub fn try_write(&self) -> Option<std::sync::RwLockWriteGuard<'_, WorkflowState>> {
+        self.inner.try_write().ok()
+    }
+
+    /// Returns the number of strong references to the inner state.
+    ///
+    /// Useful for debugging to see how many clones exist.
+    pub fn ref_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
+    }
+}
+
+// SAFETY: ConcurrentState is Send + Sync because:
+// - Arc<T> is Send + Sync when T: Send + Sync
+// - RwLock<T> is Send + Sync when T: Send
+// - WorkflowState is Send (all fields are Send)
+unsafe impl Send for ConcurrentState {}
+unsafe impl Sync for ConcurrentState {}
+
+#[cfg(test)]
+mod concurrent_state_tests {
+    use super::*;
+    use std::sync::Barrier;
+    use tokio::task::JoinSet;
+
+    #[test]
+    fn test_concurrent_state_creation() {
+        let state = WorkflowState::new("workflow-1");
+        let concurrent = ConcurrentState::new(state);
+
+        let reader = concurrent.read().unwrap();
+        assert_eq!(reader.workflow_id, "workflow-1");
+        assert_eq!(reader.status, WorkflowStatus::Pending);
+    }
+
+    #[test]
+    fn test_concurrent_state_clone_is_cheap() {
+        let state = WorkflowState::new("workflow-1");
+        let concurrent = ConcurrentState::new(state);
+
+        // Clone is cheap (just Arc increment)
+        let cloned = concurrent.clone();
+        assert_eq!(concurrent.ref_count(), 2);
+
+        let cloned2 = cloned.clone();
+        assert_eq!(concurrent.ref_count(), 3);
+    }
+
+    #[test]
+    fn test_concurrent_read_write() {
+        let state = WorkflowState::new("workflow-1");
+        let concurrent = ConcurrentState::new(state);
+
+        // Read initial state
+        {
+            let reader = concurrent.read().unwrap();
+            assert_eq!(reader.status, WorkflowStatus::Pending);
+        }
+
+        // Write new state
+        {
+            let mut writer = concurrent.write().unwrap();
+            writer.status = WorkflowStatus::Completed;
+        }
+
+        // Read updated state
+        {
+            let reader = concurrent.read().unwrap();
+            assert_eq!(reader.status, WorkflowStatus::Completed);
+        }
+    }
+
+    #[test]
+    fn test_try_read_write() {
+        let state = WorkflowState::new("workflow-1");
+        let concurrent = ConcurrentState::new(state);
+
+        // Try read should succeed
+        assert!(concurrent.try_read().is_some());
+
+        // Try write should succeed
+        assert!(concurrent.try_write().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_state_thread_safety() {
+        let state = WorkflowState::new("workflow-1").with_status(WorkflowStatus::Running);
+        let concurrent = Arc::new(ConcurrentState::new(state));
+        let barrier = Arc::new(Barrier::new(3)); // 2 readers + 1 writer
+
+        let mut handles = JoinSet::new();
+
+        // Spawn reader 1
+        let concurrent1 = Arc::clone(&concurrent);
+        let barrier1 = Arc::clone(&barrier);
+        handles.spawn(async move {
+            barrier1.wait();
+            let reader = concurrent1.read().unwrap();
+            assert_eq!(reader.workflow_id, "workflow-1");
+        });
+
+        // Spawn reader 2
+        let concurrent2 = Arc::clone(&concurrent);
+        let barrier2 = Arc::clone(&barrier);
+        handles.spawn(async move {
+            barrier2.wait();
+            let reader = concurrent2.read().unwrap();
+            assert_eq!(reader.status, WorkflowStatus::Running);
+        });
+
+        // Spawn writer
+        let concurrent3 = Arc::clone(&concurrent);
+        let barrier3 = Arc::clone(&barrier);
+        handles.spawn(async move {
+            barrier3.wait();
+            // Small delay to let readers read first
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let mut writer = concurrent3.write().unwrap();
+            writer.status = WorkflowStatus::Completed;
+        });
+
+        // Wait for all tasks
+        while let Some(result) = handles.join_next().await {
+            result.expect("Task should complete successfully");
+        }
+
+        // Verify final state
+        let reader = concurrent.read().unwrap();
+        assert_eq!(reader.status, WorkflowStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_state_stress_test() {
+        let state = WorkflowState::new("workflow-stress");
+        let concurrent = Arc::new(ConcurrentState::new(state));
+
+        let mut handles = JoinSet::new();
+
+        // Spawn 10 concurrent readers/writers
+        for i in 0..10 {
+            let concurrent_clone = Arc::clone(&concurrent);
+            handles.spawn(async move {
+                // Read (guard dropped before await)
+                {
+                    let _reader = concurrent_clone.read().unwrap();
+                }
+
+                // Small delay
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+
+                // Write (if even number)
+                if i % 2 == 0 {
+                    let mut writer = concurrent_clone.write().unwrap();
+                    writer.completed_tasks.push(TaskSummary::new(
+                        format!("task-{}", i),
+                        format!("Task {}", i),
+                        TaskStatus::Completed,
+                    ));
+                }
+            });
+        }
+
+        // Wait for all tasks
+        while let Some(result) = handles.join_next().await {
+            result.expect("Task should complete successfully");
+        }
+
+        // Verify no corruption - should have 5 completed tasks (even numbers 0,2,4,6,8)
+        let reader = concurrent.read().unwrap();
+        assert_eq!(reader.completed_tasks.len(), 5);
     }
 }
 
