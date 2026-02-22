@@ -62,8 +62,9 @@ pub use auto_detect::{
 };
 pub use builder::WorkflowBuilder;
 pub use checkpoint::{
-    CheckpointId, CheckpointSummary, RollbackRecommendation, ValidationCheckpoint, ValidationResult,
-    ValidationStatus, WorkflowCheckpoint, WorkflowCheckpointService,
+    can_proceed, extract_confidence, requires_rollback, validate_checkpoint, CheckpointId,
+    CheckpointSummary, RollbackRecommendation, ValidationCheckpoint, ValidationResult, ValidationStatus,
+    WorkflowCheckpoint, WorkflowCheckpointService,
 };
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};

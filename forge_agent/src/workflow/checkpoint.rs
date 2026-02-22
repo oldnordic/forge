@@ -84,6 +84,121 @@ impl Default for ValidationCheckpoint {
     }
 }
 
+/// Extracts confidence score from a task result.
+///
+/// Maps TaskResult variants to confidence scores:
+/// - Success -> 1.0 (100% confidence)
+/// - Skipped -> 0.5 (50% confidence)
+/// - Failed -> 0.0 (0% confidence)
+/// - WithCompensation -> extract from inner result
+///
+/// # Arguments
+///
+/// * `result` - The task result to extract confidence from
+///
+/// # Returns
+///
+/// Confidence score from 0.0 to 1.0
+pub fn extract_confidence(result: &crate::workflow::task::TaskResult) -> f64 {
+    match result {
+        crate::workflow::task::TaskResult::Success => 1.0,
+        crate::workflow::task::TaskResult::Skipped => 0.5,
+        crate::workflow::task::TaskResult::Failed(_) => 0.0,
+        crate::workflow::task::TaskResult::WithCompensation { result, .. } => {
+            extract_confidence(result)
+        }
+    }
+}
+
+/// Validates a task checkpoint against confidence thresholds.
+///
+/// Extracts confidence from task result and determines validation status
+/// based on configured thresholds. Returns ValidationResult with status
+/// and optional rollback recommendation.
+///
+/// # Arguments
+///
+/// * `task_result` - The task result to validate
+/// * `config` - Validation checkpoint configuration
+///
+/// # Returns
+///
+/// ValidationResult containing confidence, status, and rollback recommendation
+pub fn validate_checkpoint(
+    task_result: &crate::workflow::task::TaskResult,
+    config: &ValidationCheckpoint,
+) -> ValidationResult {
+    let confidence = extract_confidence(task_result);
+
+    // Determine validation status
+    let status = if confidence >= config.warning_threshold {
+        ValidationStatus::Passed
+    } else if confidence >= config.min_confidence {
+        ValidationStatus::Warning
+    } else {
+        ValidationStatus::Failed
+    };
+
+    // Generate message with percentage
+    let percentage = (confidence * 100.0) as u32;
+    let message = format!(
+        "Confidence: {}% (status: {:?})",
+        percentage, status
+    );
+
+    // Determine rollback recommendation
+    let rollback_recommendation = if matches!(status, ValidationStatus::Failed)
+        && config.rollback_on_failure
+    {
+        Some(RollbackRecommendation::FullRollback)
+    } else {
+        None
+    };
+
+    ValidationResult {
+        confidence,
+        status,
+        message,
+        rollback_recommendation,
+        timestamp: Utc::now(),
+    }
+}
+
+/// Checks if workflow can proceed based on validation result.
+///
+/// Returns true if validation status is Passed or Warning,
+/// false if validation Failed.
+///
+/// # Arguments
+///
+/// * `validation` - The validation result to check
+///
+/// # Returns
+///
+/// true if workflow can proceed, false otherwise
+pub fn can_proceed(validation: &ValidationResult) -> bool {
+    !matches!(validation.status, ValidationStatus::Failed)
+}
+
+/// Checks if rollback is required based on validation result.
+///
+/// Returns true if validation status is Failed and rollback
+/// recommendation is present.
+///
+/// # Arguments
+///
+/// * `validation` - The validation result to check
+///
+/// # Returns
+///
+/// true if rollback is required, false otherwise
+pub fn requires_rollback(validation: &ValidationResult) -> bool {
+    matches!(
+        validation.status,
+        ValidationStatus::Failed
+    ) && validation.rollback_recommendation.is_some()
+}
+
 /// Unique identifier for a workflow checkpoint.
 ///
 /// Wrapper type for forge_reasoning::CheckpointId to maintain
@@ -1143,5 +1258,222 @@ mod tests {
         assert_eq!(restored.confidence, result.confidence);
         assert_eq!(restored.status, result.status);
         assert_eq!(restored.message, result.message);
+    }
+
+    // Tests for confidence extraction
+
+    #[test]
+    fn test_extract_confidence_success() {
+        use crate::workflow::task::TaskResult;
+
+        let result = TaskResult::Success;
+        let confidence = extract_confidence(&result);
+
+        assert_eq!(confidence, 1.0);
+    }
+
+    #[test]
+    fn test_extract_confidence_skipped() {
+        use crate::workflow::task::TaskResult;
+
+        let result = TaskResult::Skipped;
+        let confidence = extract_confidence(&result);
+
+        assert_eq!(confidence, 0.5);
+    }
+
+    #[test]
+    fn test_extract_confidence_failed() {
+        use crate::workflow::task::TaskResult;
+
+        let result = TaskResult::Failed("error".to_string());
+        let confidence = extract_confidence(&result);
+
+        assert_eq!(confidence, 0.0);
+    }
+
+    #[test]
+    fn test_extract_confidence_with_compensation() {
+        use crate::workflow::task::{CompensationAction, TaskResult};
+
+        let inner = Box::new(TaskResult::Success);
+        let compensation = CompensationAction::skip("test");
+        let result = TaskResult::WithCompensation {
+            result: inner,
+            compensation,
+        };
+
+        let confidence = extract_confidence(&result);
+
+        // Should extract from inner Success result
+        assert_eq!(confidence, 1.0);
+    }
+
+    #[test]
+    fn test_extract_confidence_with_compensation_failed() {
+        use crate::workflow::task::{CompensationAction, TaskResult};
+
+        let inner = Box::new(TaskResult::Failed("error".to_string()));
+        let compensation = CompensationAction::skip("test");
+        let result = TaskResult::WithCompensation {
+            result: inner,
+            compensation,
+        };
+
+        let confidence = extract_confidence(&result);
+
+        // Should extract from inner Failed result
+        assert_eq!(confidence, 0.0);
+    }
+
+    // Tests for validation logic
+
+    #[test]
+    fn test_validate_checkpoint_passed() {
+        use crate::workflow::task::TaskResult;
+
+        let result = TaskResult::Success;
+        let config = ValidationCheckpoint::default();
+
+        let validation = validate_checkpoint(&result, &config);
+
+        assert_eq!(validation.confidence, 1.0);
+        assert_eq!(validation.status, ValidationStatus::Passed);
+        assert!(validation.message.contains("100%"));
+        assert!(validation.rollback_recommendation.is_none());
+    }
+
+    #[test]
+    fn test_validate_checkpoint_warning() {
+        use crate::workflow::task::TaskResult;
+
+        // Skipped gives 0.5 confidence (50%)
+        // With default thresholds (70% min, 85% warning), 50% is Failed
+        // Let's use custom thresholds to test Warning
+        let result = TaskResult::Skipped;
+        let config = ValidationCheckpoint {
+            min_confidence: 0.4,
+            warning_threshold: 0.6,
+            rollback_on_failure: true,
+        };
+
+        let validation = validate_checkpoint(&result, &config);
+
+        assert_eq!(validation.confidence, 0.5);
+        assert_eq!(validation.status, ValidationStatus::Warning);
+        assert!(validation.message.contains("50%"));
+        assert!(validation.rollback_recommendation.is_none());
+    }
+
+    #[test]
+    fn test_validate_checkpoint_failed() {
+        use crate::workflow::task::TaskResult;
+
+        let result = TaskResult::Failed("error".to_string());
+        let config = ValidationCheckpoint::default();
+
+        let validation = validate_checkpoint(&result, &config);
+
+        assert_eq!(validation.confidence, 0.0);
+        assert_eq!(validation.status, ValidationStatus::Failed);
+        assert!(validation.message.contains("0%"));
+        assert!(validation.rollback_recommendation.is_some());
+    }
+
+    #[test]
+    fn test_validate_thresholds_custom() {
+        use crate::workflow::task::TaskResult;
+
+        let result = TaskResult::Skipped; // 0.5 confidence
+
+        // Set thresholds to make 0.5 a Warning
+        let config = ValidationCheckpoint {
+            min_confidence: 0.4,
+            warning_threshold: 0.6,
+            rollback_on_failure: false,
+        };
+
+        let validation = validate_checkpoint(&result, &config);
+
+        assert_eq!(validation.status, ValidationStatus::Warning);
+        assert!(validation.rollback_recommendation.is_none());
+    }
+
+    #[test]
+    fn test_can_proceed_passed() {
+        let validation = ValidationResult {
+            confidence: 0.9,
+            status: ValidationStatus::Passed,
+            message: "Good".to_string(),
+            rollback_recommendation: None,
+            timestamp: Utc::now(),
+        };
+
+        assert!(can_proceed(&validation));
+    }
+
+    #[test]
+    fn test_can_proceed_warning() {
+        let validation = ValidationResult {
+            confidence: 0.7,
+            status: ValidationStatus::Warning,
+            message: "Warning".to_string(),
+            rollback_recommendation: None,
+            timestamp: Utc::now(),
+        };
+
+        assert!(can_proceed(&validation));
+    }
+
+    #[test]
+    fn test_can_proceed_failed() {
+        let validation = ValidationResult {
+            confidence: 0.3,
+            status: ValidationStatus::Failed,
+            message: "Failed".to_string(),
+            rollback_recommendation: None,
+            timestamp: Utc::now(),
+        };
+
+        assert!(!can_proceed(&validation));
+    }
+
+    #[test]
+    fn test_requires_rollback_true() {
+        let validation = ValidationResult {
+            confidence: 0.0,
+            status: ValidationStatus::Failed,
+            message: "Failed".to_string(),
+            rollback_recommendation: Some(RollbackRecommendation::FullRollback),
+            timestamp: Utc::now(),
+        };
+
+        assert!(requires_rollback(&validation));
+    }
+
+    #[test]
+    fn test_requires_rollback_false_no_rollback() {
+        let validation = ValidationResult {
+            confidence: 0.0,
+            status: ValidationStatus::Failed,
+            message: "Failed".to_string(),
+            rollback_recommendation: None,
+            timestamp: Utc::now(),
+        };
+
+        assert!(!requires_rollback(&validation));
+    }
+
+    #[test]
+    fn test_requires_rollback_false_passed() {
+        let validation = ValidationResult {
+            confidence: 1.0,
+            status: ValidationStatus::Passed,
+            message: "Passed".to_string(),
+            rollback_recommendation: None,
+            timestamp: Utc::now(),
+        };
+
+        assert!(!requires_rollback(&validation));
     }
 }
