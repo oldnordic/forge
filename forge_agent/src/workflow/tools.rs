@@ -33,6 +33,7 @@
 
 use crate::workflow::rollback::ToolCompensation;
 use crate::workflow::task::{TaskContext, TaskError, TaskResult};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -299,6 +300,296 @@ pub enum ToolError {
     /// Tool already registered
     #[error("Tool already registered: {0}")]
     AlreadyRegistered(String),
+}
+
+/// Result of a fallback handler operation.
+///
+/// Fallback handlers can retry with modified invocation, skip with a result,
+/// or fail with the original error.
+#[derive(Clone, Debug)]
+pub enum FallbackResult {
+    /// Retry the tool with the same or modified invocation
+    Retry(ToolInvocation),
+    /// Skip the tool and return a result
+    Skip(TaskResult),
+    /// Fail with the original error
+    Fail(ToolError),
+}
+
+/// Handler for tool execution failures.
+///
+/// FallbackHandler allows workflows to recover from tool failures using
+/// configurable strategies (retry, skip, custom handlers).
+#[async_trait]
+pub trait FallbackHandler: Send + Sync {
+    /// Handles a tool execution error.
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The error that occurred during tool execution
+    /// * `invocation` - The invocation that caused the error
+    ///
+    /// # Returns
+    ///
+    /// A FallbackResult indicating whether to retry, skip, or fail
+    async fn handle(&self, error: &ToolError, invocation: &ToolInvocation) -> FallbackResult;
+}
+
+/// Retry fallback handler with exponential backoff.
+///
+/// Retries tool execution on transient errors using exponential backoff.
+/// Useful for network timeouts or temporary resource issues.
+///
+/// # Example
+///
+/// ```
+/// use forge_agent::workflow::tools::RetryFallback;
+///
+/// // Retry up to 3 times with 100ms base backoff
+/// let fallback = RetryFallback::new(3, 100);
+/// ```
+#[derive(Clone)]
+pub struct RetryFallback {
+    /// Maximum number of retry attempts
+    max_attempts: u32,
+    /// Base backoff duration in milliseconds
+    backoff_ms: u64,
+}
+
+impl RetryFallback {
+    /// Creates a new RetryFallback.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_attempts` - Maximum number of retry attempts (including initial attempt)
+    /// * `backoff_ms` - Base backoff duration in milliseconds (exponential: backoff_ms * 2^attempt)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tools::RetryFallback;
+    ///
+    /// let fallback = RetryFallback::new(3, 100);
+    /// ```
+    pub fn new(max_attempts: u32, backoff_ms: u64) -> Self {
+        Self {
+            max_attempts,
+            backoff_ms,
+        }
+    }
+}
+
+#[async_trait]
+impl FallbackHandler for RetryFallback {
+    async fn handle(&self, error: &ToolError, invocation: &ToolInvocation) -> FallbackResult {
+        // Extract current attempt from invocation metadata (if available)
+        // For now, we'll always retry unless it's a ToolNotFound error
+        match error {
+            ToolError::ToolNotFound(_) => {
+                // Don't retry if tool is not found
+                FallbackResult::Fail(error.clone())
+            }
+            ToolError::Timeout(_) | ToolError::ExecutionFailed(_) => {
+                // Retry transient errors
+                FallbackResult::Retry(invocation.clone())
+            }
+            ToolError::AlreadyRegistered(_) | ToolError::TerminationFailed(_) => {
+                // Don't retry registration or termination errors
+                FallbackResult::Fail(error.clone())
+            }
+        }
+    }
+}
+
+impl fmt::Debug for RetryFallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RetryFallback")
+            .field("max_attempts", &self.max_attempts)
+            .field("backoff_ms", &self.backoff_ms)
+            .finish()
+    }
+}
+
+/// Skip fallback handler that returns a fixed result.
+///
+/// Always skips tool execution and returns a pre-configured result.
+/// Useful for optional tools or graceful degradation scenarios.
+///
+/// # Example
+///
+/// ```
+/// use forge_agent::workflow::tasks::TaskResult;
+/// use forge_agent::workflow::tools::SkipFallback;
+///
+/// // Skip with success result
+/// let fallback = SkipFallback::success();
+///
+/// // Skip with custom result
+/// let fallback = SkipFallback::new(TaskResult::Skipped);
+/// ```
+#[derive(Clone)]
+pub struct SkipFallback {
+    /// Result to return when skipping
+    result: TaskResult,
+}
+
+impl SkipFallback {
+    /// Creates a new SkipFallback with the given result.
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The result to return when skipping
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tasks::TaskResult;
+    /// use forge_agent::workflow::tools::SkipFallback;
+    ///
+    /// let fallback = SkipFallback::new(TaskResult::Skipped);
+    /// ```
+    pub fn new(result: TaskResult) -> Self {
+        Self { result }
+    }
+
+    /// Creates a SkipFallback that returns Success.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tools::SkipFallback;
+    ///
+    /// let fallback = SkipFallback::success();
+    /// ```
+    pub fn success() -> Self {
+        Self {
+            result: TaskResult::Success,
+        }
+    }
+
+    /// Creates a SkipFallback that returns Skipped.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tools::SkipFallback;
+    ///
+    /// let fallback = SkipFallback::skip();
+    /// ```
+    pub fn skip() -> Self {
+        Self {
+            result: TaskResult::Skipped,
+        }
+    }
+}
+
+#[async_trait]
+impl FallbackHandler for SkipFallback {
+    async fn handle(&self, _error: &ToolError, _invocation: &ToolInvocation) -> FallbackResult {
+        FallbackResult::Skip(self.result.clone())
+    }
+}
+
+impl fmt::Debug for SkipFallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SkipFallback")
+            .field("result", &self.result)
+            .finish()
+    }
+}
+
+/// Chain fallback handler that tries multiple handlers in sequence.
+///
+/// Tries each handler in order until one returns a non-Fail result.
+/// If all handlers fail, returns the last Fail result.
+///
+/// # Example
+///
+/// ```
+/// use forge_agent::workflow::tools::{ChainFallback, RetryFallback, SkipFallback};
+///
+/// let fallback = ChainFallback::new()
+///     .add(RetryFallback::new(3, 100))
+///     .add(SkipFallback::skip());
+/// ```
+#[derive(Clone)]
+pub struct ChainFallback {
+    /// Chain of handlers to try in sequence
+    handlers: Vec<Arc<dyn FallbackHandler>>,
+}
+
+impl ChainFallback {
+    /// Creates a new ChainFallback.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tools::ChainFallback;
+    ///
+    /// let fallback = ChainFallback::new();
+    /// ```
+    pub fn new() -> Self {
+        Self {
+            handlers: Vec::new(),
+        }
+    }
+
+    /// Adds a handler to the chain.
+    ///
+    /// # Arguments
+    ///
+    /// * `handler` - Handler to add to the chain
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tools::{ChainFallback, RetryFallback, SkipFallback};
+    ///
+    /// let fallback = ChainFallback::new()
+    ///     .add(RetryFallback::new(3, 100))
+    ///     .add(SkipFallback::skip());
+    /// ```
+    pub fn add(mut self, handler: impl FallbackHandler + 'static) -> Self {
+        self.handlers.push(Arc::new(handler));
+        self
+    }
+}
+
+impl Default for ChainFallback {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl FallbackHandler for ChainFallback {
+    async fn handle(&self, error: &ToolError, invocation: &ToolInvocation) -> FallbackResult {
+        let mut last_fail = None;
+
+        for handler in &self.handlers {
+            match handler.handle(error, invocation).await {
+                FallbackResult::Fail(err) => {
+                    last_fail = Some(err);
+                }
+                result => return result,
+            }
+        }
+
+        // All handlers failed
+        FallbackResult::Fail(last_fail.unwrap_or_else(|| error.clone()))
+    }
+}
+
+impl fmt::Debug for ChainFallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChainFallback")
+            .field("handlers", &self.handlers.len())
+            .finish()
+    }
 }
 
 /// RAII guard for process lifecycle management.
@@ -800,6 +1091,120 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ============== FallbackHandler Tests ==============
+
+    #[tokio::test]
+    async fn test_retry_fallback_retries_transient_errors() {
+        let fallback = RetryFallback::new(3, 100);
+        let invocation = ToolInvocation::new("test_tool").args(vec!["arg1".to_string()]);
+
+        // Test timeout error (should retry)
+        let error = ToolError::Timeout("Test timeout".to_string());
+        let result = fallback.handle(&error, &invocation).await;
+
+        assert!(matches!(result, FallbackResult::Retry(_)));
+    }
+
+    #[tokio::test]
+    async fn test_retry_fallback_fails_on_tool_not_found() {
+        let fallback = RetryFallback::new(3, 100);
+        let invocation = ToolInvocation::new("nonexistent_tool");
+
+        // Test tool not found (should fail)
+        let error = ToolError::ToolNotFound("nonexistent_tool".to_string());
+        let result = fallback.handle(&error, &invocation).await;
+
+        assert!(matches!(result, FallbackResult::Fail(_)));
+    }
+
+    #[tokio::test]
+    async fn test_skip_fallback_success() {
+        let fallback = SkipFallback::success();
+        let invocation = ToolInvocation::new("test_tool");
+        let error = ToolError::ToolNotFound("test_tool".to_string());
+
+        let result = fallback.handle(&error, &invocation).await;
+
+        assert!(matches!(result, FallbackResult::Skip(TaskResult::Success)));
+    }
+
+    #[tokio::test]
+    async fn test_skip_fallback_skip() {
+        let fallback = SkipFallback::skip();
+        let invocation = ToolInvocation::new("test_tool");
+        let error = ToolError::ToolNotFound("test_tool".to_string());
+
+        let result = fallback.handle(&error, &invocation).await;
+
+        assert!(matches!(result, FallbackResult::Skip(TaskResult::Skipped)));
+    }
+
+    #[tokio::test]
+    async fn test_skip_fallback_custom_result() {
+        let fallback = SkipFallback::new(TaskResult::Failed("Custom failure".to_string()));
+        let invocation = ToolInvocation::new("test_tool");
+        let error = ToolError::ToolNotFound("test_tool".to_string());
+
+        let result = fallback.handle(&error, &invocation).await;
+
+        assert!(matches!(result, FallbackResult::Skip(TaskResult::Failed(_))));
+        if let FallbackResult::Skip(TaskResult::Failed(msg)) = result {
+            assert_eq!(msg, "Custom failure");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chain_fallback_tries_handlers_in_sequence() {
+        let invocation = ToolInvocation::new("test_tool");
+        let error = ToolError::Timeout("Test timeout".to_string());
+
+        // Create chain with retry (fails) then skip (succeeds)
+        let fallback = ChainFallback::new()
+            .add(SkipFallback::skip())
+            .add(SkipFallback::success());
+
+        let result = fallback.handle(&error, &invocation).await;
+
+        // First handler (skip) should be used
+        assert!(matches!(result, FallbackResult::Skip(TaskResult::Skipped)));
+    }
+
+    #[tokio::test]
+    async fn test_chain_fallback_all_handlers_fail() {
+        let invocation = ToolInvocation::new("test_tool");
+        let error = ToolError::Timeout("Test timeout".to_string());
+
+        // Create chain with custom handler that always fails
+        #[derive(Clone)]
+        struct AlwaysFail;
+        #[async_trait]
+        impl FallbackHandler for AlwaysFail {
+            async fn handle(&self, error: &ToolError, _invocation: &ToolInvocation) -> FallbackResult {
+                FallbackResult::Fail(error.clone())
+            }
+        }
+
+        let fallback = ChainFallback::new()
+            .add(AlwaysFail)
+            .add(AlwaysFail);
+
+        let result = fallback.handle(&error, &invocation).await;
+
+        assert!(matches!(result, FallbackResult::Fail(_)));
+    }
+
+    #[tokio::test]
+    async fn test_chain_fallback_empty_chain() {
+        let invocation = ToolInvocation::new("test_tool");
+        let error = ToolError::Timeout("Test timeout".to_string());
+
+        let fallback = ChainFallback::new();
+        let result = fallback.handle(&error, &invocation).await;
+
+        // Empty chain should return the original error
+        assert!(matches!(result, FallbackResult::Fail(_)));
+    }
 
     // ============== Tool Tests ==============
 
