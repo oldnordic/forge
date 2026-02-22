@@ -368,6 +368,85 @@ impl WorkflowTask for PollingTask {
     }
 }
 
+/// Timeout and cancellation aware task.
+///
+/// This task demonstrates handling both timeout and cancellation simultaneously
+/// using `tokio::select!` with three branches:
+/// 1. Work completion
+/// 2. Timeout
+/// 3. Cancellation
+///
+/// # Example
+///
+/// ```ignore
+/// use forge_agent::workflow::examples::TimeoutAndCancellationTask;
+/// use forge_agent::workflow::TaskId;
+///
+/// let task = TimeoutAndCancellationTask::new(
+///     TaskId::new("task1"),
+///     "Timeout Task".to_string(),
+///     5000, // work_duration_ms
+/// );
+/// ```
+pub struct TimeoutAndCancellationTask {
+    id: TaskId,
+    name: String,
+    work_duration_ms: u64,
+}
+
+impl TimeoutAndCancellationTask {
+    /// Creates a new timeout and cancellation aware task.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique task identifier
+    /// * `name` - Human-readable task name
+    /// * `work_duration_ms` - Duration of work in milliseconds
+    pub fn new(id: TaskId, name: String, work_duration_ms: u64) -> Self {
+        Self {
+            id,
+            name,
+            work_duration_ms,
+        }
+    }
+}
+
+#[async_trait]
+impl WorkflowTask for TimeoutAndCancellationTask {
+    async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+        // Use tokio::select! with three branches
+        let work = tokio::time::sleep(tokio::time::Duration::from_millis(self.work_duration_ms));
+
+        tokio::select! {
+            _ = work => {
+                // Work completed successfully
+                Ok(TaskResult::Success)
+            }
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                // Timeout - task exceeded allowed time
+                Ok(TaskResult::Success) // Return success; actual timeout handled by executor
+            }
+            _ = async {
+                // Wait for cancellation
+                if let Some(token) = context.cancellation_token() {
+                    token.wait_until_cancelled().await;
+                }
+            } => {
+                // Cancelled by user
+                Ok(TaskResult::Success)
+            }
+        }
+    }
+
+    fn id(&self) -> TaskId {
+        self.id.clone()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 /// Creates a cooperative cancellation example workflow.
 ///
 /// This function creates a workflow with 3 cancellation-aware tasks and
@@ -410,6 +489,42 @@ pub fn cooperative_cancellation_example() -> Workflow {
     ));
 
     WorkflowBuilder::sequential(vec![task1, task2, task3]).unwrap()
+}
+
+/// Creates a timeout and cancellation example workflow.
+///
+/// This function creates a workflow with timeout configuration and
+/// demonstrates tasks that respond to both timeout and cancellation signals.
+///
+/// # Returns
+///
+/// A workflow ready for execution with timeout support.
+///
+/// # Example
+///
+/// ```ignore
+/// use forge_agent::workflow::examples::timeout_cancellation_example;
+/// use forge_agent::workflow::executor::WorkflowExecutor;
+///
+/// let workflow = timeout_cancellation_example();
+/// let mut executor = WorkflowExecutor::new(workflow)
+///     .with_timeout(std::time::Duration::from_millis(100));
+/// // ... execute with timeout
+/// ```
+pub fn timeout_cancellation_example() -> Workflow {
+    let task1 = Box::new(TimeoutAndCancellationTask::new(
+        TaskId::new("task1"),
+        "Timeout Task 1".to_string(),
+        50, // Completes before timeout
+    ));
+
+    let task2 = Box::new(TimeoutAndCancellationTask::new(
+        TaskId::new("task2"),
+        "Timeout Task 2".to_string(),
+        50,
+    ));
+
+    WorkflowBuilder::sequential(vec![task1, task2]).unwrap()
 }
 
 #[cfg(test)]
@@ -629,5 +744,103 @@ mod tests {
         let workflow = cooperative_cancellation_example();
 
         assert_eq!(workflow.task_count(), 3);
+    }
+
+    // Tests for timeout and cancellation integration
+
+    #[tokio::test]
+    async fn test_task_exits_on_timeout_before_cancellation() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+        use crate::workflow::task::TaskContext;
+
+        let source = CancellationTokenSource::new();
+        let task = TimeoutAndCancellationTask::new(
+            TaskId::new("task1"),
+            "Timeout Task".to_string(),
+            5000, // Long work duration
+        );
+
+        // Create context with cancellation token
+        let mut context = TaskContext::new("test-workflow", task.id());
+        context = context.with_cancellation_token(source.token());
+
+        // Don't cancel - let timeout trigger
+        // Task has internal 30s timeout, but work is 5s
+
+        let start = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            task.execute(&context),
+        ).await;
+        let elapsed = start.elapsed();
+
+        // Should timeout at 100ms (not 5s work duration, not 30s internal timeout)
+        assert!(result.is_err()); // Timeout error
+        assert!(elapsed < tokio::time::Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn test_task_exits_on_cancellation_before_timeout() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+        use crate::workflow::task::TaskContext;
+
+        let source = CancellationTokenSource::new();
+        let task = TimeoutAndCancellationTask::new(
+            TaskId::new("task1"),
+            "Timeout Task".to_string(),
+            5000, // Long work duration
+        );
+
+        // Create context with cancellation token
+        let mut context = TaskContext::new("test-workflow", task.id());
+        context = context.with_cancellation_token(source.token());
+
+        // Spawn cancellation after 50ms (before 30s timeout)
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            source.cancel();
+        });
+
+        // Execute task - should complete quickly due to cancellation
+        let start = std::time::Instant::now();
+        let result = task.execute(&context).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok());
+        assert!(elapsed < tokio::time::Duration::from_millis(200)); // Should exit early
+    }
+
+    #[tokio::test]
+    async fn test_task_completes_before_timeout_and_cancellation() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+        use crate::workflow::task::TaskContext;
+
+        let source = CancellationTokenSource::new();
+        let task = TimeoutAndCancellationTask::new(
+            TaskId::new("task1"),
+            "Fast Task".to_string(),
+            50, // Short work duration
+        );
+
+        // Create context with cancellation token (but don't cancel)
+        let mut context = TaskContext::new("test-workflow", task.id());
+        context = context.with_cancellation_token(source.token());
+
+        // Execute task - should complete work before timeout
+        let start = std::time::Instant::now();
+        let result = task.execute(&context).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), TaskResult::Success);
+        assert!(elapsed < tokio::time::Duration::from_millis(100)); // Should complete quickly
+        assert!(elapsed >= tokio::time::Duration::from_millis(40)); // But not instantly
+    }
+
+    #[tokio::test]
+    async fn test_timeout_cancellation_example() {
+        let workflow = timeout_cancellation_example();
+
+        assert_eq!(workflow.task_count(), 2);
     }
 }
