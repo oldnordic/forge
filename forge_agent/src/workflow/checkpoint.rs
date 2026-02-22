@@ -13,6 +13,77 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use uuid::Uuid;
 
+/// Validation status for checkpoint confidence scoring.
+///
+/// Indicates whether a task result meets confidence thresholds
+/// for proceeding with workflow execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ValidationStatus {
+    /// Above warning threshold, proceed with workflow
+    Passed,
+    /// Above minimum but below warning, proceed with log
+    Warning,
+    /// Below minimum, rollback if configured
+    Failed,
+}
+
+/// Rollback recommendation for validation failures.
+///
+/// Suggests how to handle workflow rollback when validation fails.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RollbackRecommendation {
+    /// Rollback to previous checkpoint
+    ToPreviousCheckpoint,
+    /// Rollback to a specific task
+    SpecificTask(TaskId),
+    /// Full rollback of all completed tasks
+    FullRollback,
+    /// Continue despite failure (no rollback)
+    None,
+}
+
+/// Result of validating a task checkpoint.
+///
+/// Contains confidence score, validation status, and optional
+/// rollback recommendation for failed validations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValidationResult {
+    /// Confidence score from 0.0 to 1.0
+    pub confidence: f64,
+    /// Validation status based on confidence thresholds
+    pub status: ValidationStatus,
+    /// Human-readable validation message
+    pub message: String,
+    /// Optional rollback recommendation for failures
+    pub rollback_recommendation: Option<RollbackRecommendation>,
+    /// Timestamp when validation was performed
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Configuration for validation checkpoints.
+///
+/// Defines confidence thresholds and rollback behavior for
+/// validating task results between workflow steps.
+#[derive(Clone, Debug)]
+pub struct ValidationCheckpoint {
+    /// Minimum confidence threshold (default: 0.7)
+    pub min_confidence: f64,
+    /// Warning threshold (default: 0.85)
+    pub warning_threshold: f64,
+    /// Whether to rollback on validation failure (default: true)
+    pub rollback_on_failure: bool,
+}
+
+impl Default for ValidationCheckpoint {
+    fn default() -> Self {
+        Self {
+            min_confidence: 0.7,
+            warning_threshold: 0.85,
+            rollback_on_failure: true,
+        }
+    }
+}
+
 /// Unique identifier for a workflow checkpoint.
 ///
 /// Wrapper type for forge_reasoning::CheckpointId to maintain
@@ -985,5 +1056,92 @@ mod tests {
 
         // Checksums should be identical regardless of order
         assert_eq!(checksum1, checksum2);
+    }
+
+    // Tests for validation types
+
+    #[test]
+    fn test_validation_status_variants() {
+        let passed = ValidationStatus::Passed;
+        let warning = ValidationStatus::Warning;
+        let failed = ValidationStatus::Failed;
+
+        assert_ne!(passed, warning);
+        assert_ne!(warning, failed);
+        assert_ne!(passed, failed);
+    }
+
+    #[test]
+    fn test_rollback_recommendation_variants() {
+        let prev = RollbackRecommendation::ToPreviousCheckpoint;
+        let specific = RollbackRecommendation::SpecificTask(TaskId::new("task-1"));
+        let full = RollbackRecommendation::FullRollback;
+        let none = RollbackRecommendation::None;
+
+        assert_ne!(prev, full);
+        assert_ne!(full, none);
+        assert_eq!(none, RollbackRecommendation::None);
+    }
+
+    #[test]
+    fn test_validation_result_creation() {
+        let result = ValidationResult {
+            confidence: 0.9,
+            status: ValidationStatus::Passed,
+            message: "All good".to_string(),
+            rollback_recommendation: None,
+            timestamp: Utc::now(),
+        };
+
+        assert_eq!(result.confidence, 0.9);
+        assert_eq!(result.status, ValidationStatus::Passed);
+        assert_eq!(result.message, "All good");
+        assert!(result.rollback_recommendation.is_none());
+    }
+
+    #[test]
+    fn test_validation_checkpoint_default() {
+        let config = ValidationCheckpoint::default();
+
+        assert_eq!(config.min_confidence, 0.7);
+        assert_eq!(config.warning_threshold, 0.85);
+        assert_eq!(config.rollback_on_failure, true);
+    }
+
+    #[test]
+    fn test_validation_checkpoint_custom() {
+        let config = ValidationCheckpoint {
+            min_confidence: 0.5,
+            warning_threshold: 0.8,
+            rollback_on_failure: false,
+        };
+
+        assert_eq!(config.min_confidence, 0.5);
+        assert_eq!(config.warning_threshold, 0.8);
+        assert_eq!(config.rollback_on_failure, false);
+    }
+
+    #[test]
+    fn test_validation_result_serialization() {
+        let result = ValidationResult {
+            confidence: 0.75,
+            status: ValidationStatus::Warning,
+            message: "Low confidence".to_string(),
+            rollback_recommendation: Some(RollbackRecommendation::None),
+            timestamp: Utc::now(),
+        };
+
+        // Serialize with JSON
+        let serialized = serde_json::to_string(&result);
+        assert!(serialized.is_ok());
+
+        // Deserialize back
+        let deserialized: Result<ValidationResult, _> = serde_json::from_str(&serialized.unwrap());
+        assert!(deserialized.is_ok());
+
+        let restored = deserialized.unwrap();
+        assert_eq!(restored.confidence, result.confidence);
+        assert_eq!(restored.status, result.status);
+        assert_eq!(restored.message, result.message);
     }
 }
