@@ -201,6 +201,7 @@ impl CheckpointSummary {
 /// This is a basic in-memory implementation for Phase 9 Task 2.
 /// Future tasks will integrate with forge-reasoning CheckpointStorage
 /// for persistent storage using SQLiteGraph backend.
+#[derive(Clone)]
 pub struct WorkflowCheckpointService {
     /// Namespace prefix for workflow checkpoints
     namespace: String,
