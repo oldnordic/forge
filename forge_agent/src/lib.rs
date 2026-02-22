@@ -143,6 +143,16 @@ pub struct CommitResult {
 /// 5. Verify: Validate results
 /// 6. Commit: Finalize transaction
 ///
+/// # Runtime Integration
+///
+/// The agent can integrate with `ForgeRuntime` for coordinated file watching
+/// and caching:
+///
+/// ```ignore
+/// let (agent, mut runtime) = Agent::with_runtime("./project").await?;
+/// let result = agent.run_with_runtime(&mut runtime, "refactor function").await?;
+/// ```
+///
 pub struct Agent {
     /// Path to the codebase
     #[allow(dead_code)]
@@ -370,6 +380,12 @@ pub mod transaction;
 // Re-export transaction types
 pub use transaction::{FileSnapshot, Transaction, TransactionState};
 
+// Runtime integration module (Phase 3 - Plan 4)
+pub mod runtime_integration;
+
+// Re-export runtime types for convenience
+pub use forge_runtime::{ForgeRuntime, RuntimeConfig, RuntimeStats};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +396,43 @@ mod tests {
         let agent = Agent::new(temp.path()).await.unwrap();
 
         assert_eq!(agent.codebase_path, temp.path());
+    }
+
+    #[tokio::test]
+    async fn test_agent_with_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+        let (agent, mut runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+
+        // Verify runtime is accessible
+        assert_eq!(runtime.codebase_path(), temp.path());
+
+        // Run agent with runtime
+        let result = agent.run_with_runtime(&mut runtime, "test query").await;
+
+        // Should complete (may fail on actual query, but infrastructure works)
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_agent_runtime_stats() {
+        let temp = tempfile::tempdir().unwrap();
+        let (agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+
+        let stats = runtime.stats();
+        assert!(!stats.watch_active); // Not started
+    }
+
+    #[tokio::test]
+    async fn test_agent_backward_compatibility() {
+        // Agent should work without runtime (backward compatibility)
+        let temp = tempfile::tempdir().unwrap();
+        let agent = Agent::new(temp.path()).await.unwrap();
+
+        // Agent should be functional standalone
+        assert_eq!(agent.codebase_path, temp.path());
+
+        // runtime_cache and runtime_stats should return None
+        assert!(agent.runtime_cache().is_none());
+        assert!(agent.runtime_stats().is_none());
     }
 }

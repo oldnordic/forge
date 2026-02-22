@@ -90,7 +90,7 @@ impl Agent {
         &self,
         _runtime: &mut ForgeRuntime,
         query: &str,
-    ) -> Result<LoopResult> {
+    ) -> crate::Result<LoopResult> {
         // For v0.3, we don't pause watcher (future enhancement in Phase 3.1)
         // Just run the normal loop - runtime provides cache access and metrics
 
