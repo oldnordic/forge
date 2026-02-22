@@ -10,6 +10,7 @@ use crate::{
     audit::AuditEvent, audit::AuditLog, policy::PolicyValidator, CommitResult, ConstrainedPlan,
     ExecutionPlan, MutationResult, Observation, VerificationResult,
 };
+use chrono::Utc;
 use forge_core::Forge;
 use std::sync::Arc;
 
@@ -146,8 +147,6 @@ impl AgentLoop {
 
     /// Observation phase - gather context from the graph.
     async fn observe_phase(&mut self, query: &str) -> Result<Observation, crate::AgentError> {
-        let timestamp = self.timestamp();
-
         // Use Observer to gather context
         let observer = crate::observe::Observer::new((*self.forge).clone());
         let observation = observer
@@ -155,11 +154,14 @@ impl AgentLoop {
             .await
             .map_err(|e| crate::AgentError::ObservationFailed(e.to_string()))?;
 
+        let symbol_count = observation.symbols.len();
+
         // Record audit event
         self.audit_log
             .record(AuditEvent::Observe {
-                timestamp: timestamp.clone(),
+                timestamp: Utc::now(),
                 query: query.to_string(),
+                symbol_count,
             })
             .await
             .map_err(|e| crate::AgentError::ObservationFailed(e.to_string()))?;
@@ -172,8 +174,6 @@ impl AgentLoop {
         &mut self,
         observation: Observation,
     ) -> Result<ConstrainedPlan, crate::AgentError> {
-        let timestamp = self.timestamp();
-
         // Create validator with empty policies for now
         let validator = PolicyValidator::new((*self.forge).clone());
         let diff = crate::policy::Diff {
@@ -189,10 +189,15 @@ impl AgentLoop {
             .await
             .map_err(|e| crate::AgentError::PolicyViolation(e.to_string()))?;
 
+        let policy_count = policies.len();
+        let violations = report.violations.len();
+
         // Record audit event
         self.audit_log
             .record(AuditEvent::Constrain {
-                timestamp: timestamp.clone(),
+                timestamp: Utc::now(),
+                policy_count,
+                violations,
             })
             .await
             .map_err(|e| crate::AgentError::PolicyViolation(e.to_string()))?;
@@ -208,8 +213,6 @@ impl AgentLoop {
         &mut self,
         constrained: ConstrainedPlan,
     ) -> Result<ExecutionPlan, crate::AgentError> {
-        let timestamp = self.timestamp();
-
         // Create planner
         let planner = crate::planner::Planner::new();
 
@@ -224,6 +227,7 @@ impl AgentLoop {
             .estimate_impact(&steps)
             .await
             .map_err(|e| crate::AgentError::PlanningFailed(e.to_string()))?;
+        let estimated_files = impact.affected_files.len();
 
         // Detect conflicts
         let conflicts = planner
@@ -243,13 +247,17 @@ impl AgentLoop {
             .order_steps(&mut ordered_steps)
             .map_err(|e| crate::AgentError::PlanningFailed(e.to_string()))?;
 
+        let step_count = ordered_steps.len();
+
         // Generate rollback plan
         let rollback = planner.generate_rollback(&ordered_steps);
 
         // Record audit event
         self.audit_log
             .record(AuditEvent::Plan {
-                timestamp: timestamp.clone(),
+                timestamp: Utc::now(),
+                step_count,
+                estimated_files,
             })
             .await
             .map_err(|e| crate::AgentError::PlanningFailed(e.to_string()))?;
@@ -266,8 +274,6 @@ impl AgentLoop {
         &mut self,
         plan: ExecutionPlan,
     ) -> Result<MutationResult, crate::AgentError> {
-        let timestamp = self.timestamp();
-
         // Create mutator
         let mut mutator = crate::mutate::Mutator::new();
         mutator
@@ -283,10 +289,14 @@ impl AgentLoop {
                 .map_err(|e| crate::AgentError::MutationFailed(e.to_string()))?;
         }
 
+        // Collect modified files (empty for v0.3)
+        let files_modified: Vec<String> = Vec::new();
+
         // Record audit event
         self.audit_log
             .record(AuditEvent::Mutate {
-                timestamp: timestamp.clone(),
+                timestamp: Utc::now(),
+                files_modified,
             })
             .await
             .map_err(|e| crate::AgentError::MutationFailed(e.to_string()))?;
@@ -302,8 +312,6 @@ impl AgentLoop {
         &mut self,
         _result: MutationResult,
     ) -> Result<VerificationResult, crate::AgentError> {
-        let timestamp = self.timestamp();
-
         // Create verifier
         let verifier = crate::verify::Verifier::new();
 
@@ -313,10 +321,15 @@ impl AgentLoop {
             .await
             .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?;
 
+        let diagnostic_count = report.diagnostics.len();
+        let passed = report.passed;
+
         // Record audit event
         self.audit_log
             .record(AuditEvent::Verify {
-                timestamp: timestamp.clone(),
+                timestamp: Utc::now(),
+                passed,
+                diagnostic_count,
             })
             .await
             .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?;
@@ -336,8 +349,6 @@ impl AgentLoop {
         &mut self,
         verification: VerificationResult,
     ) -> Result<CommitResult, crate::AgentError> {
-        let timestamp = self.timestamp();
-
         // Extract files from diagnostics
         let files: Vec<std::path::PathBuf> = verification
             .diagnostics
@@ -363,10 +374,13 @@ impl AgentLoop {
                 .map_err(|e| crate::AgentError::CommitFailed(e.to_string()))?;
         }
 
+        let transaction_id = commit_report.transaction_id.clone();
+
         // Record audit event
         self.audit_log
             .record(AuditEvent::Commit {
-                timestamp: timestamp.clone(),
+                timestamp: Utc::now(),
+                transaction_id,
             })
             .await
             .map_err(|e| crate::AgentError::CommitFailed(e.to_string()))?;
@@ -379,31 +393,31 @@ impl AgentLoop {
 
     /// Records a rollback in the audit log.
     async fn record_rollback(&mut self, error: &crate::AgentError) {
-        let timestamp = self.timestamp();
-
         // Rollback transaction if active
         if let Some(txn) = self.transaction.take() {
             let _ = txn.rollback().await;
         }
 
+        // Determine phase from error type
+        let phase = match error {
+            crate::AgentError::ObservationFailed(_) => "Observe",
+            crate::AgentError::PolicyViolation(_) => "Constrain",
+            crate::AgentError::PlanningFailed(_) => "Plan",
+            crate::AgentError::MutationFailed(_) => "Mutate",
+            crate::AgentError::VerificationFailed(_) => "Verify",
+            crate::AgentError::CommitFailed(_) => "Commit",
+            crate::AgentError::ForgeError(_) => "Forge",
+        };
+
         // Record rollback event
         let _ = self
             .audit_log
             .record(AuditEvent::Rollback {
-                timestamp,
+                timestamp: Utc::now(),
                 reason: error.to_string(),
+                phase: phase.to_string(),
             })
             .await;
-    }
-
-    /// Returns current timestamp as ISO 8601 string.
-    fn timestamp(&self) -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        format!("{}", now)
     }
 
     /// Returns a reference to the audit log (for testing).
