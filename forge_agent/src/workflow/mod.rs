@@ -42,16 +42,22 @@
 //! 4. Stop on first failure (rollback is deferred to phase 08-05)
 
 pub mod builder;
+pub mod combinators;
 pub mod dag;
 pub mod executor;
+pub mod state;
 pub mod task;
 pub mod tasks;
 pub mod validate;
+pub mod yaml;
 
 // Re-export core types for public API
 pub use builder::WorkflowBuilder;
+pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};
 pub use executor::{WorkflowExecutor, WorkflowResult};
+pub use state::{TaskStatus, TaskSummary, WorkflowState, WorkflowStatus};
 pub use task::{Dependency, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
 pub use tasks::{AgentLoopTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask};
 pub use validate::{ValidationReport, WorkflowValidator};
+pub use yaml::{YamlWorkflow, YamlTask, YamlTaskParams, YamlTaskType, YamlWorkflowError};

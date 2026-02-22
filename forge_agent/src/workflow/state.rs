@@ -180,10 +180,11 @@ impl WorkflowExecutor {
             .difference(&completed_ids)
             .filter(|id| !failed_ids.contains(id))
             .map(|id| {
-                let node = self.get_task_node(id);
+                let name = self.get_task_name(id)
+                    .unwrap_or_else(|| "Unknown".to_string());
                 TaskSummary::new(
                     id.as_str(),
-                    node.map(|n| n.name.as_str()).unwrap_or("Unknown"),
+                    &name,
                     TaskStatus::Pending,
                 )
             })
@@ -194,10 +195,11 @@ impl WorkflowExecutor {
             .failed_tasks
             .iter()
             .map(|id| {
-                let node = self.get_task_node(id);
+                let name = self.get_task_name(id)
+                    .unwrap_or_else(|| "Unknown".to_string());
                 TaskSummary::new(
                     id.as_str(),
-                    node.map(|n| n.name.as_str()).unwrap_or("Unknown"),
+                    &name,
                     TaskStatus::Failed,
                 )
             })
@@ -213,11 +215,9 @@ impl WorkflowExecutor {
         }
     }
 
-    /// Helper method to get task node from workflow.
-    fn get_task_node(&self, id: &TaskId) -> Option<&TaskNode> {
-        self.workflow.task_map.get(id).and_then(|&idx| {
-            self.workflow.graph.node_weight(idx)
-        })
+    /// Helper method to get task name from workflow.
+    fn get_task_name(&self, id: &TaskId) -> Option<String> {
+        self.workflow.task_name(id)
     }
 }
 

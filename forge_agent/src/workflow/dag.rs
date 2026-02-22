@@ -240,6 +240,14 @@ impl Workflow {
             .map(|node| node.dependencies.clone())
     }
 
+    /// Returns the name of a task.
+    pub fn task_name(&self, id: &TaskId) -> Option<String> {
+        self.task_map
+            .get(id)
+            .and_then(|&idx| self.graph.node_weight(idx))
+            .map(|node| node.name.clone())
+    }
+
     /// Finds the cycle path for error reporting.
     ///
     /// Simple DFS-based cycle detection starting from the problematic edge.
