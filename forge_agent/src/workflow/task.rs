@@ -386,4 +386,75 @@ mod tests {
         assert_eq!(task.dependencies().len(), 1);
         assert_eq!(task.dependencies()[0], TaskId::new("task-a"));
     }
+
+    #[tokio::test]
+    async fn test_task_compensation_integration() {
+        use crate::workflow::rollback::ToolCompensation;
+
+        // Test task with compensation
+        struct TaskWithCompensation {
+            id: TaskId,
+            name: String,
+            compensation: Option<CompensationAction>,
+        }
+
+        #[async_trait]
+        impl WorkflowTask for TaskWithCompensation {
+            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+                Ok(TaskResult::Success)
+            }
+
+            fn id(&self) -> TaskId {
+                self.id.clone()
+            }
+
+            fn name(&self) -> &str {
+                &self.name
+            }
+
+            fn compensation(&self) -> Option<CompensationAction> {
+                self.compensation.clone()
+            }
+        }
+
+        // Create task with skip compensation
+        let task = TaskWithCompensation {
+            id: TaskId::new("task-1"),
+            name: "Test Task".to_string(),
+            compensation: Some(CompensationAction::skip("No action needed")),
+        };
+
+        // Verify compensation is accessible
+        let comp = task.compensation();
+        assert!(comp.is_some());
+        assert_eq!(comp.unwrap().action_type, CompensationType::Skip);
+
+        // Create task with no compensation
+        let task_no_comp = TaskWithCompensation {
+            id: TaskId::new("task-2"),
+            name: "Task Without Compensation".to_string(),
+            compensation: None,
+        };
+
+        assert!(task_no_comp.compensation().is_none());
+    }
+
+    #[test]
+    fn test_compensation_action_to_tool_compensation() {
+        use crate::workflow::rollback::ToolCompensation;
+
+        // Test conversion from CompensationAction to ToolCompensation
+        let skip_action = CompensationAction::skip("Skip this");
+        let tool_comp: ToolCompensation = skip_action.into();
+        assert_eq!(tool_comp.description, "Skip this");
+
+        let retry_action = CompensationAction::retry("Retry later");
+        let tool_comp: ToolCompensation = retry_action.into();
+        assert_eq!(tool_comp.description, "Retry later");
+
+        let undo_action = CompensationAction::undo("Delete file");
+        let tool_comp: ToolCompensation = undo_action.into();
+        // Undo becomes skip with note about no undo function
+        assert!(tool_comp.description.contains("no undo function available"));
+    }
 }
