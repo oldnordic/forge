@@ -647,6 +647,7 @@ impl RollbackEngine {
     /// * `tasks` - Tasks to roll back (in rollback order)
     /// * `workflow_id` - Workflow ID for audit logging
     /// * `audit_log` - Audit log for recording rollback events
+    /// * `compensation_registry` - Registry containing compensation actions
     ///
     /// # Returns
     ///
@@ -658,6 +659,7 @@ impl RollbackEngine {
         tasks: Vec<TaskId>,
         workflow_id: &str,
         audit_log: &mut AuditLog,
+        compensation_registry: &CompensationRegistry,
     ) -> Result<RollbackReport, RollbackError> {
         let mut report = RollbackReport::new();
 
@@ -668,31 +670,60 @@ impl RollbackEngine {
                 .get(task_id)
                 .ok_or_else(|| RollbackError::TaskNotFound(task_id.clone()))?;
 
-            let node = workflow
+            let _node = workflow
                 .graph
                 .node_weight(*node_idx)
                 .expect("Node index should be valid");
 
-            // Try to get compensation from task
-            // Note: We don't have the actual WorkflowTask trait object here,
-            // so we can't call task.compensation(). This is a limitation of
-            // storing only metadata in TaskNode.
-            //
-            // For now, we'll record the task as rolled back in the audit log,
-            // but actual compensation execution will happen in the executor
-            // where we have access to the task instances.
+            // Try to get compensation from registry
+            if let Some(compensation) = compensation_registry.get(task_id) {
+                // Create task context for compensation execution
+                let context = TaskContext::new(workflow_id, task_id.clone());
 
-            // Record rollback in audit log
-            let _ = audit_log
-                .record(crate::audit::AuditEvent::WorkflowTaskRolledBack {
-                    timestamp: Utc::now(),
-                    workflow_id: workflow_id.to_string(),
-                    task_id: task_id.to_string(),
-                    compensation: "Compensation executed".to_string(),
-                })
-                .await;
+                // Execute the compensation
+                match compensation.execute(&context) {
+                    Ok(_) => {
+                        // Record successful rollback in audit log
+                        let _ = audit_log
+                            .record(crate::audit::AuditEvent::WorkflowTaskRolledBack {
+                                timestamp: Utc::now(),
+                                workflow_id: workflow_id.to_string(),
+                                task_id: task_id.to_string(),
+                                compensation: compensation.description.clone(),
+                            })
+                            .await;
 
-            report.rolled_back_tasks.push(task_id.clone());
+                        report.rolled_back_tasks.push(task_id.clone());
+                    }
+                    Err(e) => {
+                        // Record compensation failure
+                        let error_msg = e.to_string();
+                        let _ = audit_log
+                            .record(crate::audit::AuditEvent::WorkflowTaskRolledBack {
+                                timestamp: Utc::now(),
+                                workflow_id: workflow_id.to_string(),
+                                task_id: task_id.to_string(),
+                                compensation: format!("Failed: {}", error_msg),
+                            })
+                            .await;
+
+                        report.failed_compensations.push((task_id.clone(), error_msg));
+                    }
+                }
+            } else {
+                // No compensation registered - skip task
+                report.skipped_tasks.push(task_id.clone());
+
+                // Record skipped rollback in audit log
+                let _ = audit_log
+                    .record(crate::audit::AuditEvent::WorkflowTaskRolledBack {
+                        timestamp: Utc::now(),
+                        workflow_id: workflow_id.to_string(),
+                        task_id: task_id.to_string(),
+                        compensation: "No compensation registered".to_string(),
+                    })
+                    .await;
+            }
         }
 
         // Record workflow rolled back event
@@ -724,7 +755,7 @@ impl RollbackEngine {
         workflow: &Workflow,
     ) -> CompensationReport {
         let total_tasks = workflow.task_count();
-        let mut with_compensation = Vec::new();
+        let with_compensation = Vec::new();
         let mut without_compensation = Vec::new();
 
         // Note: We can't check actual compensation without the task instances
@@ -1167,13 +1198,61 @@ mod tests {
 
         let engine = RollbackEngine::new();
         let mut audit_log = AuditLog::new();
+        let registry = CompensationRegistry::new();
 
-        // Roll back task b
+        // Roll back task b (no compensation registered, so skipped)
         let report = engine
-            .execute_rollback(&workflow, vec![TaskId::new("b")], "test_workflow", &mut audit_log)
+            .execute_rollback(
+                &workflow,
+                vec![TaskId::new("b")],
+                "test_workflow",
+                &mut audit_log,
+                &registry,
+            )
             .await
             .unwrap();
 
+        // Task b should be skipped (no compensation registered)
+        assert_eq!(report.skipped_tasks.len(), 1);
+        assert_eq!(report.skipped_tasks[0], TaskId::new("b"));
+        assert!(report.rolled_back_tasks.is_empty());
+        assert!(report.failed_compensations.is_empty());
+
+        // Verify audit events
+        let events = audit_log.replay();
+        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
+        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_execute_rollback_with_compensation() {
+        let mut workflow = Workflow::new();
+
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("b", "Task B")));
+
+        workflow.add_dependency("a", "b").unwrap();
+
+        let engine = RollbackEngine::new();
+        let mut audit_log = AuditLog::new();
+        let mut registry = CompensationRegistry::new();
+
+        // Register compensation for task b
+        registry.register(TaskId::new("b"), ToolCompensation::skip("Test compensation"));
+
+        // Roll back task b
+        let report = engine
+            .execute_rollback(
+                &workflow,
+                vec![TaskId::new("b")],
+                "test_workflow",
+                &mut audit_log,
+                &registry,
+            )
+            .await
+            .unwrap();
+
+        // Task b should be rolled back successfully
         assert_eq!(report.rolled_back_tasks.len(), 1);
         assert_eq!(report.rolled_back_tasks[0], TaskId::new("b"));
         assert!(report.skipped_tasks.is_empty());
@@ -1183,6 +1262,45 @@ mod tests {
         let events = audit_log.replay();
         assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
         assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_execute_rollback_mixed_compensation() {
+        let mut workflow = Workflow::new();
+
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("c", "Task C")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        let engine = RollbackEngine::new();
+        let mut audit_log = AuditLog::new();
+        let mut registry = CompensationRegistry::new();
+
+        // Register compensation only for task a
+        registry.register(TaskId::new("a"), ToolCompensation::skip("Test compensation"));
+
+        // Roll back all three tasks
+        let report = engine
+            .execute_rollback(
+                &workflow,
+                vec![TaskId::new("a"), TaskId::new("b"), TaskId::new("c")],
+                "test_workflow",
+                &mut audit_log,
+                &registry,
+            )
+            .await
+            .unwrap();
+
+        // Task a rolled back, b and c skipped
+        assert_eq!(report.rolled_back_tasks.len(), 1);
+        assert_eq!(report.rolled_back_tasks[0], TaskId::new("a"));
+        assert_eq!(report.skipped_tasks.len(), 2);
+        assert!(report.skipped_tasks.contains(&TaskId::new("b")));
+        assert!(report.skipped_tasks.contains(&TaskId::new("c")));
+        assert!(report.failed_compensations.is_empty());
     }
 
     #[test]

@@ -6,8 +6,8 @@
 use crate::audit::AuditLog;
 use crate::workflow::checkpoint::{validate_workflow_consistency, WorkflowCheckpoint, WorkflowCheckpointService};
 use crate::workflow::dag::Workflow;
-use crate::workflow::rollback::{RollbackEngine, RollbackReport, RollbackStrategy};
-use crate::workflow::task::{TaskContext, TaskId};
+use crate::workflow::rollback::{CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation};
+use crate::workflow::task::{CompensationAction, TaskContext, TaskId};
 use chrono::Utc;
 use std::collections::HashSet;
 
@@ -95,6 +95,8 @@ pub struct WorkflowExecutor {
     rollback_engine: RollbackEngine,
     /// Rollback strategy to use on failure
     rollback_strategy: RollbackStrategy,
+    /// Compensation registry for tracking undo actions
+    pub(in crate::workflow) compensation_registry: CompensationRegistry,
     /// Optional checkpoint service for state persistence
     pub(in crate::workflow) checkpoint_service: Option<WorkflowCheckpointService>,
     /// Checkpoint sequence counter
@@ -122,6 +124,7 @@ impl WorkflowExecutor {
             failed_tasks: Vec::new(),
             rollback_engine: RollbackEngine::new(),
             rollback_strategy: RollbackStrategy::AllDependent,
+            compensation_registry: CompensationRegistry::new(),
             checkpoint_service: None,
             checkpoint_sequence: 0,
         }
@@ -169,6 +172,85 @@ impl WorkflowExecutor {
         self
     }
 
+    /// Registers a compensation action for a task.
+    ///
+    /// Allows manual compensation registration for external tool side effects.
+    /// Overrides any existing compensation for the task.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to register compensation for
+    /// * `compensation` - The compensation action to register
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// executor.register_compensation(
+    ///     TaskId::new("task-1"),
+    ///     ToolCompensation::file_compensation("/tmp/output.txt")
+    /// );
+    /// ```
+    pub fn register_compensation(&mut self, task_id: TaskId, compensation: ToolCompensation) {
+        self.compensation_registry.register(task_id, compensation);
+    }
+
+    /// Registers a file creation compensation for a task.
+    ///
+    /// Convenience method that automatically creates a file deletion compensation.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to register compensation for
+    /// * `file_path` - Path to the file that will be deleted during rollback
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// executor.register_file_compensation(
+    ///     TaskId::new("task-1"),
+    ///     "/tmp/work_output.txt"
+    /// );
+    /// ```
+    pub fn register_file_compensation(&mut self, task_id: TaskId, file_path: impl Into<String>) {
+        self.compensation_registry.register_file_creation(task_id, file_path);
+    }
+
+    /// Validates compensation coverage for all workflow tasks.
+    ///
+    /// Checks which tasks have compensation actions defined and logs warnings
+    /// for tasks without compensation.
+    ///
+    /// # Returns
+    ///
+    /// A CompensationReport showing coverage statistics
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let report = executor.validate_compensation_coverage();
+    /// if report.coverage_percentage < 1.0 {
+    ///     eprintln!("Warning: {:.0}% of tasks lack compensation", 100.0 * (1.0 - report.coverage_percentage));
+    /// }
+    /// ```
+    pub fn validate_compensation_coverage(&self) -> crate::workflow::rollback::CompensationReport {
+        let task_ids = self.workflow.task_ids();
+        let report = self.compensation_registry.validate_coverage(&task_ids);
+
+        // Log warning if coverage is incomplete
+        if report.coverage_percentage < 1.0 {
+            let missing = &report.tasks_without_compensation;
+            if !missing.is_empty() {
+                eprintln!(
+                    "Warning: {} tasks lack compensation: {:?}",
+                    missing.len(),
+                    missing
+                );
+            }
+        }
+
+        report
+    }
+
     /// Executes the workflow.
     ///
     /// Tasks are executed in topological order, with audit logging
@@ -214,10 +296,16 @@ impl WorkflowExecutor {
                 // Execute rollback
                 let rollback_report = self
                     .rollback_engine
-                    .execute_rollback(&self.workflow, rollback_set, &workflow_id, &mut self.audit_log)
+                    .execute_rollback(
+                        &self.workflow,
+                        rollback_set,
+                        &workflow_id,
+                        &mut self.audit_log,
+                        &self.compensation_registry,
+                    )
                     .await
-                    .map_err(|err| {
-                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    .map_err(|_err| {
+                        crate::workflow::dag::WorkflowError::TaskNotFound(task_id.clone())
                     })?;
 
                 // Record workflow failed
@@ -676,10 +764,16 @@ impl WorkflowExecutor {
                 // Execute rollback
                 let rollback_report = self
                     .rollback_engine
-                    .execute_rollback(&self.workflow, rollback_set, &workflow_id, &mut self.audit_log)
+                    .execute_rollback(
+                        &self.workflow,
+                        rollback_set,
+                        &workflow_id,
+                        &mut self.audit_log,
+                        &self.compensation_registry,
+                    )
                     .await
-                    .map_err(|err| {
-                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    .map_err(|_err| {
+                        crate::workflow::dag::WorkflowError::TaskNotFound(task_id.clone())
                     })?;
 
                 // Record workflow failed
@@ -1355,5 +1449,114 @@ mod tests {
             }
             _ => panic!("Expected CheckpointNotFound error"),
         }
+    }
+
+    #[test]
+    fn test_executor_register_compensation() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        let mut executor = WorkflowExecutor::new(workflow);
+
+        // Register compensation for task a
+        executor.register_compensation(
+            TaskId::new("a"),
+            ToolCompensation::skip("Test compensation"),
+        );
+
+        // Verify compensation is registered
+        assert!(executor.compensation_registry.has_compensation(&TaskId::new("a")));
+        assert!(!executor.compensation_registry.has_compensation(&TaskId::new("b")));
+
+        // Verify we can retrieve it
+        let comp = executor.compensation_registry.get(&TaskId::new("a"));
+        assert!(comp.is_some());
+        assert_eq!(comp.unwrap().description, "Test compensation");
+    }
+
+    #[test]
+    fn test_executor_register_file_compensation() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let mut executor = WorkflowExecutor::new(workflow);
+
+        // Register file compensation
+        executor.register_file_compensation(TaskId::new("a"), "/tmp/test.txt");
+
+        // Verify compensation is registered
+        assert!(executor.compensation_registry.has_compensation(&TaskId::new("a")));
+
+        let comp = executor.compensation_registry.get(&TaskId::new("a"));
+        assert!(comp.is_some());
+        assert!(comp.unwrap().description.contains("Delete file"));
+    }
+
+    #[test]
+    fn test_executor_validate_compensation_coverage() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+
+        let mut executor = WorkflowExecutor::new(workflow);
+
+        // Register compensation for only task a
+        executor.register_compensation(
+            TaskId::new("a"),
+            ToolCompensation::skip("Test compensation"),
+        );
+
+        // Validate coverage
+        let report = executor.validate_compensation_coverage();
+
+        assert_eq!(report.tasks_with_compensation.len(), 1);
+        assert!(report.tasks_with_compensation.contains(&TaskId::new("a")));
+
+        assert_eq!(report.tasks_without_compensation.len(), 2);
+        assert!(report.tasks_without_compensation.contains(&TaskId::new("b")));
+        assert!(report.tasks_without_compensation.contains(&TaskId::new("c")));
+
+        // Coverage should be 1/3 = 0.333
+        assert!((report.coverage_percentage - 0.333).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_compensation_registry_integration_with_rollback() {
+        use crate::workflow::rollback::CompensationRegistry;
+
+        let mut workflow = Workflow::new();
+
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a").with_failure()));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("b")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        let mut executor = WorkflowExecutor::new(workflow);
+
+        // Register compensations
+        executor.register_compensation(
+            TaskId::new("a"),
+            ToolCompensation::skip("Compensate A"),
+        );
+        executor.register_file_compensation(TaskId::new("b"), "/tmp/test.txt");
+
+        // Execute workflow (will fail at b)
+        let result = executor.execute().await.unwrap();
+
+        // Workflow should have failed
+        assert!(!result.success);
+        assert_eq!(result.failed_tasks[0], TaskId::new("b"));
+
+        // Rollback should have occurred
+        assert!(result.rollback_report.is_some());
+        let rollback_report = result.rollback_report.unwrap();
+
+        // Verify compensations were executed
+        // Only b should be rolled back (no dependents)
+        assert!(rollback_report.rolled_back_tasks.contains(&TaskId::new("b")));
     }
 }
