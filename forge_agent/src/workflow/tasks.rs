@@ -635,6 +635,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_shell_command_with_working_dir() {
+        // Create a temporary directory for testing
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_shell_command.txt");
+
+        // Create a test file in the temp directory
+        std::fs::write(&test_file, "test content").unwrap();
+
+        // Create a task that lists files in the temp directory
+        let config = ShellCommandConfig::new("ls")
+            .args(vec![temp_dir.to_string_lossy().to_string()])
+            .working_dir(&temp_dir);
+
+        let task = ShellCommandTask::with_config(
+            TaskId::new("shell_task"),
+            "Shell Task".to_string(),
+            config,
+        );
+
+        let context = TaskContext::new("workflow_1", task.id());
+        let result = task.execute(&context).await.unwrap();
+
+        // Command should succeed
+        assert_eq!(result, TaskResult::Success);
+
+        // Clean up
+        std::fs::remove_file(&test_file).ok();
+    }
+
+    #[tokio::test]
+    async fn test_shell_command_with_env() {
+        // Create a task that reads an environment variable
+        let config = ShellCommandConfig::new("sh")
+            .args(vec!["-c".to_string(), "echo $TEST_VAR".to_string()])
+            .env("TEST_VAR", "test_value");
+
+        let task = ShellCommandTask::with_config(
+            TaskId::new("shell_task"),
+            "Shell Task".to_string(),
+            config,
+        );
+
+        let context = TaskContext::new("workflow_1", task.id());
+        let result = task.execute(&context).await.unwrap();
+
+        // Command should succeed
+        assert_eq!(result, TaskResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_shell_command_compensation() {
+        // Create a task that spawns a long-running process
+        // For testing, we use echo which exits immediately
+        let task = ShellCommandTask::new(
+            TaskId::new("shell_task"),
+            "Shell Task".to_string(),
+            "echo",
+        ).with_args(vec!["test".to_string()]);
+
+        // Before execution, compensation should indicate no process spawned
+        let compensation = task.compensation();
+        assert!(compensation.is_some());
+        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+
+        // Execute the task
+        let context = TaskContext::new("workflow_1", task.id());
+        let result = task.execute(&context).await.unwrap();
+        assert_eq!(result, TaskResult::Success);
+
+        // After execution, compensation should indicate process termination
+        let compensation = task.compensation();
+        assert!(compensation.is_some());
+        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::UndoFunction);
+    }
+
+    #[tokio::test]
     async fn test_graph_query_compensation_skip() {
         let task = GraphQueryTask::find_symbol("my_function");
 
