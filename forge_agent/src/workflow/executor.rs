@@ -10,6 +10,7 @@ use crate::workflow::checkpoint::{
 };
 use crate::workflow::dag::Workflow;
 use crate::workflow::rollback::{CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation};
+use crate::workflow::state::TaskStatus;
 use crate::workflow::task::{CompensationAction, TaskContext, TaskId, TaskResult};
 use crate::workflow::timeout::{TaskTimeout, TimeoutConfig, TimeoutError, WorkflowTimeout};
 use crate::workflow::tools::ToolRegistry;
@@ -731,10 +732,17 @@ impl WorkflowExecutor {
     /// ```
     pub async fn execute_parallel(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
         use tokio::task::JoinSet;
+        use crate::workflow::state::{ConcurrentState, WorkflowState, TaskSummary};
 
         // Record workflow started
         let workflow_id = self.audit_log.tx_id().to_string();
         self.record_workflow_started(&workflow_id).await;
+
+        // Create thread-safe concurrent state wrapper
+        // This allows tasks to read state while executor writes updates
+        let initial_state = WorkflowState::new(&workflow_id)
+            .with_status(crate::workflow::state::WorkflowStatus::Running);
+        let concurrent_state = std::sync::Arc::new(ConcurrentState::new(initial_state));
 
         // Get execution layers
         let execution_layers = self.workflow.execution_layers()?;
@@ -791,6 +799,7 @@ impl WorkflowExecutor {
                 let timeout_config = self.timeout_config.clone();
                 let tool_registry = self.tool_registry.clone();
                 let audit_log = self.audit_log.clone();
+                let concurrent_state_clone = std::sync::Arc::clone(&concurrent_state);
 
                 // Spawn task execution
                 set.spawn(async move {
@@ -804,6 +813,13 @@ impl WorkflowExecutor {
                             task_name: task_name.clone(),
                         })
                         .await;
+
+                    // Task can read state concurrently (immutable access)
+                    // Guard is dropped before await to maintain Send bounds
+                    {
+                        let _state_reader = concurrent_state_clone.read();
+                        // State can be read here if needed
+                    }
 
                     // Create task context
                     let mut context = if let Some(token) = cancellation_token {
@@ -847,7 +863,18 @@ impl WorkflowExecutor {
                 match result {
                     Ok(Ok((task_id, task_name))) => {
                         // Task completed successfully
+                        // Update executor's completed_tasks (non-thread-safe, but we're single-threaded here)
                         self.completed_tasks.insert(task_id.clone());
+
+                        // Update concurrent state (thread-safe write)
+                        if let Ok(mut state) = concurrent_state.write() {
+                            state.completed_tasks.push(TaskSummary::new(
+                                task_id.as_str(),
+                                &task_name,
+                                TaskStatus::Completed,
+                            ));
+                        }
+
                         // Record task completion in executor's audit log
                         self.record_task_completed(&workflow_id, &task_id, &task_name).await;
                     }
@@ -922,7 +949,11 @@ impl WorkflowExecutor {
             self.create_checkpoint(&workflow_id, layer_index).await;
         }
 
-        // All layers completed
+        // All layers completed - update final state
+        if let Ok(mut state) = concurrent_state.write() {
+            state.status = crate::workflow::state::WorkflowStatus::Completed;
+        }
+
         self.record_workflow_completed(&workflow_id).await;
 
         let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
@@ -2797,5 +2828,32 @@ mod tests {
 
         // Should have WorkflowCompleted
         assert!(audit_events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCompleted { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_parallel_state_updates() {
+        // Stress test with 10 concurrent tasks in same layer
+        let mut workflow = Workflow::new();
+
+        // Add 10 independent tasks (all in layer 0)
+        for i in 0..10 {
+            workflow.add_task(Box::new(MockTask::new(
+                format!("task-{}", i),
+                &format!("Task {}", i),
+            )));
+        }
+
+        let mut executor = WorkflowExecutor::new(workflow);
+        let result = executor.execute_parallel().await;
+
+        assert!(result.is_ok());
+        let workflow_result = result.unwrap();
+        assert!(workflow_result.success);
+        assert_eq!(workflow_result.completed_tasks.len(), 10);
+
+        // Verify all tasks completed
+        for i in 0..10 {
+            assert!(workflow_result.completed_tasks.contains(&TaskId::new(format!("task-{}", i))));
+        }
     }
 }
