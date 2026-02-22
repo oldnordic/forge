@@ -10,11 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 12-parallel-execution
-Plan: 2 of 3 in current phase
-Status: In Progress
-Last activity: 2026-02-22 — Plan 12-02 (Concurrent state management with dashmap) completed
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: Complete
+Last activity: 2026-02-22 — Plan 12-03 (Deadlock detection and prevention) completed
 
-Progress: [█████░] 67%
+Progress: [██████████████████] 100%
+
+**Phase 12 Complete!** This completes the v0.4 milestone.
+- Fork-join parallel execution (12-01)
+- Concurrent state management (12-02)
+- Deadlock detection and prevention (12-03)
 
 ## Performance Metrics
 
@@ -162,6 +167,11 @@ Recent decisions affecting current work:
 - [Phase 12-parallel-execution]: Use Arc<RwLock<T>> over dashmap for concurrent state access
 - [Phase 12-parallel-execution]: RwLock over Mutex for read-heavy concurrent state access
 - [Phase 12-parallel-execution]: State updates in executor after task completion, not during execution
+- [Phase 12-parallel-execution]: Use Tarjan's strongly connected components algorithm for cycle detection
+- [Phase 12-parallel-execution]: Default deadlock timeout of 5 minutes balances safety and long-running workflows
+- [Phase 12-parallel-execution]: Resource deadlock warnings are informational (logged but don't block execution)
+- [Phase 12-parallel-execution]: Dependency cycles are hard errors (workflow cannot execute)
+- [Phase 12-parallel-execution]: Timeout applies per-layer, not per-task (task timeouts exist separately)
 
 ### Pending Todos
 
@@ -177,6 +187,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T23:01:00Z
-Stopped at: Completed plan 12-01 (Fork-join parallelism with topological sort)
+Last session: 2026-02-22T23:53:42Z
+Stopped at: Completed plan 12-03 (Deadlock detection and prevention) - Phase 12 and v0.4 milestone complete!
 Resume file: None
