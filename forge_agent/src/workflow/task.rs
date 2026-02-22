@@ -96,6 +96,7 @@ pub enum TaskResult {
 ///
 /// Provides access to the Forge SDK for graph operations,
 /// metadata about the current workflow execution, and cancellation token.
+#[derive(Clone)]
 pub struct TaskContext {
     /// Optional Forge instance for graph queries
     pub forge: Option<Forge>,
