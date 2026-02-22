@@ -80,9 +80,6 @@ impl AgentLoop {
     ///
     /// Returns `LoopResult` with commit data on success, or error on phase failure.
     pub async fn run(&mut self, query: &str) -> Result<LoopResult, crate::AgentError> {
-        // Begin transaction
-        self.transaction = Some(crate::transaction::Transaction::begin().await?);
-
         // Phase 1: Observe
         let observation = match self.observe_phase(query).await {
             Ok(obs) => obs,
@@ -288,6 +285,9 @@ impl AgentLoop {
                 .await
                 .map_err(|e| crate::AgentError::MutationFailed(e.to_string()))?;
         }
+
+        // Transfer transaction to loop for commit/rollback
+        self.transaction = Some(mutator.into_transaction()?);
 
         // Collect modified files (empty for v0.3)
         let files_modified: Vec<String> = Vec::new();
