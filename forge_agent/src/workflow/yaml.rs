@@ -548,4 +548,76 @@ tasks:
         let workflow = load_workflow_from_file(temp_file.path()).await.unwrap();
         assert_eq!(workflow.task_count(), 1);
     }
+
+    #[tokio::test]
+    async fn test_yaml_round_trip() {
+        let yaml = r#"
+name: "Round Trip Test"
+version: "1.0"
+description: "Test serialization round trip"
+tasks:
+  - id: "task1"
+    name: "Task 1"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "test"
+"#;
+
+        // Parse YAML to YamlWorkflow
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+
+        // Serialize back to YAML
+        let yaml_out = serde_yaml::to_string(&yaml_workflow).unwrap();
+
+        // Parse again
+        let yaml_workflow2: YamlWorkflow = serde_yaml::from_str(&yaml_out).unwrap();
+
+        // Should be identical
+        assert_eq!(yaml_workflow.name, yaml_workflow2.name);
+        assert_eq!(yaml_workflow.tasks.len(), yaml_workflow2.tasks.len());
+    }
+
+    #[tokio::test]
+    async fn test_load_simple_graph_query_example() {
+        let yaml = include_str!("examples/simple_graph_query.yaml");
+
+        let workflow = load_workflow_from_string(yaml).unwrap();
+        assert_eq!(workflow.task_count(), 2);
+
+        let execution_order = workflow.execution_order().unwrap();
+        assert_eq!(execution_order[0], TaskId::new("find"));
+        assert_eq!(execution_order[1], TaskId::new("analyze"));
+    }
+
+    #[tokio::test]
+    async fn test_load_agent_assisted_example() {
+        let yaml = include_str!("examples/agent_assisted.yaml");
+
+        let workflow = load_workflow_from_string(yaml).unwrap();
+        assert_eq!(workflow.task_count(), 2);
+
+        let execution_order = workflow.execution_order().unwrap();
+        assert_eq!(execution_order[0], TaskId::new("observe"));
+        assert_eq!(execution_order[1], TaskId::new("plan"));
+    }
+
+    #[tokio::test]
+    async fn test_load_complex_dependencies_example() {
+        let yaml = include_str!("examples/complex_dependencies.yaml");
+
+        let workflow = load_workflow_from_string(yaml).unwrap();
+        assert_eq!(workflow.task_count(), 4);
+
+        let execution_order = workflow.execution_order().unwrap();
+        // Verify topological sort respects diamond pattern
+        assert_eq!(execution_order[0], TaskId::new("a"));
+        // B and C can be in either order after A
+        let b_index = execution_order.iter().position(|id| id == &TaskId::new("b")).unwrap();
+        let c_index = execution_order.iter().position(|id| id == &TaskId::new("c")).unwrap();
+        assert!(b_index > 0 && c_index > 0);
+        // D must be after both B and C
+        let d_index = execution_order.iter().position(|id| id == &TaskId::new("d")).unwrap();
+        assert!(d_index > b_index && d_index > c_index);
+    }
 }

@@ -1,0 +1,23 @@
+# Simple Graph Query Workflow
+#
+# This workflow demonstrates how to use YAML to define a simple
+# workflow that queries the code graph for symbol information.
+
+name: "Symbol Analysis Workflow"
+description: "Find a symbol and analyze its impact"
+
+tasks:
+  - id: "find"
+    name: "Find Symbol"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "process_data"
+
+  - id: "analyze"
+    name: "Analyze Impact"
+    type: GRAPH_QUERY
+    depends_on: ["find"]
+    params:
+      query_type: "impact"
+      target: "process_data"

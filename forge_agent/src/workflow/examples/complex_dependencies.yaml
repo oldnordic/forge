@@ -1,0 +1,43 @@
+# Complex Dependencies Workflow
+#
+# This workflow demonstrates a diamond dependency pattern:
+# - Task A is the root
+# - Tasks B and C both depend on A (can run in parallel in future)
+# - Task D depends on both B and C (must wait for both)
+#
+# Execution order: A -> [B, C] -> D
+
+name: "Diamond Dependency Pattern"
+description: "Demonstrates complex dependency handling"
+
+tasks:
+  - id: "a"
+    name: "Root Task"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "root_function"
+
+  - id: "b"
+    name: "Branch Task B"
+    type: GRAPH_QUERY
+    depends_on: ["a"]
+    params:
+      query_type: "references"
+      target: "function_b"
+
+  - id: "c"
+    name: "Branch Task C"
+    type: GRAPH_QUERY
+    depends_on: ["a"]
+    params:
+      query_type: "references"
+      target: "function_c"
+
+  - id: "d"
+    name: "Final Task"
+    type: GRAPH_QUERY
+    depends_on: ["b", "c"]
+    params:
+      query_type: "impact"
+      target: "final_function"

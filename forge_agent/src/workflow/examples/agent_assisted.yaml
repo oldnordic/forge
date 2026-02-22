@@ -1,0 +1,21 @@
+# AI-Assisted Refactoring Workflow
+#
+# This workflow demonstrates how to use YAML to define a workflow
+# that includes AI-driven steps using the AgentLoop task type.
+
+name: "AI-Assisted Refactoring"
+description: "Use agent loop to plan refactoring"
+
+tasks:
+  - id: "observe"
+    name: "Gather Context"
+    type: AGENT_LOOP
+    params:
+      query: "Find all functions that call process_data"
+
+  - id: "plan"
+    name: "Plan Refactoring"
+    type: AGENT_LOOP
+    depends_on: ["observe"]
+    params:
+      query: "Create a plan to extract error handling"

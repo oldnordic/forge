@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 08-workflow-foundation
-Plan: 1 of 5 in current phase
+Plan: 2 of 5 in current phase
 Status: Complete
-Last activity: 2026-02-22 — Plan 08-01 (DAG Scheduler) completed
+Last activity: 2026-02-22 — Plan 08-02 (Workflow Definition API) completed
 
-Progress: [███░░░░░░] 20%
+Progress: [█████░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 10 min
-- Total execution time: 1.2 hours
+- Total plans completed: 8
+- Average duration: 15 min
+- Total execution time: 2 hours
 
 **By Phase:**
 
@@ -44,6 +44,7 @@ Progress: [███░░░░░░] 20%
 | Phase 03 P03 | 4min | 3 tasks | 4 files |
 | Phase 03 P04 | 3min | 2 tasks | 4 files |
 | Phase 08 P01 | 71min | 7 tasks | 9 files |
+| Phase 08-workflow-foundation P08-02 | 1081 | 5 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,10 @@ Recent decisions affecting current work:
 - [Phase 08]: Granular audit events (start/completion/failed per task) for complete audit trail
 - [Phase 08]: petgraph 0.8 for topological sort and SCC-based cycle detection
 - [Phase 08]: async-trait 0.1 for WorkflowTask trait with async execute() method
+- [Phase 08-workflow-foundation]: FunctionTask uses generic bounds with Box::pin to avoid futures-util dependency
+- [Phase 08-workflow-foundation]: Executor fields made pub(crate) for state module access
+- [Phase 08-workflow-foundation]: ParallelTasks executes sequentially in Phase 8, parallelism deferred to Phase 12
+- [Phase 08-workflow-foundation]: State types serialize to JSON for external monitoring
 
 ### Pending Todos
 
@@ -92,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T15:33:00Z
-Stopped at: Completed plan 08-01 (DAG Scheduler)
+Last session: 2026-02-22T16:40:00Z
+Stopped at: Completed plan 08-02 (Workflow Definition API)
 Resume file: None
