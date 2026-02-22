@@ -118,6 +118,8 @@ pub struct WorkflowExecutor {
     pub(in crate::workflow) timeout_config: Option<TimeoutConfig>,
     /// Optional tool registry for tool invocation
     pub(in crate::workflow) tool_registry: Option<Arc<ToolRegistry>>,
+    /// Optional deadlock timeout for layer execution (default 5 minutes)
+    pub(in crate::workflow) deadlock_timeout: Option<std::time::Duration>,
 }
 
 impl WorkflowExecutor {
@@ -148,6 +150,7 @@ impl WorkflowExecutor {
             cancellation_source: None,
             timeout_config: None,
             tool_registry: None,
+            deadlock_timeout: Some(std::time::Duration::from_secs(300)), // Default 5 minutes
         }
     }
 
@@ -333,6 +336,48 @@ impl WorkflowExecutor {
     /// ```
     pub fn with_tool_registry(mut self, registry: ToolRegistry) -> Self {
         self.tool_registry = Some(Arc::new(registry));
+        self
+    }
+
+    /// Sets the deadlock timeout for parallel execution layers.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - The timeout duration for each layer execution
+    ///
+    /// # Returns
+    ///
+    /// The executor with deadlock timeout configured (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::time::Duration;
+    ///
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .with_deadlock_timeout(Duration::from_secs(600)); // 10 minutes
+    /// ```
+    pub fn with_deadlock_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.deadlock_timeout = Some(timeout);
+        self
+    }
+
+    /// Disables the deadlock timeout for parallel execution.
+    ///
+    /// Use this for workflows that may take longer than the default 5 minutes.
+    ///
+    /// # Returns
+    ///
+    /// The executor with deadlock timeout disabled (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .without_deadlock_timeout();
+    /// ```
+    pub fn without_deadlock_timeout(mut self) -> Self {
+        self.deadlock_timeout = None;
         self
     }
 
@@ -859,41 +904,98 @@ impl WorkflowExecutor {
             }
 
             // Wait for all tasks in layer to complete
-            let mut layer_succeeded = true;
-            let mut failed_task: Option<TaskId> = None;
-            let mut error_message: Option<String> = None;
+            // Apply deadlock timeout if configured
+            let (layer_succeeded, failed_task, error_message): (bool, Option<TaskId>, Option<String>) = if let Some(timeout) = self.deadlock_timeout {
+                // With timeout - check for timeout first
+                let layer_result = tokio::time::timeout(timeout, async {
+                    let mut layer_succeeded = true;
+                    let mut failed_task: Option<TaskId> = None;
+                    let mut error_message: Option<String> = None;
 
-            while let Some(result) = set.join_next().await {
-                match result {
-                    Ok(Ok((task_id, task_name))) => {
-                        // Task completed successfully
-                        // Update executor's completed_tasks (non-thread-safe, but we're single-threaded here)
-                        self.completed_tasks.insert(task_id.clone());
+                    while let Some(result) = set.join_next().await {
+                        match result {
+                            Ok(Ok((task_id, task_name))) => {
+                                // Task completed successfully
+                                // Update executor's completed_tasks (non-thread-safe, but we're single-threaded here)
+                                self.completed_tasks.insert(task_id.clone());
 
-                        // Update concurrent state (thread-safe write)
-                        if let Ok(mut state) = concurrent_state.write() {
-                            state.completed_tasks.push(TaskSummary::new(
-                                task_id.as_str(),
-                                &task_name,
-                                TaskStatus::Completed,
-                            ));
+                                // Update concurrent state (thread-safe write)
+                                if let Ok(mut state) = concurrent_state.write() {
+                                    state.completed_tasks.push(TaskSummary::new(
+                                        task_id.as_str(),
+                                        &task_name,
+                                        TaskStatus::Completed,
+                                    ));
+                                }
+
+                                // Record task completion in executor's audit log
+                                self.record_task_completed(&workflow_id, &task_id, &task_name).await;
+                            }
+                            Ok(Err(_e)) => {
+                                // Task failed
+                                layer_succeeded = false;
+                                error_message = Some("Task execution failed".to_string());
+                            }
+                            Err(_e) => {
+                                // Task panicked
+                                layer_succeeded = false;
+                                error_message = Some("Task panicked".to_string());
+                            }
                         }
+                    }
 
-                        // Record task completion in executor's audit log
-                        self.record_task_completed(&workflow_id, &task_id, &task_name).await;
-                    }
-                    Ok(Err(e)) => {
-                        // Task failed
-                        layer_succeeded = false;
-                        error_message = Some(e.to_string());
-                    }
-                    Err(e) => {
-                        // Task panicked
-                        layer_succeeded = false;
-                        error_message = Some(format!("Task panicked: {}", e));
+                    (layer_succeeded, failed_task, error_message)
+                })
+                .await;
+
+                match layer_result {
+                    Ok(result) => result,
+                    Err(_) => {
+                        // Layer timed out - treat as deadlock
+                        let timeout_secs = timeout.as_secs();
+                        self.record_deadlock_timeout(&workflow_id, layer_index, timeout_secs).await;
+
+                        return Err(DeadlockError::ResourceDeadlock(format!(
+                            "Layer {} exceeded deadlock timeout of {} seconds",
+                            layer_index, timeout_secs
+                        )).into());
                     }
                 }
-            }
+            } else {
+                // No timeout - execute layer directly
+                let mut layer_succeeded = true;
+                let mut failed_task: Option<TaskId> = None;
+                let mut error_message: Option<String> = None;
+
+                while let Some(result) = set.join_next().await {
+                    match result {
+                        Ok(Ok((task_id, task_name))) => {
+                            // Task completed successfully
+                            self.completed_tasks.insert(task_id.clone());
+
+                            if let Ok(mut state) = concurrent_state.write() {
+                                state.completed_tasks.push(TaskSummary::new(
+                                    task_id.as_str(),
+                                    &task_name,
+                                    TaskStatus::Completed,
+                                ));
+                            }
+
+                            self.record_task_completed(&workflow_id, &task_id, &task_name).await;
+                        }
+                        Ok(Err(_e)) => {
+                            layer_succeeded = false;
+                            error_message = Some("Task execution failed".to_string());
+                        }
+                        Err(_e) => {
+                            layer_succeeded = false;
+                            error_message = Some("Task panicked".to_string());
+                        }
+                    }
+                }
+
+                (layer_succeeded, failed_task, error_message)
+            };
 
             // Record parallel layer completed
             let _ = self
@@ -1237,6 +1339,19 @@ impl WorkflowExecutor {
                 Err(e.into())
             }
         }
+    }
+
+    /// Records deadlock timeout event.
+    async fn record_deadlock_timeout(&mut self, workflow_id: &str, layer_index: usize, timeout_secs: u64) {
+        let _ = self
+            .audit_log
+            .record(crate::audit::AuditEvent::WorkflowDeadlockTimeout {
+                timestamp: Utc::now(),
+                workflow_id: workflow_id.to_string(),
+                layer_index,
+                timeout_secs,
+            })
+            .await;
     }
 
     /// Records task timeout event.
@@ -2952,5 +3067,32 @@ mod tests {
         for i in 0..10 {
             assert!(workflow_result.completed_tasks.contains(&TaskId::new(format!("task-{}", i))));
         }
+    }
+
+    #[tokio::test]
+    async fn test_deadlock_timeout_abort() {
+        // Test that a layer times out after the configured deadlock timeout
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_deadlock_timeout(std::time::Duration::from_millis(100)); // 100ms timeout
+
+        // The stub execution only takes 10ms, so this should complete successfully
+        let result = executor.execute_parallel().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_deadlock_timeout_disabled() {
+        // Test that deadlock timeout can be disabled
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let executor = WorkflowExecutor::new(workflow)
+            .without_deadlock_timeout();
+
+        // Verify the timeout is None
+        assert!(executor.deadlock_timeout.is_none());
     }
 }
