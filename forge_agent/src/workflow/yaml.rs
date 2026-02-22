@@ -6,7 +6,8 @@
 use crate::workflow::{
     task::{TaskId, TaskResult, TaskError, TaskContext},
     tasks::{GraphQueryTask, GraphQueryType, AgentLoopTask, ShellCommandTask},
-    dag::Workflow,
+    dag::{Workflow, WorkflowError},
+    builder::WorkflowBuilder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
