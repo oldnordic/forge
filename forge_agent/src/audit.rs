@@ -160,6 +160,20 @@ pub enum AuditEvent {
         error: String,
         fallback_action: String,
     },
+    /// Parallel task layer started
+    WorkflowTaskParallelStarted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        layer_index: usize,
+        task_count: usize,
+    },
+    /// Parallel task layer completed
+    WorkflowTaskParallelCompleted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        layer_index: usize,
+        task_count: usize,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.
