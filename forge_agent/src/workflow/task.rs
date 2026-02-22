@@ -98,6 +98,8 @@ pub struct TaskContext {
     pub task_id: TaskId,
     /// Optional cancellation token for cooperative cancellation
     cancellation_token: Option<crate::workflow::cancellation::CancellationToken>,
+    /// Optional task timeout duration
+    pub task_timeout: Option<std::time::Duration>,
 }
 
 impl TaskContext {
@@ -108,6 +110,7 @@ impl TaskContext {
             workflow_id: workflow_id.into(),
             task_id,
             cancellation_token: None,
+            task_timeout: None,
         }
     }
 
@@ -162,6 +165,42 @@ impl TaskContext {
     /// ```
     pub fn cancellation_token(&self) -> Option<&crate::workflow::cancellation::CancellationToken> {
         self.cancellation_token.as_ref()
+    }
+
+    /// Sets the task timeout for this context.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - The timeout duration for the task
+    ///
+    /// # Returns
+    ///
+    /// The context with task timeout set (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::time::Duration;
+    ///
+    /// let context = TaskContext::new("workflow-1", task_id)
+    ///     .with_task_timeout(Duration::from_secs(30));
+    /// ```
+    pub fn with_task_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.task_timeout = Some(timeout);
+        self
+    }
+
+    /// Returns the task timeout duration if set.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(timeout) = context.task_timeout() {
+    ///     println!("Task timeout: {:?}", timeout);
+    /// }
+    /// ```
+    pub fn task_timeout(&self) -> Option<std::time::Duration> {
+        self.task_timeout
     }
 }
 
@@ -231,6 +270,10 @@ pub enum TaskError {
     /// Task was skipped due to workflow state
     #[error("Task skipped: {0}")]
     Skipped(String),
+
+    /// Task exceeded time limit
+    #[error("Task timeout: {0}")]
+    Timeout(String),
 
     /// I/O error during task execution
     #[error("I/O error: {0}")]
@@ -406,6 +449,45 @@ mod tests {
 
         assert!(context.cancellation_token().is_some());
         assert_eq!(context.workflow_id, "workflow-1");
+    }
+
+    #[test]
+    fn test_context_without_task_timeout() {
+        let task_id = TaskId::new("task-1");
+        let context = TaskContext::new("workflow-1", task_id);
+
+        // Task timeout should be None by default
+        assert!(context.task_timeout().is_none());
+    }
+
+    #[test]
+    fn test_context_with_task_timeout() {
+        use std::time::Duration;
+
+        let task_id = TaskId::new("task-1");
+        let timeout = Duration::from_secs(30);
+
+        let context = TaskContext::new("workflow-1", task_id)
+            .with_task_timeout(timeout);
+
+        // Task timeout should be accessible
+        assert!(context.task_timeout().is_some());
+        assert_eq!(context.task_timeout().unwrap(), timeout);
+    }
+
+    #[test]
+    fn test_context_task_timeout_accessor() {
+        use std::time::Duration;
+
+        let task_id = TaskId::new("task-1");
+        let timeout = Duration::from_millis(5000);
+
+        let context = TaskContext::new("workflow-1", task_id)
+            .with_task_timeout(timeout);
+
+        // Verify accessor returns correct value
+        assert_eq!(context.task_timeout, Some(timeout));
+        assert_eq!(context.task_timeout().unwrap(), Duration::from_millis(5000));
     }
 
     // Mock task for testing WorkflowTask trait
