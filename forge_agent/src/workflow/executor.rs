@@ -1,9 +1,11 @@
-//! Sequential workflow executor with audit logging.
+//! Sequential workflow executor with audit logging and rollback.
 //!
 //! Executes tasks in topological order, recording all events to the audit log.
+//! On failure, triggers selective rollback of dependent tasks using Saga compensation.
 
 use crate::audit::AuditLog;
 use crate::workflow::dag::Workflow;
+use crate::workflow::rollback::{RollbackEngine, RollbackReport, RollbackStrategy};
 use crate::workflow::task::{TaskContext, TaskId};
 use chrono::Utc;
 use std::collections::HashSet;
@@ -21,6 +23,8 @@ pub struct WorkflowResult {
     pub failed_tasks: Vec<TaskId>,
     /// Error message if workflow failed
     pub error: Option<String>,
+    /// Rollback report if rollback was executed
+    pub rollback_report: Option<RollbackReport>,
 }
 
 impl WorkflowResult {
@@ -31,6 +35,7 @@ impl WorkflowResult {
             completed_tasks,
             failed_tasks: Vec::new(),
             error: None,
+            rollback_report: None,
         }
     }
 
@@ -41,14 +46,32 @@ impl WorkflowResult {
             completed_tasks,
             failed_tasks: vec![failed_task],
             error: Some(error),
+            rollback_report: None,
+        }
+    }
+
+    /// Creates a failed result with rollback report.
+    fn new_failed_with_rollback(
+        completed_tasks: Vec<TaskId>,
+        failed_task: TaskId,
+        error: String,
+        rollback_report: RollbackReport,
+    ) -> Self {
+        Self {
+            success: false,
+            completed_tasks,
+            failed_tasks: vec![failed_task],
+            error: Some(error),
+            rollback_report: Some(rollback_report),
         }
     }
 }
 
-/// Sequential workflow executor.
+/// Sequential workflow executor with rollback support.
 ///
 /// Executes tasks in topological order based on dependencies,
-/// recording all task events to the audit log.
+/// recording all task events to the audit log. On failure,
+/// automatically triggers selective rollback of dependent tasks.
 ///
 /// # Execution Model
 ///
@@ -56,7 +79,7 @@ impl WorkflowResult {
 /// 1. Validates the workflow structure
 /// 2. Calculates execution order via topological sort
 /// 3. Executes each task with audit logging
-/// 4. Stops on first failure (rollback is deferred to phase 08-05)
+/// 4. On failure, triggers rollback of dependent tasks
 pub struct WorkflowExecutor {
     /// The workflow to execute
     pub(in crate::workflow) workflow: Workflow,
@@ -66,6 +89,10 @@ pub struct WorkflowExecutor {
     pub(in crate::workflow) completed_tasks: HashSet<TaskId>,
     /// Tasks that failed
     pub(in crate::workflow) failed_tasks: Vec<TaskId>,
+    /// Rollback engine for handling failures
+    rollback_engine: RollbackEngine,
+    /// Rollback strategy to use on failure
+    rollback_strategy: RollbackStrategy,
 }
 
 impl WorkflowExecutor {
@@ -87,13 +114,37 @@ impl WorkflowExecutor {
             audit_log: AuditLog::new(),
             completed_tasks: HashSet::new(),
             failed_tasks: Vec::new(),
+            rollback_engine: RollbackEngine::new(),
+            rollback_strategy: RollbackStrategy::AllDependent,
         }
+    }
+
+    /// Sets the rollback strategy for this executor.
+    ///
+    /// # Arguments
+    ///
+    /// * `strategy` - The rollback strategy to use
+    ///
+    /// # Returns
+    ///
+    /// The executor with the updated strategy (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .with_rollback_strategy(RollbackStrategy::FailedOnly);
+    /// ```
+    pub fn with_rollback_strategy(mut self, strategy: RollbackStrategy) -> Self {
+        self.rollback_strategy = strategy;
+        self
     }
 
     /// Executes the workflow.
     ///
     /// Tasks are executed in topological order, with audit logging
-    /// for each task start/completion/failed event.
+    /// for each task start/completion/failed event. On failure,
+    /// triggers rollback of dependent tasks.
     ///
     /// # Returns
     ///
@@ -120,12 +171,36 @@ impl WorkflowExecutor {
         // Execute each task in order
         for task_id in execution_order {
             if let Err(e) = self.execute_task(&workflow_id, &task_id).await {
-                // Task failed - stop execution
+                // Task failed - trigger rollback
+                let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
+
+                // Find rollback set based on strategy
+                let rollback_set = self
+                    .rollback_engine
+                    .find_rollback_set(&self.workflow, &task_id, self.rollback_strategy)
+                    .map_err(|err| {
+                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    })?;
+
+                // Execute rollback
+                let rollback_report = self
+                    .rollback_engine
+                    .execute_rollback(&self.workflow, rollback_set, &workflow_id, &mut self.audit_log)
+                    .await
+                    .map_err(|err| {
+                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    })?;
+
+                // Record workflow failed
                 self.record_workflow_failed(&workflow_id, &task_id, &e.to_string())
                     .await;
 
-                let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
-                return Ok(WorkflowResult::new_failed(completed, task_id, e.to_string()));
+                return Ok(WorkflowResult::new_failed_with_rollback(
+                    completed,
+                    task_id,
+                    e.to_string(),
+                    rollback_report,
+                ));
             }
         }
 
@@ -324,6 +399,11 @@ impl WorkflowExecutor {
         }
         self.completed_tasks.len() as f64 / total as f64
     }
+
+    /// Returns the rollback strategy.
+    pub fn rollback_strategy(&self) -> RollbackStrategy {
+        self.rollback_strategy
+    }
 }
 
 #[cfg(test)]
@@ -445,5 +525,96 @@ mod tests {
 
         // Verify workflow started event
         assert!(matches!(events[0], crate::audit::AuditEvent::WorkflowStarted { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_failure_triggers_rollback() {
+        let mut workflow = Workflow::new();
+
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a").with_failure()));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("b")));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        let mut executor = WorkflowExecutor::new(workflow);
+        let result = executor.execute().await.unwrap();
+
+        // Workflow should have failed
+        assert!(!result.success);
+        assert_eq!(result.failed_tasks.len(), 1);
+        assert_eq!(result.failed_tasks[0], TaskId::new("b"));
+
+        // Rollback report should exist
+        assert!(result.rollback_report.is_some());
+        let rollback_report = result.rollback_report.unwrap();
+
+        // Only b should be rolled back (no dependents in this case)
+        assert_eq!(rollback_report.rolled_back_tasks.len(), 1);
+        assert!(rollback_report.rolled_back_tasks.contains(&TaskId::new("b")));
+
+        // Verify audit events include rollback
+        let events = executor.audit_log().replay();
+        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
+        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_rollback_strategy_configurable() {
+        let mut workflow = Workflow::new();
+
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a").with_failure()));
+
+        workflow.add_dependency("a", "b").unwrap();
+
+        // Test with FailedOnly strategy
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_rollback_strategy(RollbackStrategy::FailedOnly);
+        assert_eq!(executor.rollback_strategy(), RollbackStrategy::FailedOnly);
+
+        let result = executor.execute().await.unwrap();
+
+        // Only b should be rolled back with FailedOnly
+        assert!(result.rollback_report.is_some());
+        assert_eq!(result.rollback_report.as_ref().unwrap().rolled_back_tasks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_partial_rollback_diamond_pattern() {
+        let mut workflow = Workflow::new();
+
+        // Diamond pattern: a -> b, a -> c, b -> d, c -> d
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("a")));
+        workflow.add_task(Box::new(MockTask::new("d", "Task D").with_dep("b").with_dep("c").with_failure()));
+
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("a", "c").unwrap();
+        workflow.add_dependency("b", "d").unwrap();
+        workflow.add_dependency("c", "d").unwrap();
+
+        let mut executor = WorkflowExecutor::new(workflow);
+        let result = executor.execute().await.unwrap();
+
+        // Workflow should have failed at d
+        assert!(!result.success);
+        assert_eq!(result.failed_tasks[0], TaskId::new("d"));
+
+        // Rollback report should exist
+        assert!(result.rollback_report.is_some());
+        let rollback_report = result.rollback_report.unwrap();
+
+        // With AllDependent strategy, only d is rolled back (it has no dependents)
+        // a, b, c remain completed since they don't depend on d
+        assert_eq!(rollback_report.rolled_back_tasks.len(), 1);
+        assert!(rollback_report.rolled_back_tasks.contains(&TaskId::new("d")));
+
+        // Verify a, b, c were completed before d failed
+        assert!(result.completed_tasks.contains(&TaskId::new("a")));
+        assert!(result.completed_tasks.contains(&TaskId::new("b")));
+        assert!(result.completed_tasks.contains(&TaskId::new("c")));
     }
 }

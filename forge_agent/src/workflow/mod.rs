@@ -69,6 +69,6 @@ pub use rollback::{
 };
 pub use state::{TaskStatus, TaskSummary, WorkflowState, WorkflowStatus};
 pub use task::{CompensationAction, CompensationType, Dependency, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
-pub use tasks::{AgentLoopTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask};
+pub use tasks::{AgentLoopTask, FileEditTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask};
 pub use validate::{ValidationReport, WorkflowValidator};
 pub use yaml::{YamlWorkflow, YamlTask, YamlTaskParams, YamlTaskType, YamlWorkflowError};

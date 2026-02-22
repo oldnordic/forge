@@ -3,9 +3,10 @@
 //! Provides pre-built task types for graph queries, agent loops, shell commands,
 //! and simple function wrapping.
 
-use crate::workflow::task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
+use crate::workflow::task::{CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::future::Future;
 
@@ -147,6 +148,11 @@ impl WorkflowTask for GraphQueryTask {
     fn name(&self) -> &str {
         &self.name
     }
+
+    fn compensation(&self) -> Option<CompensationAction> {
+        // Graph queries are read-only operations with no side effects
+        Some(CompensationAction::skip("Read-only graph query - no undo needed"))
+    }
 }
 
 /// Task that executes an agent loop for AI-driven operations.
@@ -188,6 +194,12 @@ impl WorkflowTask for AgentLoopTask {
 
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn compensation(&self) -> Option<CompensationAction> {
+        // AgentLoop is read-only in v0.4 - no compensation needed
+        // Future versions may implement undo for mutations
+        Some(CompensationAction::skip("Read-only agent loop - no undo needed in v0.4"))
     }
 }
 
@@ -244,6 +256,92 @@ impl WorkflowTask for ShellCommandTask {
 
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn compensation(&self) -> Option<CompensationAction> {
+        // Shell commands have side effects - compensation will be implemented in Phase 11
+        // For now, return None to indicate no compensation available
+        None
+    }
+}
+
+/// Task that edits a file (stub for Phase 11).
+///
+/// Demonstrates the Saga compensation pattern with undo functionality.
+/// In Phase 11, this will be implemented with actual file editing.
+pub struct FileEditTask {
+    id: TaskId,
+    name: String,
+    file_path: PathBuf,
+    original_content: String,
+    new_content: String,
+}
+
+impl FileEditTask {
+    /// Creates a new FileEditTask.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Task identifier
+    /// * `name` - Human-readable task name
+    /// * `file_path` - Path to the file to edit
+    /// * `original_content` - Original content (for rollback)
+    /// * `new_content` - New content to write
+    pub fn new(
+        id: TaskId,
+        name: String,
+        file_path: PathBuf,
+        original_content: String,
+        new_content: String,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            file_path,
+            original_content,
+            new_content,
+        }
+    }
+
+    /// Gets the file path.
+    pub fn file_path(&self) -> &PathBuf {
+        &self.file_path
+    }
+
+    /// Gets the original content.
+    pub fn original_content(&self) -> &str {
+        &self.original_content
+    }
+
+    /// Gets the new content.
+    pub fn new_content(&self) -> &str {
+        &self.new_content
+    }
+}
+
+#[async_trait]
+impl WorkflowTask for FileEditTask {
+    async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, TaskError> {
+        // Phase 8 stub - actual file editing will be implemented in Phase 11
+        // For now, return Success to indicate the task structure is valid
+        Ok(TaskResult::Success)
+    }
+
+    fn id(&self) -> TaskId {
+        self.id.clone()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn compensation(&self) -> Option<CompensationAction> {
+        // Return undo compensation that restores original content
+        // This demonstrates the Saga compensation pattern
+        Some(CompensationAction::undo(format!(
+            "Restore original content of {}",
+            self.file_path.display()
+        )))
     }
 }
 
@@ -351,5 +449,45 @@ mod tests {
 
         assert_eq!(task.args().len(), 0);
         assert!(task.args().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_graph_query_compensation_skip() {
+        let task = GraphQueryTask::find_symbol("my_function");
+
+        // Graph queries should have Skip compensation
+        let compensation = task.compensation();
+        assert!(compensation.is_some());
+        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+    }
+
+    #[tokio::test]
+    async fn test_agent_loop_compensation_skip() {
+        let task = AgentLoopTask::new(
+            TaskId::new("agent_task"),
+            "Agent Task".to_string(),
+            "Find all functions",
+        );
+
+        // AgentLoop should have Skip compensation in v0.4
+        let compensation = task.compensation();
+        assert!(compensation.is_some());
+        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+    }
+
+    #[tokio::test]
+    async fn test_file_edit_compensation_undo() {
+        let task = FileEditTask::new(
+            TaskId::new("file_edit"),
+            "Edit File".to_string(),
+            PathBuf::from("/tmp/test.txt"),
+            "original".to_string(),
+            "new".to_string(),
+        );
+
+        // FileEdit should have UndoFunction compensation
+        let compensation = task.compensation();
+        assert!(compensation.is_some());
+        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::UndoFunction);
     }
 }

@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 08-workflow-foundation
-Plan: 3 of 5 in current phase
+Plan: 4 of 5 in current phase
 Status: Complete
-Last activity: 2026-02-22 — Plan 08-03 (YAML Workflow Parser) completed
+Last activity: 2026-02-22 — Plan 08-04 (Dependency Auto-Detection) completed
 
-Progress: [██████░░░] 60%
+Progress: [███████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 13 min
-- Total execution time: 2.3 hours
+- Total plans completed: 11
+- Average duration: 15 min
+- Total execution time: 2.7 hours
 
 **By Phase:**
 
@@ -30,7 +30,7 @@ Progress: [██████░░░] 60%
 | 1     | 1     | 7 min | 7 min    |
 | 2     | 1     | 6 min | 6 min    |
 | 3     | 4     | 21 min | 5.25 min |
-| 8     | 4     | 167 min | 41.75 min  |
+| 8     | 5     | 182 min | 36.4 min  |
 
 **Recent Trend:**
 - Last 5 plans: 18 min avg
@@ -45,6 +45,7 @@ Progress: [██████░░░] 60%
 | Phase 03 P04 | 3min | 2 tasks | 4 files |
 | Phase 08 P01 | 71min | 7 tasks | 9 files |
 | Phase 08-workflow-foundation P08-02 | 1081 | 5 tasks | 7 files |
+| Phase 08-workflow-foundation P08-04 | 15 | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,11 @@ Recent decisions affecting current work:
 - [Phase 08-workflow-foundation]: TryFrom<YamlWorkflow> for Workflow using WorkflowBuilder internally
 - [Phase 08-workflow-foundation]: Task types limited to GraphQuery, AgentLoop, Shell - Function requires Rust API
 - [Phase 08-workflow-foundation]: Added public task_name() method to Workflow for state inspection
+- [Phase 08-workflow-foundation]: DependencyAnalyzer uses confidence threshold 0.7, high-confidence at 0.8
+- [Phase 08-workflow-foundation]: Direct references get 0.9 confidence, impact analysis decays by 0.1 per hop
+- [Phase 08-workflow-foundation]: Task target extraction uses name heuristics (Phase 8 limitation)
+- [Phase 08-workflow-foundation]: Reference-based detection skipped (API limitation with SymbolIds)
+- [Phase 08-workflow-foundation]: autocomplete_workflow cannot clone tasks (Workflow API limitation)
 
 
 ### Pending Todos
@@ -103,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T16:14:00Z
-Stopped at: Completed plan 08-03 (YAML Workflow Parser)
+Last session: 2026-02-22T16:32:15Z
+Stopped at: Completed plan 08-04 (Dependency Auto-Detection)
 Resume file: None
