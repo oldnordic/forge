@@ -469,12 +469,13 @@ mod tests {
     fn test_builder_with_auto_detect() {
         use forge_core::Forge;
 
-        // Create a forge instance (in-memory for testing)
+        // Create a forge instance (SQLite backend for testing)
+        let temp_dir = tempfile::tempdir().unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let forge = rt.block_on(async {
             Forge::open_with_backend(
-                "/tmp/test_workflow_builder",
-                forge_core::storage::BackendKind::Memory,
+                temp_dir.path(),
+                forge_core::storage::BackendKind::SQLite,
             )
             .await
             .unwrap()
