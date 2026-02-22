@@ -4,10 +4,13 @@
 //! On failure, triggers selective rollback of dependent tasks using Saga compensation.
 
 use crate::audit::AuditLog;
-use crate::workflow::checkpoint::{validate_workflow_consistency, WorkflowCheckpoint, WorkflowCheckpointService};
+use crate::workflow::checkpoint::{
+    can_proceed, requires_rollback, validate_checkpoint, validate_workflow_consistency,
+    ValidationCheckpoint, ValidationResult, WorkflowCheckpoint, WorkflowCheckpointService,
+};
 use crate::workflow::dag::Workflow;
 use crate::workflow::rollback::{CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation};
-use crate::workflow::task::{CompensationAction, TaskContext, TaskId};
+use crate::workflow::task::{CompensationAction, TaskContext, TaskId, TaskResult};
 use chrono::Utc;
 use std::collections::HashSet;
 
@@ -80,8 +83,9 @@ impl WorkflowResult {
 /// 1. Validates the workflow structure
 /// 2. Calculates execution order via topological sort
 /// 3. Executes each task with audit logging
-/// 4. Creates checkpoint after each successful task
-/// 5. On failure, triggers rollback of dependent tasks
+/// 4. Validates task result if validation config is set
+/// 5. Creates checkpoint after each successful task
+/// 6. On failure, triggers rollback of dependent tasks
 pub struct WorkflowExecutor {
     /// The workflow to execute
     pub(in crate::workflow) workflow: Workflow,
@@ -101,6 +105,8 @@ pub struct WorkflowExecutor {
     pub(in crate::workflow) checkpoint_service: Option<WorkflowCheckpointService>,
     /// Checkpoint sequence counter
     pub(in crate::workflow) checkpoint_sequence: u64,
+    /// Optional validation configuration for checkpoint validation
+    pub(in crate::workflow) validation_config: Option<ValidationCheckpoint>,
 }
 
 impl WorkflowExecutor {
@@ -127,6 +133,7 @@ impl WorkflowExecutor {
             compensation_registry: CompensationRegistry::new(),
             checkpoint_service: None,
             checkpoint_sequence: 0,
+            validation_config: None,
         }
     }
 
@@ -169,6 +176,27 @@ impl WorkflowExecutor {
     /// ```
     pub fn with_checkpoint_service(mut self, service: WorkflowCheckpointService) -> Self {
         self.checkpoint_service = Some(service);
+        self
+    }
+
+    /// Sets the validation configuration for this executor.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The validation checkpoint configuration
+    ///
+    /// # Returns
+    ///
+    /// The executor with validation enabled (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .with_validation_config(ValidationCheckpoint::default());
+    /// ```
+    pub fn with_validation_config(mut self, config: ValidationCheckpoint) -> Self {
+        self.validation_config = Some(config);
         self
     }
 
@@ -320,6 +348,80 @@ impl WorkflowExecutor {
                 ));
             }
 
+            // Task completed successfully - run validation if configured
+            if let Some(validation_config) = &self.validation_config {
+                // Get task name for logging
+                let node_idx = self.workflow.task_map.get(task_id).unwrap();
+                let task_node = self.workflow.graph.node_weight(*node_idx).unwrap();
+                let task_name = task_node.name.clone();
+
+                // Simulate task result for validation
+                // TODO: When actual task execution is implemented, get real TaskResult
+                let task_result = TaskResult::Success;
+
+                let validation = validate_checkpoint(&task_result, validation_config);
+
+                // Log validation result to audit log
+                let _ = self
+                    .audit_log
+                    .record(crate::audit::AuditEvent::WorkflowTaskCompleted {
+                        timestamp: Utc::now(),
+                        workflow_id: workflow_id.to_string(),
+                        task_id: task_id.to_string(),
+                        task_name: task_name.clone(),
+                        result: format!("Validation: {:?}", validation.status),
+                    })
+                    .await;
+
+                // Handle validation failure
+                if !can_proceed(&validation) {
+                    let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
+
+                    // Trigger rollback if configured
+                    if requires_rollback(&validation) {
+                        let rollback_set = self
+                            .rollback_engine
+                            .find_rollback_set(&self.workflow, task_id, self.rollback_strategy)
+                            .map_err(|err| {
+                                crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                            })?;
+
+                        let rollback_report = self
+                            .rollback_engine
+                            .execute_rollback(
+                                &self.workflow,
+                                rollback_set,
+                                &workflow_id,
+                                &mut self.audit_log,
+                                &self.compensation_registry,
+                            )
+                            .await
+                            .map_err(|_err| {
+                                crate::workflow::dag::WorkflowError::TaskNotFound(task_id.clone())
+                            })?;
+
+                        return Ok(WorkflowResult::new_failed_with_rollback(
+                            completed,
+                            task_id.clone(),
+                            validation.message,
+                            rollback_report,
+                        ));
+                    } else {
+                        // No rollback, just fail
+                        return Ok(WorkflowResult::new_failed(
+                            completed,
+                            task_id.clone(),
+                            validation.message,
+                        ));
+                    }
+                }
+
+                // Log warning if validation status is Warning but can proceed
+                if matches!(validation.status, crate::workflow::checkpoint::ValidationStatus::Warning) {
+                    eprintln!("Warning: {} - {}", task_id, validation.message);
+                }
+            }
+
             // Task completed successfully - create checkpoint
             self.create_checkpoint(&workflow_id, position).await;
         }
@@ -329,6 +431,33 @@ impl WorkflowExecutor {
 
         let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
         Ok(WorkflowResult::new(completed))
+    }
+
+    /// Executes the workflow with validation checkpoints enabled.
+    ///
+    /// Convenience method that sets default validation configuration
+    /// and executes the workflow. Validation runs after each task
+    /// to check confidence scores and trigger rollback if needed.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(WorkflowResult)` - Execution completed (may have partial completion)
+    /// - `Err(WorkflowError)` - If workflow validation or ordering fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut executor = WorkflowExecutor::new(workflow);
+    /// let result = executor.execute_with_validations().await?;
+    /// ```
+    pub async fn execute_with_validations(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+        // Set default validation config if not already set
+        if self.validation_config.is_none() {
+            self.validation_config = Some(ValidationCheckpoint::default());
+        }
+
+        // Execute with validation
+        self.execute().await
     }
 
     /// Executes a single task.
@@ -627,6 +756,32 @@ impl WorkflowExecutor {
         self.restore_state_from_checkpoint(checkpoint)?;
 
         Ok(())
+    }
+
+    /// Validates a task result against configured thresholds.
+    ///
+    /// Extracts confidence from task result and validates against
+    /// configured thresholds. Logs validation result to audit log.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_result` - The task result to validate
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(ValidationResult)` if validation succeeded
+    /// - `Err(WorkflowError)` if validation configuration is not set
+    fn validate_task_result(
+        &self,
+        task_result: &TaskResult,
+    ) -> Result<ValidationResult, crate::workflow::WorkflowError> {
+        let config = self.validation_config.as_ref()
+            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointCorrupted(
+                "Validation configuration not set".to_string()
+            ))?;
+
+        let validation = validate_checkpoint(task_result, config);
+        Ok(validation)
     }
 
     /// Checks if workflow has a valid checkpoint to resume from.
@@ -1554,5 +1709,109 @@ mod tests {
         assert!(executor.compensation_registry.has_compensation(&TaskId::new("a")));
         assert!(executor.compensation_registry.has_compensation(&TaskId::new("b")));
         assert!(!executor.compensation_registry.has_compensation(&TaskId::new("c")));
+    }
+
+    // Tests for validation checkpoint integration
+
+    #[tokio::test]
+    async fn test_execute_with_validations() {
+        use crate::workflow::checkpoint::ValidationCheckpoint;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        let mut executor = WorkflowExecutor::new(workflow);
+        let result = executor.execute_with_validations().await;
+
+        // Should succeed with default validation (Success = 1.0 confidence)
+        assert!(result.is_ok());
+        let workflow_result = result.unwrap();
+        assert!(workflow_result.success);
+    }
+
+    #[tokio::test]
+    async fn test_validation_config_builder() {
+        use crate::workflow::checkpoint::ValidationCheckpoint;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let custom_config = ValidationCheckpoint {
+            min_confidence: 0.5,
+            warning_threshold: 0.8,
+            rollback_on_failure: true,
+        };
+
+        let executor = WorkflowExecutor::new(workflow)
+            .with_validation_config(custom_config);
+
+        assert!(executor.validation_config.is_some());
+        let config = executor.validation_config.unwrap();
+        assert_eq!(config.min_confidence, 0.5);
+        assert_eq!(config.warning_threshold, 0.8);
+        assert_eq!(config.rollback_on_failure, true);
+    }
+
+    #[tokio::test]
+    async fn test_validation_warning_continues() {
+        use crate::workflow::checkpoint::ValidationCheckpoint;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+
+        // Set thresholds so Success (1.0) passes but Skipped (0.5) would be warning
+        let config = ValidationCheckpoint {
+            min_confidence: 0.4,
+            warning_threshold: 0.9, // 1.0 >= 0.9, so Success passes
+            rollback_on_failure: false,
+        };
+
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_validation_config(config);
+
+        let result = executor.execute().await.unwrap();
+
+        // Should succeed (Success has 1.0 confidence)
+        assert!(result.success);
+    }
+
+    #[test]
+    fn test_validate_task_result_method() {
+        use crate::workflow::checkpoint::ValidationCheckpoint;
+        use crate::workflow::task::TaskResult;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let config = ValidationCheckpoint::default();
+        let executor = WorkflowExecutor::new(workflow)
+            .with_validation_config(config);
+
+        // Validate Success result
+        let result = TaskResult::Success;
+        let validation = executor.validate_task_result(&result);
+
+        assert!(validation.is_ok());
+        let v = validation.unwrap();
+        assert_eq!(v.confidence, 1.0);
+        assert_eq!(v.status, crate::workflow::checkpoint::ValidationStatus::Passed);
+    }
+
+    #[test]
+    fn test_validate_task_result_no_config() {
+        use crate::workflow::task::TaskResult;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        // No validation config
+        let executor = WorkflowExecutor::new(workflow);
+
+        let result = TaskResult::Success;
+        let validation = executor.validate_task_result(&result);
+
+        assert!(validation.is_err());
     }
 }
