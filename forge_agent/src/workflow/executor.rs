@@ -59,13 +59,13 @@ impl WorkflowResult {
 /// 4. Stops on first failure (rollback is deferred to phase 08-05)
 pub struct WorkflowExecutor {
     /// The workflow to execute
-    workflow: Workflow,
+    pub(in crate::workflow) workflow: Workflow,
     /// Audit log for recording events
-    audit_log: AuditLog,
+    pub(in crate::workflow) audit_log: AuditLog,
     /// Tasks that have completed
-    completed_tasks: HashSet<TaskId>,
+    pub(in crate::workflow) completed_tasks: HashSet<TaskId>,
     /// Tasks that failed
-    failed_tasks: Vec<TaskId>,
+    pub(in crate::workflow) failed_tasks: Vec<TaskId>,
 }
 
 impl WorkflowExecutor {
@@ -284,6 +284,45 @@ impl WorkflowExecutor {
     /// Returns the number of failed tasks.
     pub fn failed_count(&self) -> usize {
         self.failed_tasks.len()
+    }
+
+    /// Returns the total number of tasks in the workflow.
+    pub fn task_count(&self) -> usize {
+        self.workflow.task_count()
+    }
+
+    /// Returns the IDs of all tasks in the workflow.
+    pub fn task_ids(&self) -> Vec<TaskId> {
+        self.workflow.task_ids()
+    }
+
+    /// Returns the completed task IDs.
+    pub fn completed_task_ids(&self) -> Vec<TaskId> {
+        self.completed_tasks.iter().cloned().collect()
+    }
+
+    /// Returns the failed task IDs.
+    pub fn failed_task_ids(&self) -> Vec<TaskId> {
+        self.failed_tasks.clone()
+    }
+
+    /// Checks if a task has completed.
+    pub fn is_task_completed(&self, id: &TaskId) -> bool {
+        self.completed_tasks.contains(id)
+    }
+
+    /// Checks if a task has failed.
+    pub fn is_task_failed(&self, id: &TaskId) -> bool {
+        self.failed_tasks.contains(id)
+    }
+
+    /// Returns execution progress as a percentage (0.0 to 1.0).
+    pub fn progress(&self) -> f64 {
+        let total = self.workflow.task_count();
+        if total == 0 {
+            return 0.0;
+        }
+        self.completed_tasks.len() as f64 / total as f64
     }
 }
 
