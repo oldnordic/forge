@@ -53,6 +53,7 @@ pub mod rollback;
 pub mod state;
 pub mod task;
 pub mod tasks;
+pub mod timeout;
 pub mod validate;
 pub mod yaml;
 
@@ -78,5 +79,6 @@ pub use rollback::{
 pub use state::{TaskStatus, TaskSummary, WorkflowState, WorkflowStatus};
 pub use task::{CompensationAction, CompensationType, Dependency, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
 pub use tasks::{AgentLoopTask, FileEditTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask};
+pub use timeout::{TaskTimeout, TimeoutConfig, TimeoutError, WorkflowTimeout};
 pub use validate::{ValidationReport, WorkflowValidator};
 pub use yaml::{YamlWorkflow, YamlTask, YamlTaskParams, YamlTaskType, YamlWorkflowError};
