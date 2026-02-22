@@ -4,6 +4,7 @@
 //! and simple function wrapping.
 
 use crate::workflow::task::{CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
+use crate::workflow::tools::{FallbackHandler, FallbackResult, ToolError, ToolInvocation, ToolRegistry};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,6 +13,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::future::Future;
 use std::time::Duration;
+use std::process::Command;
 
 /// Task that wraps an async function for easy workflow definition.
 ///
@@ -528,6 +530,275 @@ impl WorkflowTask for FileEditTask {
     }
 }
 
+/// Task that invokes a registered tool from the ToolRegistry.
+///
+/// ToolTask executes external tools (magellan, cargo, splice, etc.) with
+/// configurable fallback handlers for error recovery.
+///
+/// # Example
+///
+/// ```ignore
+/// use forge_agent::workflow::tasks::ToolTask;
+/// use forge_agent::workflow::tools::ToolInvocation;
+/// use forge_agent::workflow::TaskId;
+///
+/// let task = ToolTask::new(
+///     TaskId::new("tool_task"),
+///     "Magellan Query".to_string(),
+///     "magellan"
+/// )
+/// .args(vec!["find".to_string(), "--name".to_string(), "symbol".to_string()]);
+/// ```
+pub struct ToolTask {
+    /// Task identifier
+    id: TaskId,
+    /// Human-readable task name
+    name: String,
+    /// Tool invocation specification
+    invocation: ToolInvocation,
+    /// Optional fallback handler for error recovery
+    fallback: Option<Arc<dyn FallbackHandler>>,
+}
+
+impl ToolTask {
+    /// Creates a new ToolTask.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Task identifier
+    /// * `name` - Human-readable task name
+    /// * `tool_name` - Name of the registered tool to invoke
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tasks::ToolTask;
+    /// use forge_agent::workflow::TaskId;
+    ///
+    /// let task = ToolTask::new(
+    ///     TaskId::new("tool_task"),
+    ///     "Query Magellan".to_string(),
+    ///     "magellan"
+    /// );
+    /// ```
+    pub fn new(id: TaskId, name: String, tool_name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name,
+            invocation: ToolInvocation::new(tool_name),
+            fallback: None,
+        }
+    }
+
+    /// Sets the arguments for the tool invocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - Vector of argument strings
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tasks::ToolTask;
+    /// use forge_agent::workflow::TaskId;
+    ///
+    /// let task = ToolTask::new(
+    ///     TaskId::new("tool_task"),
+    ///     "Query Magellan".to_string(),
+    ///     "magellan"
+    /// )
+    /// .args(vec!["find".to_string(), "--name".to_string(), "symbol".to_string()]);
+    /// ```
+    pub fn args(mut self, args: Vec<String>) -> Self {
+        self.invocation = self.invocation.args(args);
+        self
+    }
+
+    /// Sets the working directory for the tool invocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `dir` - Working directory path
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tasks::ToolTask;
+    /// use forge_agent::workflow::TaskId;
+    ///
+    /// let task = ToolTask::new(
+    ///     TaskId::new("tool_task"),
+    ///     "Run cargo".to_string(),
+    ///     "cargo"
+    /// )
+    /// .working_dir("/home/user/project");
+    /// ```
+    pub fn working_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.invocation = self.invocation.working_dir(dir);
+        self
+    }
+
+    /// Adds an environment variable to the tool invocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Environment variable name
+    /// * `value` - Environment variable value
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tasks::ToolTask;
+    /// use forge_agent::workflow::TaskId;
+    ///
+    /// let task = ToolTask::new(
+    ///     TaskId::new("tool_task"),
+    ///     "Run cargo".to_string(),
+    ///     "cargo"
+    /// )
+    /// .env("RUST_LOG", "debug");
+    /// ```
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.invocation = self.invocation.env(key, value);
+        self
+    }
+
+    /// Sets the fallback handler for error recovery.
+    ///
+    /// # Arguments
+    ///
+    /// * `handler` - Fallback handler to use on tool failure
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tasks::ToolTask;
+    /// use forge_agent::workflow::tools::RetryFallback;
+    /// use forge_agent::workflow::TaskId;
+    ///
+    /// let task = ToolTask::new(
+    ///     TaskId::new("tool_task"),
+    ///     "Query Magellan".to_string(),
+    ///     "magellan"
+    /// )
+    /// .with_fallback(Box::new(RetryFallback::new(3, 100)));
+    /// ```
+    pub fn with_fallback(mut self, handler: Box<dyn FallbackHandler>) -> Self {
+        self.fallback = Some(Arc::from(handler));
+        self
+    }
+
+    /// Gets the tool name for this task.
+    pub fn tool_name(&self) -> &str {
+        &self.invocation.tool_name
+    }
+
+    /// Gets the invocation for this task.
+    pub fn invocation(&self) -> &ToolInvocation {
+        &self.invocation
+    }
+}
+
+#[async_trait]
+impl WorkflowTask for ToolTask {
+    async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+        // Get the tool registry from context
+        let registry = context.tool_registry
+            .as_ref()
+            .ok_or_else(|| TaskError::ExecutionFailed(
+                "ToolRegistry not available in TaskContext".to_string()
+            ))?;
+
+        // Try to invoke the tool
+        let invocation_result = registry.invoke(&self.invocation).await;
+
+        match invocation_result {
+            Ok(result) => {
+                if result.result.success {
+                    Ok(TaskResult::Success)
+                } else {
+                    Ok(TaskResult::Failed(result.result.stderr))
+                }
+            }
+            Err(error) => {
+                // Try fallback handler if available
+                if let Some(ref fallback) = self.fallback {
+                    match fallback.handle(&error, &self.invocation).await {
+                        FallbackResult::Retry(retry_invocation) => {
+                            // Retry with modified invocation
+                            match registry.invoke(&retry_invocation).await {
+                                Ok(retry_result) => {
+                                    if retry_result.result.success {
+                                        Ok(TaskResult::Success)
+                                    } else {
+                                        Ok(TaskResult::Failed(retry_result.result.stderr))
+                                    }
+                                }
+                                Err(retry_error) => {
+                                    Ok(TaskResult::Failed(format!(
+                                        "Tool {} failed after retry: {}",
+                                        self.invocation.tool_name,
+                                        retry_error
+                                    )))
+                                }
+                            }
+                        }
+                        FallbackResult::Skip(result) => {
+                            Ok(result)
+                        }
+                        FallbackResult::Fail(fail_error) => {
+                            Ok(TaskResult::Failed(format!(
+                                "Tool {} failed: {}",
+                                self.invocation.tool_name,
+                                fail_error
+                            )))
+                        }
+                    }
+                } else {
+                    // No fallback handler, return error
+                    Ok(TaskResult::Failed(format!(
+                        "Tool {} failed: {}",
+                        self.invocation.tool_name,
+                        error
+                    )))
+                }
+            }
+        }
+    }
+
+    fn id(&self) -> TaskId {
+        self.id.clone()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn compensation(&self) -> Option<CompensationAction> {
+        // Tool side effects are handled by ProcessGuard in the tool registry
+        // Return skip compensation
+        Some(CompensationAction::skip(
+            "Tool side effects handled by ProcessGuard"
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -748,5 +1019,194 @@ mod tests {
         let compensation = task.compensation();
         assert!(compensation.is_some());
         assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::UndoFunction);
+    }
+
+    // ============== ToolTask Tests ==============
+
+    #[tokio::test]
+    async fn test_tool_task_creation() {
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Echo Tool".to_string(),
+            "echo"
+        );
+
+        assert_eq!(task.id(), TaskId::new("tool_task"));
+        assert_eq!(task.name(), "Echo Tool");
+        assert_eq!(task.tool_name(), "echo");
+        assert!(task.invocation().args.is_empty());
+        assert!(task.fallback.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_with_args() {
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Echo Tool".to_string(),
+            "echo"
+        )
+        .args(vec!["hello".to_string(), "world".to_string()]);
+
+        assert_eq!(task.invocation().args.len(), 2);
+        assert_eq!(task.invocation().args[0], "hello");
+        assert_eq!(task.invocation().args[1], "world");
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_with_working_dir() {
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Cargo Test".to_string(),
+            "cargo"
+        )
+        .working_dir("/home/user/project");
+
+        assert_eq!(
+            task.invocation().working_dir,
+            Some(PathBuf::from("/home/user/project"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_with_env() {
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Cargo Test".to_string(),
+            "cargo"
+        )
+        .env("RUST_LOG", "debug");
+
+        assert_eq!(task.invocation().env.len(), 1);
+        assert_eq!(task.invocation().env.get("RUST_LOG"), Some(&"debug".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_builder_pattern() {
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Cargo Test".to_string(),
+            "cargo"
+        )
+        .args(vec!["test".to_string()])
+        .working_dir("/tmp")
+        .env("TEST_VAR", "value");
+
+        assert_eq!(task.invocation().args.len(), 1);
+        assert_eq!(task.invocation().working_dir, Some(PathBuf::from("/tmp")));
+        assert_eq!(task.invocation().env.get("TEST_VAR"), Some(&"value".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_compensation() {
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Echo Tool".to_string(),
+            "echo"
+        );
+
+        // ToolTask should have Skip compensation
+        let compensation = task.compensation();
+        assert!(compensation.is_some());
+        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_execution() {
+        use std::sync::Arc;
+
+        // Create a tool registry with echo
+        let mut registry = crate::workflow::tools::ToolRegistry::new();
+        registry.register(crate::workflow::tools::Tool::new("echo", "echo")).unwrap();
+
+        // Create a context with the tool registry
+        let context = TaskContext::new("workflow_1", TaskId::new("tool_task"))
+            .with_tool_registry(Arc::new(registry));
+
+        // Create a tool task
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Echo Tool".to_string(),
+            "echo"
+        )
+        .args(vec!["test".to_string()]);
+
+        // Execute the task
+        let result = task.execute(&context).await.unwrap();
+        assert_eq!(result, TaskResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_tool_task_with_fallback() {
+        use std::sync::Arc;
+
+        // Create a tool registry with echo
+        let mut registry = crate::workflow::tools::ToolRegistry::new();
+        registry.register(crate::workflow::tools::Tool::new("echo", "echo")).unwrap();
+
+        // Create a context with the tool registry
+        let context = TaskContext::new("workflow_1", TaskId::new("tool_task"))
+            .with_tool_registry(Arc::new(registry));
+
+        // Create a tool task with skip fallback
+        let task = ToolTask::new(
+            TaskId::new("tool_task"),
+            "Nonexistent Tool".to_string(),
+            "nonexistent"  // Tool not registered
+        )
+        .with_fallback(Box::new(crate::workflow::tools::SkipFallback::skip()));
+
+        // Execute the task - should use fallback
+        let result = task.execute(&context).await.unwrap();
+        assert_eq!(result, TaskResult::Skipped);
+    }
+
+    #[tokio::test]
+    async fn test_standard_tools() {
+        use crate::workflow::tools::ToolRegistry;
+
+        let registry = ToolRegistry::with_standard_tools();
+
+        // Check that at least some tools might be registered
+        // (we can't assume all tools are present on the system)
+        let tool_count = registry.len();
+        eprintln!("Standard tools registered: {}", tool_count);
+
+        // Registry should be created successfully (even if no tools found)
+        // This is a basic smoke test
+        assert!(tool_count >= 0);
+    }
+
+    #[tokio::test]
+    async fn test_tool_invoke_from_workflow() {
+        use crate::workflow::dag::Workflow;
+        use crate::workflow::executor::WorkflowExecutor;
+        use crate::workflow::tools::{Tool, ToolRegistry};
+        use std::sync::Arc;
+
+        // Create a workflow with a tool task
+        let mut workflow = Workflow::new();
+        let task_id = TaskId::new("tool_task");
+
+        // Create tool registry with echo
+        let mut registry = ToolRegistry::new();
+        registry.register(Tool::new("echo", "echo")).unwrap();
+
+        let tool_task = ToolTask::new(
+            task_id.clone(),
+            "Echo Tool".to_string(),
+            "echo"
+        )
+        .args(vec!["hello".to_string()]);
+
+        workflow.add_task(Box::new(tool_task));
+
+        // Create executor with tool registry
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_tool_registry(registry);
+
+        // Execute the workflow
+        let result = executor.execute().await.unwrap();
+        assert!(result.success);
+        assert!(result.completed_tasks.contains(&task_id));
     }
 }

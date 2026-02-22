@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -1080,11 +1081,86 @@ impl ToolRegistry {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
+
+    /// Creates a ToolRegistry with standard tools pre-registered.
+    ///
+    /// This method attempts to discover and register commonly-used tools:
+    /// - magellan (graph-based code indexer)
+    /// - cargo (Rust package manager)
+    /// - splice (precision code editor)
+    ///
+    /// Tools that are not found are logged but don't cause failure (graceful degradation).
+    ///
+    /// # Returns
+    ///
+    /// A ToolRegistry with discovered tools registered
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use forge_agent::workflow::tools::ToolRegistry;
+    ///
+    /// let registry = ToolRegistry::with_standard_tools();
+    /// // registry may have magellan, cargo, splice if they were found
+    /// ```
+    pub fn with_standard_tools() -> Self {
+        let mut registry = Self::new();
+
+        // Helper function to find a tool in PATH
+        let find_tool = |name: &str| -> Option<PathBuf> {
+            match Command::new("which").arg(name).output() {
+                Ok(output) => {
+                    if output.status.success() {
+                        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        Some(PathBuf::from(path))
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        };
+
+        // Register magellan if found
+        if let Some(path) = find_tool("magellan") {
+            let tool = Tool::new("magellan", path)
+                .description("Graph-based code indexer");
+            if registry.register(tool).is_ok() {
+                eprintln!("Registered standard tool: magellan");
+            }
+        } else {
+            eprintln!("Warning: magellan not found in PATH");
+        }
+
+        // Register cargo if found
+        if let Some(path) = find_tool("cargo") {
+            let tool = Tool::new("cargo", path)
+                .description("Rust package manager");
+            if registry.register(tool).is_ok() {
+                eprintln!("Registered standard tool: cargo");
+            }
+        } else {
+            eprintln!("Warning: cargo not found in PATH");
+        }
+
+        // Register splice if found
+        if let Some(path) = find_tool("splice") {
+            let tool = Tool::new("splice", path)
+                .description("Precision code editor");
+            if registry.register(tool).is_ok() {
+                eprintln!("Registered standard tool: splice");
+            }
+        } else {
+            eprintln!("Warning: splice not found in PATH");
+        }
+
+        registry
+    }
 }
 
 impl Default for ToolRegistry {
     fn default() -> Self {
-        Self::new()
+        Self::with_standard_tools()
     }
 }
 
