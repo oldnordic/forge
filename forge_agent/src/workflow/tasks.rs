@@ -298,51 +298,130 @@ impl ShellCommandConfig {
     }
 }
 
-/// Task that executes shell commands (stub for Phase 11).
+/// Task that executes shell commands using tokio::process.
 ///
-/// In Phase 8, this task returns Skipped. Actual shell execution
-/// will be implemented in Phase 11.
+/// Executes external shell commands with configurable working directory,
+/// environment variables, and timeout settings. Supports process
+/// compensation for rollback operations.
 pub struct ShellCommandTask {
     id: TaskId,
     name: String,
-    command: String,
-    args: Vec<String>,
+    config: ShellCommandConfig,
+    /// Last spawned process ID (for compensation)
+    last_pid: Arc<std::sync::Mutex<Option<u32>>>,
 }
 
 impl ShellCommandTask {
-    /// Creates a new ShellCommandTask.
+    /// Creates a new ShellCommandTask with the given command.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Task identifier
+    /// * `name` - Human-readable task name
+    /// * `command` - Command to execute (e.g., "echo", "ls", "cargo")
     pub fn new(id: TaskId, name: String, command: impl Into<String>) -> Self {
         Self {
             id,
             name,
-            command: command.into(),
-            args: Vec::new(),
+            config: ShellCommandConfig::new(command),
+            last_pid: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Creates a new ShellCommandTask with a ShellCommandConfig.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Task identifier
+    /// * `name` - Human-readable task name
+    /// * `config` - Shell command configuration
+    pub fn with_config(id: TaskId, name: String, config: ShellCommandConfig) -> Self {
+        Self {
+            id,
+            name,
+            config,
+            last_pid: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     /// Sets the arguments for the shell command.
+    ///
+    /// # Deprecated
+    ///
+    /// Use `with_config()` and `ShellCommandConfig::args()` instead.
+    #[deprecated(since = "0.4.0", note = "Use with_config() instead for better configurability")]
     pub fn with_args(mut self, args: Vec<String>) -> Self {
-        self.args = args;
+        self.config.args = args;
         self
     }
 
     /// Gets the command for this task.
     pub fn command(&self) -> &str {
-        &self.command
+        &self.config.command
     }
 
     /// Gets the arguments for this task.
     pub fn args(&self) -> &[String] {
-        &self.args
+        &self.config.args
+    }
+
+    /// Gets the configuration for this task.
+    pub fn config(&self) -> &ShellCommandConfig {
+        &self.config
     }
 }
 
 #[async_trait]
 impl WorkflowTask for ShellCommandTask {
     async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, TaskError> {
-        // Phase 8 stub - returns Skipped
-        // Actual shell execution will be implemented in Phase 11
-        Ok(TaskResult::Skipped)
+        // Build the tokio process command
+        let mut cmd = tokio::process::Command::new(&self.config.command);
+
+        // Apply arguments
+        cmd.args(&self.config.args);
+
+        // Apply working directory if configured
+        if let Some(ref working_dir) = self.config.working_dir {
+            cmd.current_dir(working_dir);
+        }
+
+        // Apply environment variables
+        for (key, value) in &self.config.env {
+            cmd.env(key, value);
+        }
+
+        // Spawn the process
+        let child = cmd.spawn().map_err(|e| TaskError::Io(e))?;
+
+        // Store the process ID for compensation
+        if let Some(pid) = child.id() {
+            let mut last_pid = self.last_pid.lock().unwrap();
+            *last_pid = Some(pid);
+        }
+
+        // Wait for output with optional timeout
+        let output = if let Some(timeout) = self.config.timeout {
+            tokio::time::timeout(timeout, child.wait_with_output())
+                .await
+                .map_err(|_| TaskError::Timeout(format!("Command timed out after {:?}", timeout)))?
+                .map_err(TaskError::Io)?
+        } else {
+            child.wait_with_output().await.map_err(TaskError::Io)?
+        };
+
+        // Check exit status
+        if output.status.success() {
+            Ok(TaskResult::Success)
+        } else {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let error_msg = if !stderr.is_empty() {
+                format!("exit code: {}, stderr: {}", exit_code, stderr)
+            } else {
+                format!("exit code: {}", exit_code)
+            };
+            Ok(TaskResult::Failed(error_msg))
+        }
     }
 
     fn id(&self) -> TaskId {
@@ -354,9 +433,18 @@ impl WorkflowTask for ShellCommandTask {
     }
 
     fn compensation(&self) -> Option<CompensationAction> {
-        // Shell commands have side effects - compensation will be implemented in Phase 11
-        // For now, return None to indicate no compensation available
-        None
+        // Check if we spawned a process
+        let pid_guard = self.last_pid.lock().unwrap();
+        if let Some(pid) = *pid_guard {
+            // Return undo compensation for process termination
+            Some(CompensationAction::undo(format!(
+                "Terminate spawned process: {}",
+                pid
+            )))
+        } else {
+            // No process was spawned
+            Some(CompensationAction::skip("No process was spawned"))
+        }
     }
 }
 
@@ -531,7 +619,7 @@ mod tests {
 
         let context = TaskContext::new("workflow_1", task.id());
         let result = task.execute(&context).await.unwrap();
-        assert_eq!(result, TaskResult::Skipped);
+        assert_eq!(result, TaskResult::Success);
     }
 
     #[tokio::test]
