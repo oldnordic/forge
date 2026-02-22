@@ -77,6 +77,9 @@ pub use policy::{Policy, PolicyReport, PolicyValidator, PolicyViolation};
 // Re-export observation types
 pub use observe::Observation;
 
+// Re-export loop types
+pub use r#loop::{AgentLoop, AgentPhase, LoopResult};
+
 /// Result of applying policy constraints.
 #[derive(Clone, Debug)]
 pub struct ConstrainedPlan {
@@ -314,6 +317,44 @@ impl Agent {
             transaction_id: commit_report.transaction_id,
             files_committed: commit_report.files_committed,
         })
+    }
+
+    /// Runs the full agent loop: Observe -> Constrain -> Plan -> Mutate -> Verify -> Commit
+    ///
+    /// This is the main entry point for executing a complete agent operation.
+    /// Each phase receives the output of the previous phase, and failures
+    /// trigger rollback with audit trail entries.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The natural language query or request
+    ///
+    /// # Returns
+    ///
+    /// Returns `LoopResult` with transaction ID, modified files, and audit trail.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use forge_agent::Agent;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let agent = Agent::new(".").await?;
+    /// let result = agent.run("Add error handling to the parser").await?;
+    /// println!("Transaction ID: {}", result.transaction_id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn run(&self, query: &str) -> Result<LoopResult> {
+        let forge = self
+            .forge
+            .as_ref()
+            .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
+
+        // Create fresh loop state (no state leakage between runs)
+        let mut agent_loop = r#loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
+
+        agent_loop.run(query).await
     }
 }
 
