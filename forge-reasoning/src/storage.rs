@@ -74,10 +74,13 @@ pub enum BackendKind {
 /// # Examples
 ///
 /// ```no_run
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use forge_reasoning::{StorageConfig, create_storage};
 ///
 /// let config = StorageConfig::sqlite("/tmp/checkpoints.db");
-/// let storage = create_storage(&config)?;
+/// let _storage = create_storage(&config)?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn create_storage(config: &StorageConfig) -> Result<Box<dyn CheckpointStorage>> {
     match config.backend {
