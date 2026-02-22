@@ -45,7 +45,7 @@ ForgeKit is a deterministic code intelligence SDK for Rust - "LLVM for AI Code A
   6. User can define simple workflows in YAML, complex workflows via Rust API
   7. User can inspect workflow state including current step, completed steps, and pending work
   8. Workflow execution events are logged to audit trail
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
 - [ ] 08-01: DAG scheduler with topological sort and cycle detection
@@ -63,7 +63,7 @@ Plans:
   2. Failed workflow can resume from last checkpoint instead of restarting
   3. External tool side effects use compensation transactions for rollback (Saga pattern)
   4. Validation checkpoints between steps check confidence scores and trigger rollback if needed
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
 - [ ] 09-01: State checkpointing with forge-reasoning integration (Wave 1)
@@ -78,7 +78,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. User can cancel running workflow via async cancellation token
   2. Individual tasks and entire workflow have configurable timeout limits
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
 - [ ] 10-01: CancellationToken integration with parent-child hierarchy
@@ -93,7 +93,7 @@ Plans:
   1. Workflow can execute shell commands with working directory and environment variables
   2. External tools (magellan, cargo, splice) are registered and callable from workflows
   3. Tool failures trigger fallback handlers for graceful degradation
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
 - [ ] 11-01: Shell command execution with tokio::process
@@ -106,7 +106,7 @@ Plans:
 **Requirements**: WOBS-01
 **Success Criteria** (what must be TRUE):
   1. Independent workflow steps execute in parallel when dependencies allow
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
 - [ ] 12-01: Fork-join parallelism with topological sort
