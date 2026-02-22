@@ -43,6 +43,7 @@
 
 pub mod auto_detect;
 pub mod builder;
+pub mod checkpoint;
 pub mod combinators;
 pub mod dag;
 pub mod examples;
@@ -60,6 +61,7 @@ pub use auto_detect::{
     TaskSuggestion,
 };
 pub use builder::WorkflowBuilder;
+pub use checkpoint::{CheckpointId, CheckpointSummary, WorkflowCheckpoint};
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};
 pub use executor::{WorkflowExecutor, WorkflowResult};

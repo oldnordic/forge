@@ -27,6 +27,10 @@ pub enum WorkflowError {
     /// Dependency refers to non-existent task
     #[error("Missing dependency: {0}")]
     MissingDependency(TaskId),
+
+    /// Checkpoint data is corrupted or has invalid checksum
+    #[error("Checkpoint corrupted: {0}")]
+    CheckpointCorrupted(String),
 }
 
 /// Node data stored in the workflow graph.

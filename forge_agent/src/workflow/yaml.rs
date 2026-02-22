@@ -193,6 +193,7 @@ impl TryFrom<YamlWorkflow> for Workflow {
                 WorkflowError::CycleDetected(msg) => YamlWorkflowError::ConversionError(format!("Cycle detected: {:?}", msg)),
                 WorkflowError::TaskNotFound(id) => YamlWorkflowError::ConversionError(format!("Task not found: {}", id)),
                 WorkflowError::MissingDependency(id) => YamlWorkflowError::ConversionError(format!("Missing dependency: {}", id)),
+                WorkflowError::CheckpointCorrupted(msg) => YamlWorkflowError::ConversionError(format!("Checkpoint corrupted: {}", msg)),
             })?;
 
         Ok(workflow)
