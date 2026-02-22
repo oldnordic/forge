@@ -1,7 +1,7 @@
 //! Storage abstraction for checkpointing
 
 use crate::checkpoint::{CheckpointId, CheckpointSummary, SessionId, TemporalCheckpoint};
-use crate::errors::Result;
+use crate::errors::{ReasoningError, Result, StorageError};
 
 /// Storage backend trait for checkpoints
 /// 
@@ -59,7 +59,49 @@ pub enum BackendKind {
     NativeV3,
 }
 
-/// Factory function (placeholder for future implementations)
-pub fn create_storage(_config: &StorageConfig) -> Result<Box<dyn CheckpointStorage>> {
-    unimplemented!("Storage factory not yet implemented")
+/// Factory function for creating storage backends
+///
+/// Creates the appropriate storage implementation based on the backend kind.
+///
+/// # Arguments
+///
+/// * `config` - Storage configuration specifying backend type and path
+///
+/// # Returns
+///
+/// A boxed trait object implementing `CheckpointStorage`
+///
+/// # Examples
+///
+/// ```no_run
+/// use forge_reasoning::{StorageConfig, create_storage};
+///
+/// let config = StorageConfig::sqlite("/tmp/checkpoints.db");
+/// let storage = create_storage(&config)?;
+/// ```
+pub fn create_storage(config: &StorageConfig) -> Result<Box<dyn CheckpointStorage>> {
+    match config.backend {
+        BackendKind::SQLite => {
+            // Check if path is empty - use in-memory storage for testing
+            let storage = if config.path.as_os_str().is_empty() {
+                crate::storage_sqlitegraph::SqliteGraphStorage::in_memory()
+                    .map_err(|e| ReasoningError::Storage(StorageError::ConnectionFailed(
+                        format!("Failed to create in-memory SQLite storage: {}", e)
+                    )))?
+            } else {
+                crate::storage_sqlitegraph::SqliteGraphStorage::open(&config.path)
+                    .map_err(|e| ReasoningError::Storage(StorageError::ConnectionFailed(
+                        format!("Failed to open SQLite storage at {}: {}", config.path.display(), e)
+                    )))?
+            };
+            Ok(Box::new(storage))
+        }
+        BackendKind::NativeV3 => {
+            // Native V3 backend is not yet implemented
+            // This is a planned future enhancement
+            Err(ReasoningError::Storage(StorageError::BackendNotAvailable(
+                "Native V3 backend is not yet available. Use BackendKind::SQLite or check future updates.".to_string()
+            )))
+        }
+    }
 }
