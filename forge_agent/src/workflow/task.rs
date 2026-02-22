@@ -8,6 +8,10 @@ use async_trait::async_trait;
 use forge_core::Forge;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
+
+// Import ToolRegistry for task-level tool access
+use crate::workflow::tools::ToolRegistry;
 
 /// Unique identifier for a workflow task.
 ///
@@ -100,6 +104,8 @@ pub struct TaskContext {
     cancellation_token: Option<crate::workflow::cancellation::CancellationToken>,
     /// Optional task timeout duration
     pub task_timeout: Option<std::time::Duration>,
+    /// Optional tool registry for tool invocation
+    pub tool_registry: Option<Arc<ToolRegistry>>,
 }
 
 impl TaskContext {
@@ -111,6 +117,7 @@ impl TaskContext {
             task_id,
             cancellation_token: None,
             task_timeout: None,
+            tool_registry: None,
         }
     }
 
@@ -188,6 +195,49 @@ impl TaskContext {
     pub fn with_task_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.task_timeout = Some(timeout);
         self
+    }
+
+    /// Sets the tool registry for tool invocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `registry` - The tool registry to use for tool invocation
+    ///
+    /// # Returns
+    ///
+    /// The context with tool registry set (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use forge_agent::workflow::tools::ToolRegistry;
+    /// use std::sync::Arc;
+    ///
+    /// let registry = Arc::new(ToolRegistry::new());
+    /// let context = TaskContext::new("workflow-1", task_id)
+    ///     .with_tool_registry(registry);
+    /// ```
+    pub fn with_tool_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
+        self.tool_registry = Some(registry);
+        self
+    }
+
+    /// Returns a reference to the tool registry if set.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(&Arc<ToolRegistry>)` if tool registry is set
+    /// - `None` if no tool registry
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(registry) = context.tool_registry() {
+    ///     // Use tool registry
+    /// }
+    /// ```
+    pub fn tool_registry(&self) -> Option<&Arc<ToolRegistry>> {
+        self.tool_registry.as_ref()
     }
 
     /// Returns the task timeout duration if set.

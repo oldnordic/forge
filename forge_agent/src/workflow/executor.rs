@@ -12,8 +12,10 @@ use crate::workflow::dag::Workflow;
 use crate::workflow::rollback::{CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation};
 use crate::workflow::task::{CompensationAction, TaskContext, TaskId, TaskResult};
 use crate::workflow::timeout::{TaskTimeout, TimeoutConfig, TimeoutError, WorkflowTimeout};
+use crate::workflow::tools::ToolRegistry;
 use chrono::Utc;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Result of workflow execution.
 ///
@@ -112,6 +114,8 @@ pub struct WorkflowExecutor {
     cancellation_source: Option<crate::workflow::cancellation::CancellationTokenSource>,
     /// Optional timeout configuration for tasks and workflow
     pub(in crate::workflow) timeout_config: Option<TimeoutConfig>,
+    /// Optional tool registry for tool invocation
+    pub(in crate::workflow) tool_registry: Option<Arc<ToolRegistry>>,
 }
 
 impl WorkflowExecutor {
@@ -141,6 +145,7 @@ impl WorkflowExecutor {
             validation_config: None,
             cancellation_source: None,
             timeout_config: None,
+            tool_registry: None,
         }
     }
 
@@ -303,6 +308,48 @@ impl WorkflowExecutor {
     pub fn with_timeout_config(mut self, config: TimeoutConfig) -> Self {
         self.timeout_config = Some(config);
         self
+    }
+
+    /// Sets the tool registry for this executor.
+    ///
+    /// # Arguments
+    ///
+    /// * `registry` - The tool registry to use for tool invocation
+    ///
+    /// # Returns
+    ///
+    /// The executor with tool registry enabled (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use forge_agent::workflow::tools::ToolRegistry;
+    ///
+    /// let registry = ToolRegistry::new();
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .with_tool_registry(registry);
+    /// ```
+    pub fn with_tool_registry(mut self, registry: ToolRegistry) -> Self {
+        self.tool_registry = Some(Arc::new(registry));
+        self
+    }
+
+    /// Returns a reference to the tool registry if set.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(&Arc<ToolRegistry>)` if tool registry is set
+    /// - `None` if no tool registry
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(registry) = executor.tool_registry() {
+    ///     // Use tool registry
+    /// }
+    /// ```
+    pub fn tool_registry(&self) -> Option<&Arc<ToolRegistry>> {
+        self.tool_registry.as_ref()
     }
 
     /// Returns a reference to the timeout configuration if set.
@@ -700,6 +747,11 @@ impl WorkflowExecutor {
             if let Some(task_timeout) = config.task_timeout {
                 context = context.with_task_timeout(task_timeout.duration());
             }
+        }
+
+        // Add tool registry if configured
+        if let Some(ref registry) = self.tool_registry {
+            context = context.with_tool_registry(Arc::clone(registry));
         }
 
         // Execute the task with timeout if configured
@@ -1266,7 +1318,31 @@ mod tests {
     use super::*;
     use crate::workflow::dag::Workflow;
     use crate::workflow::task::{TaskContext, TaskResult, WorkflowTask};
+    use crate::workflow::tools::{Tool, ToolRegistry};
     use async_trait::async_trait;
+
+    #[tokio::test]
+    async fn test_executor_with_tool_registry() {
+        // Create a simple workflow
+        let mut workflow = Workflow::new();
+        let task_id = TaskId::new("task1");
+        workflow.add_task(Box::new(MockTask::new(task_id.clone(), "Task 1")));
+
+        // Create executor with tool registry
+        let mut registry = ToolRegistry::new();
+        registry.register(Tool::new("echo", "echo")).unwrap();
+
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_tool_registry(registry);
+
+        // Verify tool registry is set
+        assert!(executor.tool_registry().is_some());
+        assert!(executor.tool_registry().unwrap().is_registered("echo"));
+
+        // Execute the workflow
+        let result = executor.execute().await.unwrap();
+        assert!(result.success);
+    }
 
     // Mock task for testing
     struct MockTask {
