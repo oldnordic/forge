@@ -81,8 +81,8 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [x] 10-01: CancellationToken integration with parent-child hierarchy
-- [x] 10-02: Timeout handling for tasks and workflows
+- [ ] 10-01: CancellationToken integration with parent-child hierarchy
+- [ ] 10-02: Timeout handling for tasks and workflows
 - [ ] 10-03: Cooperative cancellation in async loops
 
 **Status**: 2/3 plans complete (67%)
@@ -133,4 +133,4 @@ Phases execute in numeric order: 8 → 9 → 10 → 11 → 12
 | 9. State Management | v0.4 | 0/4 | Not started | - |
 | 10. Cancellation & Timeouts | v0.4 | 2/3 | In progress | 2026-02-22 |
 | 11. Tool Integration | v0.4 | 0/3 | Planned | - |
-| 12. Parallel Execution | v0.4 | 0/3 | Not started | - |
+| 12. Parallel Execution | v0.4 | 0/3 | Planned | - |
