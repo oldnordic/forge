@@ -152,6 +152,35 @@ None - no external service configuration required. Timeout system uses tokio::ti
 - No new dependencies added (tokio::time already available)
 - Backward compatibility maintained (timeouts are optional)
 
+## Self-Check: PASSED
+
+**Created Files:**
+- ✓ forge_agent/src/workflow/timeout.rs (467 lines, 18 tests)
+- ✓ .planning/phases/10-cancellation-timeouts/10-02-SUMMARY.md
+
+**Modified Files:**
+- ✓ forge_agent/src/workflow/mod.rs (added timeout module and re-exports)
+- ✓ forge_agent/src/workflow/task.rs (added task_timeout field and Timeout variant)
+- ✓ forge_agent/src/workflow/executor.rs (added timeout_config and execute_with_timeout)
+- ✓ forge_agent/src/workflow/dag.rs (added Timeout variant to WorkflowError)
+- ✓ forge_agent/src/audit.rs (added WorkflowTaskTimedOut event)
+- ✓ forge_agent/src/workflow/yaml.rs (updated error handling)
+
+**Commits:**
+- ✓ 96dddb9 feat(10-02): create timeout module with timeout configuration types
+- ✓ dd12a98 feat(10-02): add task_timeout field to TaskContext
+- ✓ 1bf2a59 feat(10-02): add WorkflowTaskTimedOut event to AuditEvent
+- ✓ e7c348f feat(10-02): integrate timeout config into WorkflowExecutor
+- ✓ 9814f3b feat(10-02): export timeout module and add integration tests
+- ✓ 97941ce docs(10-02): complete timeout handling plan
+
+**Tests:**
+- ✓ 18 timeout tests passing
+- ✓ 6 task context tests passing
+- ✓ 10 audit tests passing
+
+All claims verified. No missing items.
+
 ---
 *Phase: 10-cancellation-timeouts*
 *Plan: 02*
