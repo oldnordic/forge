@@ -4,7 +4,7 @@
 //! Complex workflows with custom task types should use the Rust API.
 
 use crate::workflow::{
-    task::{TaskId, TaskResult, TaskError, TaskContext},
+    task::TaskId,
     tasks::{GraphQueryTask, GraphQueryType, AgentLoopTask, ShellCommandTask},
     dag::{Workflow, WorkflowError},
     builder::WorkflowBuilder,
@@ -12,7 +12,6 @@ use crate::workflow::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 /// Workflow definition from YAML.
@@ -94,6 +93,109 @@ pub enum YamlWorkflowError {
     /// YAML parsing error
     #[error("YAML parsing error: {0}")]
     YamlParse(#[from] serde_yaml::Error),
+}
+
+impl TryFrom<YamlWorkflow> for Workflow {
+    type Error = YamlWorkflowError;
+
+    fn try_from(yaml_workflow: YamlWorkflow) -> Result<Self, Self::Error> {
+        let mut builder = WorkflowBuilder::new();
+
+        // Add all tasks first
+        for yaml_task in &yaml_workflow.tasks {
+            let task_id = TaskId::new(yaml_task.id.clone());
+
+            match yaml_task.task_type {
+                YamlTaskType::GraphQuery => {
+                    // Extract required parameters
+                    let query_type_str = yaml_task.params.params.get("query_type")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| YamlWorkflowError::MissingParameter("query_type".to_string()))?;
+
+                    let target = yaml_task.params.params.get("target")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| YamlWorkflowError::MissingParameter("target".to_string()))?;
+
+                    // Convert query_type string to enum
+                    let query_type = match query_type_str {
+                        "find_symbol" => GraphQueryType::FindSymbol,
+                        "references" => GraphQueryType::References,
+                        "impact" | "impact_analysis" => GraphQueryType::ImpactAnalysis,
+                        _ => return Err(YamlWorkflowError::InvalidSchema(format!("Unknown query_type: {}", query_type_str))),
+                    };
+
+                    let task = GraphQueryTask::with_id(
+                        task_id.clone(),
+                        query_type,
+                        target,
+                    );
+
+                    builder = builder.add_task(Box::new(task));
+                }
+                YamlTaskType::AgentLoop => {
+                    // Extract query parameter
+                    let query = yaml_task.params.params.get("query")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| YamlWorkflowError::MissingParameter("query".to_string()))?;
+
+                    let task = AgentLoopTask::new(
+                        task_id.clone(),
+                        yaml_task.name.clone(),
+                        query,
+                    );
+
+                    builder = builder.add_task(Box::new(task));
+                }
+                YamlTaskType::Shell => {
+                    // Extract command parameter
+                    let command = yaml_task.params.params.get("command")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| YamlWorkflowError::MissingParameter("command".to_string()))?;
+
+                    // Extract args (optional)
+                    let args: Vec<String> = yaml_task.params.params.get("args")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str())
+                                .map(|s| s.to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let task = ShellCommandTask::new(
+                        task_id.clone(),
+                        yaml_task.name.clone(),
+                        command,
+                    ).with_args(args);
+
+                    builder = builder.add_task(Box::new(task));
+                }
+            }
+        }
+
+        // Add dependencies after all tasks are added
+        for yaml_task in &yaml_workflow.tasks {
+            let task_id = TaskId::new(yaml_task.id.clone());
+            for dep_id in &yaml_task.depends_on {
+                builder = builder.dependency(
+                    TaskId::new(dep_id.clone()),
+                    task_id.clone(),
+                );
+            }
+        }
+
+        // Build and validate workflow
+        let workflow = builder.build()
+            .map_err(|e| match e {
+                WorkflowError::EmptyWorkflow => YamlWorkflowError::InvalidSchema("Workflow has no tasks".to_string()),
+                WorkflowError::CycleDetected(msg) => YamlWorkflowError::ConversionError(format!("Cycle detected: {:?}", msg)),
+                WorkflowError::TaskNotFound(id) => YamlWorkflowError::ConversionError(format!("Task not found: {}", id)),
+                WorkflowError::MissingDependency(id) => YamlWorkflowError::ConversionError(format!("Missing dependency: {}", id)),
+            })?;
+
+        Ok(workflow)
+    }
 }
 
 #[cfg(test)]
@@ -192,5 +294,160 @@ tasks:
 
         let result: Result<YamlWorkflow, _> = serde_yaml::from_str(yaml);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_graph_query_conversion() {
+        let yaml = r#"
+name: "Graph Query Test"
+tasks:
+  - id: "find"
+    name: "Find Symbol"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "process_data"
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let workflow: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(workflow.is_ok());
+        let workflow = workflow.unwrap();
+        assert_eq!(workflow.task_count(), 1);
+    }
+
+    #[test]
+    fn test_yaml_to_workflow() {
+        let yaml = r#"
+name: "Test Workflow"
+tasks:
+  - id: "find"
+    name: "Find Symbol"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      target: "my_function"
+  - id: "analyze"
+    name: "Analyze Impact"
+    type: GRAPH_QUERY
+    depends_on: ["find"]
+    params:
+      query_type: "impact"
+      target: "my_function"
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let workflow: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(workflow.is_ok());
+        let workflow = workflow.unwrap();
+        assert_eq!(workflow.task_count(), 2);
+
+        // Verify execution order respects dependencies
+        let execution_order = workflow.execution_order().unwrap();
+        assert_eq!(execution_order[0], TaskId::new("find"));
+        assert_eq!(execution_order[1], TaskId::new("analyze"));
+    }
+
+    #[test]
+    fn test_missing_parameter_error() {
+        let yaml = r#"
+name: "Missing Parameter Test"
+tasks:
+  - id: "task1"
+    name: "Task 1"
+    type: GRAPH_QUERY
+    params:
+      query_type: "find_symbol"
+      # Missing 'target' parameter
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let result: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(YamlWorkflowError::MissingParameter(_))));
+    }
+
+    #[test]
+    fn test_agent_loop_conversion() {
+        let yaml = r#"
+name: "Agent Loop Test"
+tasks:
+  - id: "observe"
+    name: "Gather Context"
+    type: AGENT_LOOP
+    params:
+      query: "Find all functions that call process_data"
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let workflow: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(workflow.is_ok());
+        let workflow = workflow.unwrap();
+        assert_eq!(workflow.task_count(), 1);
+    }
+
+    #[test]
+    fn test_agent_loop_missing_query() {
+        let yaml = r#"
+name: "Agent Loop Missing Query"
+tasks:
+  - id: "task1"
+    name: "Task 1"
+    type: AGENT_LOOP
+    params:
+      # Missing 'query' parameter
+      other: "value"
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let result: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(YamlWorkflowError::MissingParameter(_))));
+    }
+
+    #[test]
+    fn test_shell_task_stub() {
+        let yaml = r#"
+name: "Shell Task Test"
+tasks:
+  - id: "run"
+    name: "Run Command"
+    type: SHELL
+    params:
+      command: "echo"
+      args: ["hello", "world"]
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let workflow: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(workflow.is_ok());
+        let workflow = workflow.unwrap();
+        assert_eq!(workflow.task_count(), 1);
+    }
+
+    #[test]
+    fn test_shell_task_args_default() {
+        let yaml = r#"
+name: "Shell Task No Args"
+tasks:
+  - id: "run"
+    name: "Run Command"
+    type: SHELL
+    params:
+      command: "ls"
+"#;
+
+        let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
+        let workflow: Result<Workflow, _> = yaml_workflow.try_into();
+
+        assert!(workflow.is_ok());
+        let workflow = workflow.unwrap();
+        assert_eq!(workflow.task_count(), 1);
     }
 }

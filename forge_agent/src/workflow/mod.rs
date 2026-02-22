@@ -44,6 +44,7 @@
 pub mod builder;
 pub mod combinators;
 pub mod dag;
+pub mod examples;
 pub mod executor;
 pub mod state;
 pub mod task;
