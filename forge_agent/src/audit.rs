@@ -138,6 +138,11 @@ pub enum AuditEvent {
         reason: String,
         rolled_back_tasks: Vec<String>,
     },
+    /// Workflow cancelled
+    WorkflowCancelled {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.

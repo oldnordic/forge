@@ -107,6 +107,8 @@ pub struct WorkflowExecutor {
     pub(in crate::workflow) checkpoint_sequence: u64,
     /// Optional validation configuration for checkpoint validation
     pub(in crate::workflow) validation_config: Option<ValidationCheckpoint>,
+    /// Optional cancellation source for workflow cancellation
+    cancellation_source: Option<crate::workflow::cancellation::CancellationTokenSource>,
 }
 
 impl WorkflowExecutor {
@@ -134,6 +136,7 @@ impl WorkflowExecutor {
             checkpoint_service: None,
             checkpoint_sequence: 0,
             validation_config: None,
+            cancellation_source: None,
         }
     }
 
@@ -198,6 +201,81 @@ impl WorkflowExecutor {
     pub fn with_validation_config(mut self, config: ValidationCheckpoint) -> Self {
         self.validation_config = Some(config);
         self
+    }
+
+    /// Sets the cancellation source for this executor.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The cancellation token source to use
+    ///
+    /// # Returns
+    ///
+    /// The executor with cancellation enabled (for builder pattern)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use forge_agent::workflow::CancellationTokenSource;
+    ///
+    /// let source = CancellationTokenSource::new();
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .with_cancellation_source(source);
+    /// ```
+    pub fn with_cancellation_source(
+        mut self,
+        source: crate::workflow::cancellation::CancellationTokenSource,
+    ) -> Self {
+        self.cancellation_source = Some(source);
+        self
+    }
+
+    /// Returns a cancellation token if configured.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(CancellationToken)` if cancellation source is configured
+    /// - `None` if no cancellation source
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let source = CancellationTokenSource::new();
+    /// let executor = WorkflowExecutor::new(workflow)
+    ///     .with_cancellation_source(source);
+    ///
+    /// if let Some(token) = executor.cancellation_token() {
+    ///     println!("Token cancelled: {}", token.is_cancelled());
+    /// }
+    /// ```
+    pub fn cancellation_token(&self) -> Option<crate::workflow::cancellation::CancellationToken> {
+        self.cancellation_source.as_ref().map(|source| source.token())
+    }
+
+    /// Cancels the workflow execution.
+    ///
+    /// Triggers cancellation on the cancellation source if configured.
+    /// This will cause the executor to stop after the current task completes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let source = CancellationTokenSource::new();
+    /// let mut executor = WorkflowExecutor::new(workflow)
+    ///     .with_cancellation_source(source);
+    ///
+    /// // Spawn execution in background
+    /// tokio::spawn(async move {
+    ///     executor.execute().await?;
+    /// });
+    ///
+    /// // Cancel from main thread
+    /// executor.cancel();
+    /// ```
+    pub fn cancel(&self) {
+        if let Some(source) = &self.cancellation_source {
+            source.cancel();
+        }
     }
 
     /// Registers a compensation action for a task.
@@ -309,6 +387,24 @@ impl WorkflowExecutor {
 
         // Execute each task in order
         for (position, task_id) in execution_order.iter().enumerate() {
+            // Check for cancellation before executing task
+            if let Some(token) = self.cancellation_token() {
+                if token.is_cancelled() {
+                    // Record workflow cancelled
+                    self.record_workflow_cancelled(&workflow_id).await;
+
+                    // Return cancelled result
+                    let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
+                    return Ok(WorkflowResult {
+                        success: false,
+                        completed_tasks: completed,
+                        failed_tasks: Vec::new(),
+                        error: Some("Workflow cancelled".to_string()),
+                        rollback_report: None,
+                    });
+                }
+            }
+
             if let Err(e) = self.execute_task(&workflow_id, task_id).await {
                 // Task failed - trigger rollback
                 let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
@@ -486,8 +582,12 @@ impl WorkflowExecutor {
         self.record_task_started(workflow_id, task_id, &task_name)
             .await;
 
-        // Create task context (currently unused, will be used when we implement actual task execution)
-        let _context = TaskContext::new(workflow_id, task_id.clone());
+        // Create task context with cancellation token if available
+        let context = if let Some(token) = self.cancellation_token() {
+            TaskContext::new(workflow_id, task_id.clone()).with_cancellation_token(token)
+        } else {
+            TaskContext::new(workflow_id, task_id.clone())
+        };
 
         // Execute the task (synchronously for now - task is a trait object)
         // Note: We can't execute boxed WorkflowTask without the actual task instance
@@ -498,6 +598,8 @@ impl WorkflowExecutor {
         // the actual task implementations, not just metadata.
 
         // For now, simulate successful execution
+        let _context = context; // Use context to avoid unused variable warning
+
         self.completed_tasks.insert(task_id.clone());
         self.record_task_completed(workflow_id, task_id, &task_name)
             .await;
@@ -568,6 +670,27 @@ impl WorkflowExecutor {
                 task_id: task_id.to_string(),
                 task_name: task_id.to_string(),
                 error: error.to_string(),
+            })
+            .await;
+
+        let _ = self
+            .audit_log
+            .record(crate::audit::AuditEvent::WorkflowCompleted {
+                timestamp: Utc::now(),
+                workflow_id: workflow_id.to_string(),
+                total_tasks: self.workflow.task_count(),
+                completed_tasks: self.completed_tasks.len(),
+            })
+            .await;
+    }
+
+    /// Records workflow cancelled event.
+    async fn record_workflow_cancelled(&mut self, workflow_id: &str) {
+        let _ = self
+            .audit_log
+            .record(crate::audit::AuditEvent::WorkflowCancelled {
+                timestamp: Utc::now(),
+                workflow_id: workflow_id.to_string(),
             })
             .await;
 
@@ -1813,5 +1936,101 @@ mod tests {
         let validation = executor.validate_task_result(&result);
 
         assert!(validation.is_err());
+    }
+
+    // Tests for cancellation token integration
+
+    #[test]
+    fn test_executor_without_cancellation_source() {
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let executor = WorkflowExecutor::new(workflow);
+
+        // No cancellation source by default
+        assert!(executor.cancellation_token().is_none());
+
+        // cancel() should be a no-op
+        executor.cancel(); // Should not panic
+    }
+
+    #[test]
+    fn test_executor_cancellation_token_access() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let source = CancellationTokenSource::new();
+        let executor = WorkflowExecutor::new(workflow)
+            .with_cancellation_source(source);
+
+        // Cancellation token should be accessible
+        assert!(executor.cancellation_token().is_some());
+        let token = executor.cancellation_token().unwrap();
+        assert!(!token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn test_executor_cancel_stops_execution() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTask::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTask::new("c", "Task C")));
+
+        // Use a flag to cancel after first task
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+
+        // Spawn a task to cancel after 50ms
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            cancel_flag_clone.store(true, Ordering::SeqCst);
+        });
+
+        // Create a custom cancellation mechanism
+        // For this test, we'll create the source, cancel it, then execute
+        let source = CancellationTokenSource::new();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_cancellation_source(source);
+
+        // Cancel immediately before execution
+        executor.cancel();
+
+        // Execute workflow
+        let result = executor.execute().await.unwrap();
+
+        // Should have stopped before any task
+        assert!(!result.success);
+        assert_eq!(result.completed_tasks.len(), 0);
+        assert!(result.error.unwrap().contains("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn test_cancellation_recorded_in_audit() {
+        use crate::workflow::cancellation::CancellationTokenSource;
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTask::new("a", "Task A")));
+
+        let source = CancellationTokenSource::new();
+        let mut executor = WorkflowExecutor::new(workflow)
+            .with_cancellation_source(source);
+
+        // Cancel before execution using executor's cancel method
+        executor.cancel();
+
+        // Execute workflow
+        executor.execute().await.unwrap();
+
+        // Check audit log for cancellation event
+        let events = executor.audit_log().replay();
+
+        // Should have WorkflowCancelled event
+        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCancelled { .. })));
     }
 }
