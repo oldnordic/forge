@@ -43,10 +43,12 @@ enum Action {
         query: String,
 
         /// Enable runtime integration for coordinated file watching and caching
-        // TODO: Phase 3.1 - Implement --with-runtime flag to create ForgeRuntime
-        // and call agent.run_with_runtime() instead of agent.run()
         #[arg(short, long, default_value = "false")]
         with_runtime: bool,
+
+        /// Show detailed runtime metrics
+        #[arg(short, long, default_value = "false")]
+        verbose: bool,
     },
 
     /// Generate an execution plan without applying changes (dry run)
@@ -100,24 +102,33 @@ pub async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.action {
-        Action::Run { query, with_runtime } => {
+        Action::Run { query, with_runtime, verbose } => {
             // Determine codebase path (default: current directory)
             let codebase_path = std::env::current_dir()?;
 
             // Run the full agent loop
             println!("🔄 Running agent loop...");
 
-            // TODO: Phase 3.1 - Implement full runtime integration
-            // For now, with_runtime flag is accepted but not fully utilized
             if with_runtime {
                 // Create agent with runtime for coordinated file watching
                 let (agent, mut runtime) = Agent::with_runtime(&codebase_path).await?;
                 println!("   Runtime integration enabled");
+
                 match agent.run_with_runtime(&mut runtime, &query).await {
                     Ok(_) => {
                         println!("✅ Agent completed successfully");
                         println!("   Query: {}", query);
                         println!("   Changes applied and committed");
+
+                        // Display runtime statistics
+                        let stats = runtime.stats();
+                        println!("\nRuntime Statistics:");
+                        println!("  Cache size: {} entries", stats.cache_size);
+                        println!("  Watch active: {}", if stats.watch_active { "yes" } else { "no" });
+                        println!("  Reindex operations: {}", stats.reindex_count);
+                        println!("  Graph queries: {}", stats.metrics.graph_queries);
+                        println!("  Cache hit rate: {:.1}%", stats.metrics.cache_hit_rate * 100.0);
+
                         Ok(())
                     }
                     Err(e) => {
