@@ -111,12 +111,14 @@ fn test_checkpoint_session_id() {
     let storage = Rc::new(SqliteGraphStorage::in_memory().unwrap());
     let session_id = SessionId::new();
     let _manager = TemporalCheckpointManager::new(storage.clone(), session_id);
-    
+
     let _cp_id = _manager.checkpoint("Test").unwrap();
-    
-    // In full implementation, we'd retrieve and verify session_id
-    // For MVP, we just verify creation succeeds
-    // TODO: Implement retrieval and verification
+
+    // Retrieve checkpoint and verify session_id matches
+    let retrieved = _manager.get(&_cp_id);
+    assert!(retrieved.is_ok(), "Should be able to retrieve checkpoint");
+    let checkpoint = retrieved.unwrap().unwrap();
+    assert_eq!(checkpoint.session_id, session_id, "Checkpoint should belong to correct session");
 }
 
 /// Test 10: Checkpoint state contains environment info
