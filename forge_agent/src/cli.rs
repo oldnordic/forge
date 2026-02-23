@@ -23,8 +23,15 @@
 //! $ forge-agent status
 //! ```
 
-use crate::Agent;
+#![allow(clippy::too_many_arguments)]
+
+use forge_agent::Agent;
 use clap::{Parser, Subcommand};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    run().await
+}
 
 /// CLI arguments for the agent.
 #[derive(Parser, Debug)]
@@ -86,12 +93,10 @@ impl Status {
     }
 
     /// Create status from agent state
-    fn from_agent(agent: &Agent) -> Self {
-        let op = agent.current_operation.clone()
-            .unwrap_or_else(|| "Idle".to_string());
+    fn from_agent(_agent: &Agent) -> Self {
         Self {
             ready: true,
-            current_operation: Some(op),
+            current_operation: Some("Idle".to_string()),
             queue_size: 0,
         }
     }
@@ -231,5 +236,82 @@ pub async fn run() -> anyhow::Result<()> {
 
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_cli_accepts_with_runtime_flag() {
+        // Test that CLI parsing accepts --with-runtime flag
+        let cli = Cli::try_parse_from(["forge-agent", "run", "test query", "--with-runtime"]);
+        assert!(cli.is_ok());
+
+        let cli = cli.unwrap();
+        match cli.action {
+            Action::Run { with_runtime, verbose, .. } => {
+                assert!(with_runtime);
+                assert!(!verbose);
+            }
+            _ => panic!("Expected Run action"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cli_accepts_verbose_flag() {
+        // Test that CLI parsing accepts --verbose flag
+        let cli = Cli::try_parse_from(["forge-agent", "run", "test query", "--verbose"]);
+        assert!(cli.is_ok());
+
+        let cli = cli.unwrap();
+        match cli.action {
+            Action::Run { with_runtime, verbose, .. } => {
+                assert!(!with_runtime);
+                assert!(verbose);
+            }
+            _ => panic!("Expected Run action"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cli_accepts_both_flags() {
+        // Test that CLI parsing accepts both flags together
+        let cli = Cli::try_parse_from(["forge-agent", "run", "test query", "--with-runtime", "--verbose"]);
+        assert!(cli.is_ok());
+
+        let cli = cli.unwrap();
+        match cli.action {
+            Action::Run { with_runtime, verbose, .. } => {
+                assert!(with_runtime);
+                assert!(verbose);
+            }
+            _ => panic!("Expected Run action"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cli_runtime_creation() {
+        // Verify runtime can be created successfully
+        let temp = tempdir().unwrap();
+        let result = Agent::with_runtime(temp.path()).await;
+        assert!(result.is_ok());
+
+        let (_agent, runtime) = result.unwrap();
+        assert_eq!(runtime.codebase_path(), temp.path());
+    }
+
+    #[tokio::test]
+    async fn test_cli_runtime_stats() {
+        // Verify runtime stats can be retrieved
+        let temp = tempdir().unwrap();
+        let (_agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+
+        let stats = runtime.stats();
+        assert_eq!(stats.cache_size, 0);
+        assert!(!stats.watch_active);
+        assert_eq!(stats.reindex_count, 0);
     }
 }

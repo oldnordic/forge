@@ -11,6 +11,10 @@ description = "ForgeKit agent layer - Workflow orchestration and AI loop"
 name = "forge_agent"
 path = "src/lib.rs"
 
+[[bin]]
+name = "forge-agent"
+path = "src/cli.rs"
+
 [features]
 default = ["sqlite"]
 
@@ -41,6 +45,8 @@ petgraph = "0.8"
 async-trait = "0.1"
 bincode = "2.0"
 sha2 = "0.10"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }
