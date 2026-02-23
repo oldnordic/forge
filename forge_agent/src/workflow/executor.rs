@@ -549,55 +549,65 @@ impl WorkflowExecutor {
                 }
             }
 
-            if let Err(e) = self.execute_task(&workflow_id, task_id).await {
-                // Task failed - trigger rollback
-                let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
+            // Execute task and get result for validation
+            let task_result = match self.execute_task(&workflow_id, task_id).await {
+                Ok(result) => result,
+                Err(e) => {
+                    // Task failed - trigger rollback
+                    let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
 
-                // Find rollback set based on strategy
-                let rollback_set = self
-                    .rollback_engine
-                    .find_rollback_set(&self.workflow, task_id, self.rollback_strategy)
-                    .map_err(|err| {
-                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
-                    })?;
+                    // Find rollback set based on strategy
+                    let rollback_set = self
+                        .rollback_engine
+                        .find_rollback_set(&self.workflow, task_id, self.rollback_strategy)
+                        .map_err(|err| {
+                            crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                        })?;
 
-                // Execute rollback
-                let rollback_report = self
-                    .rollback_engine
-                    .execute_rollback(
-                        &self.workflow,
-                        rollback_set,
-                        &workflow_id,
-                        &mut self.audit_log,
-                        &self.compensation_registry,
-                    )
-                    .await
-                    .map_err(|_err| {
-                        crate::workflow::dag::WorkflowError::TaskNotFound(task_id.clone())
-                    })?;
+                    // Execute rollback
+                    let rollback_report = self
+                        .rollback_engine
+                        .execute_rollback(
+                            &self.workflow,
+                            rollback_set,
+                            &workflow_id,
+                            &mut self.audit_log,
+                            &self.compensation_registry,
+                        )
+                        .await
+                        .map_err(|_err| {
+                            crate::workflow::dag::WorkflowError::TaskNotFound(task_id.clone())
+                        })?;
 
-                // Record workflow failed
-                self.record_workflow_failed(&workflow_id, task_id, &e.to_string())
-                    .await;
+                    // Record workflow failed
+                    self.record_workflow_failed(&workflow_id, task_id, &e.to_string())
+                        .await;
 
-                return Ok(WorkflowResult::new_failed_with_rollback(
-                    completed,
-                    task_id.clone(),
-                    e.to_string(),
-                    rollback_report,
-                ));
-            }
+                    return Ok(WorkflowResult::new_failed_with_rollback(
+                        completed,
+                        task_id.clone(),
+                        e.to_string(),
+                        rollback_report,
+                    ));
+                }
+            };
 
-            // Task completed successfully - run validation if configured
+            // Task completed - run validation if configured
             if let Some(validation_config) = &self.validation_config {
                 // Get task name for logging
-                let node_idx = self.workflow.task_map.get(task_id).unwrap();
-                let task_node = self.workflow.graph.node_weight(*node_idx).unwrap();
+                let node_idx = self
+                    .workflow
+                    .task_map
+                    .get(task_id)
+                    .ok_or_else(|| crate::workflow::WorkflowError::TaskNotFound(task_id.clone()))?;
+                let task_node = self
+                    .workflow
+                    .graph
+                    .node_weight(*node_idx)
+                    .ok_or_else(|| crate::workflow::WorkflowError::TaskFailed(
+                        "Node index exists but node not found in graph".to_string(),
+                    ))?;
                 let task_name = task_node.name.clone();
-
-                // Simulate task result for validation
-                // TODO: When actual task execution is implemented, get real TaskResult
-                let task_result = TaskResult::Success;
 
                 let validation = validate_checkpoint(&task_result, validation_config);
 
@@ -839,7 +849,9 @@ impl WorkflowExecutor {
                     .workflow
                     .graph
                     .node_weight(*node_idx)
-                    .expect("Node index should be valid");
+                    .ok_or_else(|| crate::workflow::WorkflowError::TaskFailed(
+                        "Node index exists but node not found in graph".to_string(),
+                    ))?;
 
                 // Clone the Arc to the task for move into spawned block
                 let task_arc = std::sync::Arc::clone(task_node.task());
@@ -1076,7 +1088,7 @@ impl WorkflowExecutor {
         &mut self,
         workflow_id: &str,
         task_id: &TaskId,
-    ) -> Result<(), crate::workflow::WorkflowError> {
+    ) -> Result<TaskResult, crate::workflow::WorkflowError> {
         // Find the task in the workflow
         let node_idx = self
             .workflow
@@ -1088,7 +1100,9 @@ impl WorkflowExecutor {
             .workflow
             .graph
             .node_weight(*node_idx)
-            .expect("Node index should be valid");
+            .ok_or_else(|| crate::workflow::WorkflowError::TaskFailed(
+                "Node index exists but node not found in graph".to_string(),
+            ))?;
 
         // Clone the Arc to the task to avoid borrow issues with mutable self
         let task_arc = std::sync::Arc::clone(task_node.task());
@@ -1148,11 +1162,11 @@ impl WorkflowExecutor {
 
         // Handle execution result
         match execution_result {
-            Ok(_) => {
+            Ok(result) => {
                 self.completed_tasks.insert(task_id.clone());
                 self.record_task_completed(workflow_id, task_id, &task_name)
                     .await;
-                Ok(())
+                Ok(result)
             }
             Err(e) => Err(e),
         }
@@ -1165,7 +1179,7 @@ impl WorkflowExecutor {
         &mut self,
         task: &std::sync::Arc<dyn crate::workflow::WorkflowTask>,
         context: &TaskContext,
-    ) -> Result<(), crate::workflow::WorkflowError> {
+    ) -> Result<TaskResult, crate::workflow::WorkflowError> {
         // Execute the task
         let result = task
             .execute(context)
@@ -1174,9 +1188,6 @@ impl WorkflowExecutor {
 
         // Handle result and register compensation if present
         match result {
-            TaskResult::Success => Ok(()),
-            TaskResult::Failed(msg) => Err(crate::workflow::WorkflowError::TaskFailed(msg)),
-            TaskResult::Skipped => Ok(()),
             TaskResult::WithCompensation {
                 result,
                 compensation,
@@ -1187,18 +1198,9 @@ impl WorkflowExecutor {
                 self.compensation_registry.register(task_id, tool_comp);
 
                 // Return the inner result
-                match *result {
-                    TaskResult::Success => Ok(()),
-                    TaskResult::Failed(msg) => {
-                        Err(crate::workflow::WorkflowError::TaskFailed(msg))
-                    }
-                    TaskResult::Skipped => Ok(()),
-                    TaskResult::WithCompensation { .. } => {
-                        // Nested compensation - flatten to success
-                        Ok(())
-                    }
-                }
+                Ok(*result)
             }
+            other => Ok(other),
         }
     }
 
@@ -1729,6 +1731,7 @@ impl WorkflowExecutor {
         for position in start_position..execution_order.len() {
             let task_id = &execution_order[position];
 
+            // Execute task (ignore result for resume path)
             if let Err(e) = self.execute_task(&workflow_id, task_id).await {
                 // Task failed - trigger rollback
                 let completed: Vec<TaskId> = self.completed_tasks.iter().cloned().collect();
