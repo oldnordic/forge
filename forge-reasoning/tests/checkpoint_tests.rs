@@ -128,11 +128,18 @@ fn test_checkpoint_state_has_env() {
     let storage = Rc::new(SqliteGraphStorage::in_memory().unwrap());
     let session_id = SessionId::new();
     let manager = TemporalCheckpointManager::new(storage, session_id);
-    
-    let _cp_id = manager.checkpoint("Test env capture").unwrap();
-    
-    // TODO: Retrieve and verify state contains working_dir
-    // TODO: Verify state contains env_vars
+
+    let cp_id = manager.checkpoint("Test env capture").unwrap();
+
+    // Retrieve checkpoint and restore state
+    let checkpoint = manager.get(&cp_id).unwrap().unwrap();
+    let state = manager.restore(&checkpoint).unwrap();
+
+    // Verify working directory was captured
+    assert!(state.working_dir.is_some(), "State should have working directory");
+
+    // Verify environment variables were captured
+    assert!(!state.env_vars.is_empty(), "State should have environment variables");
 }
 
 // ============================================================================
