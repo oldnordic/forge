@@ -197,6 +197,7 @@ impl TryFrom<YamlWorkflow> for Workflow {
                 WorkflowError::CheckpointNotFound(msg) => YamlWorkflowError::ConversionError(format!("Checkpoint not found: {}", msg)),
                 WorkflowError::WorkflowChanged(msg) => YamlWorkflowError::ConversionError(format!("Workflow changed: {}", msg)),
                 WorkflowError::Timeout(err) => YamlWorkflowError::ConversionError(format!("Timeout: {}", err)),
+                WorkflowError::TaskFailed(msg) => YamlWorkflowError::ConversionError(format!("Task failed: {}", msg)),
             })?;
 
         Ok(workflow)

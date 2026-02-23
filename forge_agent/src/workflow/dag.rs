@@ -44,6 +44,10 @@ pub enum WorkflowError {
     /// Timeout error
     #[error("Timeout: {0}")]
     Timeout(#[from] crate::workflow::timeout::TimeoutError),
+
+    /// Task execution failed
+    #[error("Task execution failed: {0}")]
+    TaskFailed(String),
 }
 
 /// Node data stored in the workflow graph.
