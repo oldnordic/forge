@@ -7,6 +7,7 @@ use crate::workflow::task::{TaskId, WorkflowTask};
 use petgraph::algo::toposort as petgraph_toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Error types for workflow operations.
@@ -47,18 +48,24 @@ pub enum WorkflowError {
 
 /// Node data stored in the workflow graph.
 ///
-/// Wraps a boxed WorkflowTask trait object for execution.
+/// Stores task metadata and the actual task trait object for execution.
 #[derive(Clone)]
 pub(in crate::workflow) struct TaskNode {
     id: TaskId,
     pub(in crate::workflow) name: String,
     dependencies: Vec<TaskId>,
+    task: Arc<dyn WorkflowTask>,
 }
 
 impl TaskNode {
     /// Returns the task ID.
     pub(in crate::workflow) fn id(&self) -> &TaskId {
         &self.id
+    }
+
+    /// Returns a reference to the task trait object.
+    pub(in crate::workflow) fn task(&self) -> &Arc<dyn WorkflowTask> {
+        &self.task
     }
 }
 
@@ -118,10 +125,14 @@ impl Workflow {
         let name = task.name().to_string();
         let dependencies = task.dependencies();
 
+        // Wrap the task in Arc for shared ownership
+        let task_arc = Arc::from(task);
+
         let node = TaskNode {
             id: id.clone(),
             name,
             dependencies,
+            task: task_arc,
         };
 
         let idx = self.graph.add_node(node);
@@ -353,12 +364,18 @@ impl Workflow {
         self.task_map.contains_key(id)
     }
 
-    /// Returns dependencies declared for a task (from task metadata).
+    /// Returns actual dependencies for a task (from graph edges).
+    ///
+    /// Returns the task IDs that this task depends on, based on the
+    /// actual graph edges rather than task metadata.
     pub fn task_dependencies(&self, id: &TaskId) -> Option<Vec<TaskId>> {
-        self.task_map
-            .get(id)
-            .and_then(|&idx| self.graph.node_weight(idx))
-            .map(|node| node.dependencies.clone())
+        self.task_map.get(id).map(|&idx| {
+            self.graph
+                .neighbors_directed(idx, petgraph::Direction::Incoming)
+                .filter_map(|neighbor_idx| self.graph.node_weight(neighbor_idx))
+                .map(|node| node.id.clone())
+                .collect()
+        })
     }
 
     /// Returns the name of a task.
