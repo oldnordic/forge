@@ -116,6 +116,11 @@ pub async fn run() -> anyhow::Result<()> {
 
                 match agent.run_with_runtime(&mut runtime, &query).await {
                     Ok(_) => {
+                        // Display cache status
+                        let cache = runtime.cache();
+                        let cache_count = cache.map(|c| futures::executor::block_on(c.len())).unwrap_or(0);
+                        println!("   Query cache: {} entries cached", cache_count);
+
                         println!("✅ Agent completed successfully");
                         println!("   Query: {}", query);
                         println!("   Changes applied and committed");
