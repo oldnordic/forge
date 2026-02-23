@@ -61,7 +61,7 @@ impl Agent {
     /// - Query cache access for faster graph operations
     /// - Metrics collection for observability
     ///
-    /// Note: For v0.3, watcher pause/resume is deferred to Phase 3.1.
+    /// Note: For v0.4, watcher pause/resume is deferred to future versions.
     /// The runtime provides cache access and metrics, but file watching
     /// coordination is a future enhancement.
     ///
@@ -91,11 +91,11 @@ impl Agent {
         _runtime: &mut ForgeRuntime,
         query: &str,
     ) -> crate::Result<LoopResult> {
-        // For v0.3, we don't pause watcher (future enhancement in Phase 3.1)
+        // For v0.4, we don't pause watcher (future enhancement)
         // Just run the normal loop - runtime provides cache access and metrics
 
-        // TODO: Phase 3.1 - Add watcher.pause() / watcher.resume()
-        // TODO: Phase 3.1 - Utilize runtime cache for graph query optimization
+        // TODO: Future version - Add watcher.pause() / watcher.resume()
+        // TODO: Future version - Utilize runtime cache for graph query optimization
 
         self.run(query).await
     }
@@ -107,32 +107,28 @@ impl Agent {
     ///
     /// # Returns
     ///
-    /// Returns `Some(&QueryCache)` if runtime is available, `None` otherwise.
+    /// Returns `None` - cache access requires runtime association (not yet implemented).
     ///
-    /// Note: For v0.3, this returns `None` as cache access requires
-    /// runtime association which will be added in Phase 3.1.
-    pub fn runtime_cache(
-        &self,
-    ) -> Option<&forge_runtime::QueryCache<String, String>> {
+    /// Note: This is a placeholder for future functionality.
+    pub fn runtime_cache(&self) -> Option<()> {
         // TODO: Return cache from associated runtime
-        // For v0.3, return None (cache access will be added in Phase 3.1)
+        // For v0.4, return None (cache access will be added in future version)
         None
     }
 
-    /// Gets runtime statistics if runtime is available.
+    /// Gets runtime statistics if available.
     ///
     /// This method provides access to runtime metrics including cache size,
     /// watch status, and reindex count.
     ///
     /// # Returns
     ///
-    /// Returns `Some(RuntimeStats)` if runtime is available, `None` otherwise.
+    /// Returns `None` - stats access requires runtime association (not yet implemented).
     ///
-    /// Note: For v0.3, this returns `None` as stats access requires
-    /// runtime association which will be added in Phase 3.1.
-    pub fn runtime_stats(&self) -> Option<forge_runtime::RuntimeStats> {
+    /// Note: This is a placeholder for future functionality.
+    pub fn runtime_stats(&self) -> Option<()> {
         // TODO: Return stats from associated runtime
-        // For v0.3, return None
+        // For v0.4, return None
         None
     }
 }
@@ -164,20 +160,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_agent_runtime_stats_returns_none_for_v03() {
+    async fn test_agent_runtime_stats_returns_none() {
         let temp = tempfile::tempdir().unwrap();
         let (agent, _runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
-        // For v0.3, runtime_stats returns None
+        // For v0.4, runtime_stats returns None
         assert!(agent.runtime_stats().is_none());
     }
 
     #[tokio::test]
-    async fn test_agent_runtime_cache_returns_none_for_v03() {
+    async fn test_agent_runtime_cache_returns_none() {
         let temp = tempfile::tempdir().unwrap();
         let (agent, _runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
-        // For v0.3, runtime_cache returns None
+        // For v0.4, runtime_cache returns None
         assert!(agent.runtime_cache().is_none());
     }
 }
