@@ -1,11 +1,11 @@
 [package]
 name = "forgekit-agent"
-version = "0.1.2"
+version = "0.4.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/oldnordic/forge"
 readme = "README.md"
-description = "ForgeKit agent layer - Deterministic AI loop"
+description = "ForgeKit agent layer - Workflow orchestration and AI loop"
 
 [lib]
 name = "forge_agent"
@@ -27,7 +27,7 @@ full-v3 = ["agent-v3", "native-v3"]
 
 [dependencies]
 forgekit-core = { version = "0.2.2", path = "../forge_core", default-features = false }
-forgekit-runtime = { path = "../forge_runtime" }
+forgekit-runtime = { version = "0.1", path = "../forge_runtime" }
 sqlitegraph = { version = "2.0.8", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
