@@ -5,28 +5,35 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Graph-first, deterministic operations — SQLiteGraph database is authoritative ground truth
-**Current focus:** Phase 12: Parallel Execution
+**Current focus:** v0.4 milestone complete - ready for audit
 
 ## Current Position
 
-Phase: 12-parallel-execution
-Plan: 3 of 3 in current phase (COMPLETE)
-Status: Complete
-Last activity: 2026-02-22 — Plan 12-03 (Deadlock detection and prevention) completed
+Phase: 13-task-execution-refactor (IN PROGRESS)
+Milestone: v0.5 Advanced Task Execution (PLANNED)
+Status: Plan 13-01 complete
+Last activity: 2026-02-23 — Fixed stub execution, tasks now execute for real
 
-Progress: [██████████████████] 100%
+Progress: [████████░░░░░░░░░░] 33%
 
-**Phase 12 Complete!** This completes the v0.4 milestone.
-- Fork-join parallel execution (12-01)
-- Concurrent state management (12-02)
-- Deadlock detection and prevention (12-03)
+**Phase 13: Task Execution Refactor**
+- Plan 13-01: Store Arc<dyn WorkflowTask> in TaskNode (COMPLETE) - 45 min
+- Plan 13-02: TBD
+- Plan 13-03: TBD
+
+**v0.4 Milestone Complete!** All 5 phases (8-12) shipped:
+- Phase 8: Workflow Foundation (5 plans) - DAG scheduler, workflow API, YAML parser, auto-detection, rollback
+- Phase 9: State Management (4 plans) - Checkpointing, recovery, compensation, validation
+- Phase 10: Cancellation & Timeouts (3 plans) - Token hierarchy, timeout handling, cooperative cancellation
+- Phase 11: Tool Integration (3 plans) - Shell execution, tool registry, fallback handlers
+- Phase 12: Parallel Execution (3 plans) - Fork-join parallelism, concurrent state, deadlock detection
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
-- Average duration: 12.9 min
-- Total execution time: 4.3 hours
+- Total plans completed: 23
+- Average duration: 14.4 min
+- Total execution time: 5.5 hours
 
 **By Phase:**
 
@@ -39,7 +46,8 @@ Progress: [██████████████████] 100%
 | 9     | 4     | 50 min | 12.5 min |
 | 10    | 3     | 66 min | 22 min    |
 | 11    | 3     | 23 min | 7.67 min  |
-| 12    | 1     | 12 min | 12 min    |
+| 12    | 3     | 63 min | 21 min    |
+| 13    | 1     | 45 min | 45 min   |
 
 **Recent Trend:**
 - Last 5 plans: 11.6 min avg
@@ -70,6 +78,8 @@ Progress: [██████████████████] 100%
 | Phase 11-tool-integration P11-03 | 14min | 4 tasks | 5 files |
 | Phase 12-parallel-execution P01 | 12min | 3 tasks | 5 files |
 | Phase 12-parallel-execution P02 | 29min | 3 tasks | 2 files |
+| Phase 12-parallel-execution P03 | 22min | 3 tasks | 4 files |
+| Phase 13-task-execution-refactor P01 | 45min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -187,6 +197,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22T23:53:42Z
-Stopped at: Completed plan 12-03 (Deadlock detection and prevention) - Phase 12 and v0.4 milestone complete!
+Last session: 2026-02-23T00:00:00Z
+Stopped at: Phase 12 and v0.4 milestone complete - ready for audit with `/gsd:audit-milestone v0.4`
 Resume file: None
