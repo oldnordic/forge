@@ -127,12 +127,31 @@ pub async fn run() -> anyhow::Result<()> {
 
                         // Display runtime statistics
                         let stats = runtime.stats();
-                        println!("\nRuntime Statistics:");
-                        println!("  Cache size: {} entries", stats.cache_size);
-                        println!("  Watch active: {}", if stats.watch_active { "yes" } else { "no" });
-                        println!("  Reindex operations: {}", stats.reindex_count);
-                        println!("  Graph queries: {}", stats.metrics.graph_queries);
-                        println!("  Cache hit rate: {:.1}%", stats.metrics.cache_hit_rate * 100.0);
+
+                        if verbose {
+                            // Detailed verbose output
+                            println!("\nRuntime Statistics (detailed):");
+                            println!("  Cache size: {} entries", stats.cache_size);
+                            println!("  Watch active: {}", if stats.watch_active { "yes" } else { "no" });
+                            println!("  Watch directory: {}", runtime.config().watch_dir);
+                            println!("  Reindex operations: {}", stats.reindex_count);
+                            println!("  ---");
+                            println!("  Metrics:");
+                            println!("    Graph queries: {}", stats.metrics.graph_queries);
+                            println!("    Searches: {}", stats.metrics.searches);
+                            println!("    CFG analyses: {}", stats.metrics.cfg_analyses);
+                            println!("    Cache hits: {}", runtime.metrics().count(forge_runtime::MetricKind::CacheHit));
+                            println!("    Cache misses: {}", runtime.metrics().count(forge_runtime::MetricKind::CacheMiss));
+                            println!("    Hit rate: {:.1}%", stats.metrics.cache_hit_rate * 100.0);
+                        } else {
+                            // Summary statistics (default)
+                            println!("\nRuntime Statistics:");
+                            println!("  Cache size: {} entries", stats.cache_size);
+                            println!("  Watch active: {}", if stats.watch_active { "yes" } else { "no" });
+                            println!("  Reindex operations: {}", stats.reindex_count);
+                            println!("  Graph queries: {}", stats.metrics.graph_queries);
+                            println!("  Cache hit rate: {:.1}%", stats.metrics.cache_hit_rate * 100.0);
+                        }
 
                         Ok(())
                     }
