@@ -1,22 +1,35 @@
-# ForgeKit - Deterministic Code Intelligence SDK
+# ForgeKit - Code Intelligence SDK for Rust
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/oldnordic/forge)
-[![Tests](https://img.shields.io/badge/tests-522%20passing-brightgreen)](https://github.com/oldnordic/forge)
+[![Tests](https://img.shields.io/badge/tests-408%20passing-brightgreen)](https://github.com/oldnordic/forge)
 
 ForgeKit provides a unified SDK for code intelligence operations, integrating multiple tools into a single API with support for both SQLite and Native V3 backends.
 
 ## Features
 
-- **🔍 Graph Queries**: Symbol lookup, reference tracking, call graph navigation
-- **📊 Impact Analysis**: k-hop traversal to find affected symbols
-- **🔎 Semantic Search**: Pattern-based code search via LLMGrep integration  
-- **🌳 Control Flow Analysis**: CFG construction and analysis via Mirage
-- **🗑️ Dead Code Detection**: Find unused functions and methods
-- **📈 Complexity Metrics**: Cyclomatic complexity and risk analysis
-- **✏️ Safe Code Editing**: Span-safe refactoring via Splice
-- **📊 Dual Backend Support**: SQLite (stable) or Native V3 (high performance)
-- **⚡ Async-First**: Built on Tokio for async/await support
+**Core SDK:**
+- Graph queries: Symbol lookup, reference tracking, call graph navigation
+- Impact analysis: k-hop traversal to find affected symbols
+- Semantic search: Pattern-based code search via LLMGrep
+- Control flow analysis: CFG construction and analysis via Mirage
+- Dead code detection: Find unused functions and methods
+- Complexity metrics: Cyclomatic complexity and risk analysis
+- Safe code editing: Span-safe refactoring via Splice
+
+**Workflow Orchestration (v0.4):**
+- DAG-based task execution with dependency resolution
+- Parallel execution via fork-join pattern
+- State checkpointing and recovery
+- Cancellation tokens and timeout handling
+- Compensation-based rollback (saga pattern)
+- YAML workflow parser for declarative workflows
+- Tool registry with fallback handlers
+
+**Infrastructure:**
+- Dual backend support: SQLite (stable) or Native V3 (high performance)
+- Async-first: Built on Tokio
+- Type-safe error handling with thiserror
 
 ## Quick Start
 
@@ -91,7 +104,7 @@ forge-core = { version = "0.2", default-features = false, features = ["sqlite"] 
 |-------|---------|---------------|
 | `forge_core` | Core SDK with graph, search, CFG, and edit APIs | [API Docs](docs/API.md) |
 | `forge_runtime` | Indexing, caching, and file watching | [Architecture](docs/ARCHITECTURE.md) |
-| `forge_agent` | Deterministic AI agent loop | [Manual](docs/MANUAL.md) |
+| `forge_agent` | Workflow orchestration and agent loop | [Manual](docs/MANUAL.md) |
 
 ## Backend Comparison
 
@@ -217,8 +230,8 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 
 ---
 
-**Current Version:** 0.2.2
+**Current Version:** 0.4.0
 
-**Note:** ForgeKit is currently in active development. The crate has not yet been published to crates.io. APIs may change until v1.0.
+**Status:** The crate has not yet been published to crates.io. APIs may change until v1.0.
 
 **Compiler Warnings:** The project uses sqlitegraph 2.0.8 which has 61 intentional dead code warnings. These are kept for API completeness, feature-gated functionality, and future use - they do not indicate bugs or incomplete code.

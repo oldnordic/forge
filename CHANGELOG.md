@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-02-23
+
+### Added
+
+**Workflow Orchestration (forge_agent v0.4.0):**
+- **WorkflowExecutor** - DAG-based task execution engine
+  - Sequential and parallel execution modes
+  - Topological sort for dependency resolution
+  - Fork-join parallelism via tokio::JoinSet
+  - Deadlock detection using Tarjan's SCC algorithm
+
+- **State Management** - Workflow state persistence and recovery
+  - CheckpointService for periodic state snapshots
+  - Resume from checkpoint after failure
+  - WorkflowState and ConcurrentState types
+  - Graph drift detection via checksums
+
+- **Cancellation & Timeouts** - Cooperative cancellation and timeout handling
+  - CancellationToken with parent-child hierarchy
+  - TaskTimeout and WorkflowTimeout types
+  - TimeoutConfig with configurable durations
+  - Timeout and cancellation audit events
+
+- **Tool Integration** - External tool execution framework
+  - ToolRegistry for tool discovery and management
+  - ShellCommandTask for command execution
+  - FallbackHandler trait (Retry, Skip, Chain)
+  - Tool compensation for rollback
+
+- **Compensation & Rollback** - Saga-based transaction pattern
+  - CompensationRegistry for undo operations
+  - RollbackEngine with strategy selection
+  - ToolCompensation for external tools
+  - Diamond-pattern rollback support
+
+- **YAML Workflow Parser** - Declarative workflow definitions
+  - YamlWorkflow for file-based workflows
+  - Task types: GraphQuery, AgentLoop, Shell
+  - Flexible parameter serialization
+  - Auto-detection of workflow dependencies
+
+- **Validation Framework** - Post-task validation with thresholds
+  - ValidationConfig with confidence thresholds
+  - ValidationCheckpoint for workflow validation
+  - ValidationStatus (Passed, Warning, Failed)
+  - Rollback-on-failure support
+
+### Changed
+
+- **WorkflowError** - New variants: TaskFailed, Timeout
+- **TaskNode** - Now stores Arc<dyn WorkflowTask> directly
+- **execute_task()** - Returns TaskResult instead of ()
+- **Removed unwrap() calls** in production executor code
+- **Validation** now uses actual task results instead of fake Success
+
+### Dependencies
+
+- `petgraph` 0.8 - Graph algorithms (topological sort, SCC)
+- `serde_yaml` 0.9 - YAML workflow parsing
+- `tempfile` 3.13 - Temporary directories for tests
+- `tokio` 1.49 - Async runtime (JoinSet for parallelism)
+
+### Test Coverage
+
+- **408 tests** passing (workflow module)
+- Workflow execution tests (sequential, parallel, diamond)
+- Checkpoint and recovery tests
+- Cancellation and timeout tests
+- Deadlock detection tests
+- Rollback and compensation tests
+
+---
+
 ## [0.2.2] - 2026-02-21
 
 ### Changed

@@ -22,7 +22,7 @@ Add ForgeKit to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-forge-core = "0.2"
+forge-core = "0.4"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
