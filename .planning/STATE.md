@@ -9,17 +9,16 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 13-task-execution-refactor (COMPLETE)
-Milestone: v0.5 Advanced Task Execution (PLANNED)
-Status: All 3 plans complete
-Last activity: 2026-02-23 — Verified compensation registration and rollback flow
+Phase: 05-complete-runtime-integration (COMPLETE)
+Milestone: v0.4 Runtime Integration
+Status: 2 plans complete
+Last activity: 2026-02-23 — Completed CLI --with-runtime flag integration with runtime statistics
 
 Progress: [████████████████████] 100%
 
-**Phase 13: Task Execution Refactor**
-- Plan 13-01: Store Arc<dyn WorkflowTask> in TaskNode (COMPLETE) - 45 min
-- Plan 13-02: Fix ParallelTasks stub to execute actual tasks (COMPLETE) - 15 min
-- Plan 13-03: Complete compensation registration and rollback flow (COMPLETE) - 10 min
+**Phase 05: Complete Runtime Integration**
+- Plan 05-01: Runtime integration module (COMPLETE) - 25 min
+- Plan 05-02: CLI --with-runtime flag implementation (COMPLETE) - 13 min
 
 **v0.4 Milestone Complete!** All 5 phases (8-12) shipped:
 - Phase 8: Workflow Foundation (5 plans) - DAG scheduler, workflow API, YAML parser, auto-detection, rollback
@@ -31,9 +30,9 @@ Progress: [████████████████████] 100%
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 26
-- Average duration: 14.2 min
-- Total execution time: 6.2 hours
+- Total plans completed: 28
+- Average duration: 14.0 min
+- Total execution time: 6.5 hours
 
 **By Phase:**
 
@@ -42,6 +41,7 @@ Progress: [████████████████████] 100%
 | 1     | 1     | 7 min | 7 min    |
 | 2     | 1     | 6 min | 6 min    |
 | 3     | 4     | 21 min | 5.25 min |
+| 5     | 2     | 38 min | 19 min   |
 | 8     | 5     | 182 min | 36.4 min  |
 | 9     | 4     | 50 min | 12.5 min |
 | 10    | 3     | 66 min | 22 min    |
@@ -50,8 +50,8 @@ Progress: [████████████████████] 100%
 | 13    | 3     | 70 min | 23.3 min  |
 
 **Recent Trend:**
-- Last 5 plans: 11.6 min avg
-- Trend: Tool integration implementation
+- Last 5 plans: 18.6 min avg
+- Trend: Runtime integration complete
 
 *Updated after each plan completion*
 | Phase 01 P01 | 7min | 3 tasks | 5 files |
@@ -82,6 +82,8 @@ Progress: [████████████████████] 100%
 | Phase 13-task-execution-refactor P01 | 45min | 3 tasks | 3 files |
 | Phase 13-task-execution-refactor P02 | 15min | 2 tasks | 1 file |
 | Phase 13-task-execution-refactor P03 | 10min | 3 tasks | 0 files (verification) |
+| Phase 05-complete-runtime-integration P01 | 25min | 3 tasks | 1 file |
+| Phase 05-complete-runtime-integration P02 | 13min | 5 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -184,6 +186,11 @@ Recent decisions affecting current work:
 - [Phase 12-parallel-execution]: Resource deadlock warnings are informational (logged but don't block execution)
 - [Phase 12-parallel-execution]: Dependency cycles are hard errors (workflow cannot execute)
 - [Phase 12-parallel-execution]: Timeout applies per-layer, not per-task (task timeouts exist separately)
+- [Phase 05-complete-runtime-integration]: Configure CLI as binary crate using [[bin]] section in Cargo.toml
+- [Phase 05-complete-runtime-integration]: Use forge_agent::Agent import for proper module path resolution in binary context
+- [Phase 05-complete-runtime-integration]: Display cache status immediately after "Runtime integration enabled" message
+- [Phase 05-complete-runtime-integration]: Default output shows summary statistics, verbose mode shows detailed breakdown
+- [Phase 05-complete-runtime-integration]: All Phase 3.1 TODO comments removed from cli.rs
 
 ### Pending Todos
 
@@ -199,6 +206,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-23T02:00:00Z
-Stopped at: Phase 13 complete - task execution refactor done with full compensation/rollback flow
+Last session: 2026-02-23T14:10:00Z
+Stopped at: Phase 05 complete - CLI --with-runtime flag with full runtime integration
 Resume file: None
