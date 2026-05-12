@@ -3,11 +3,11 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::propagation::{ConfidenceChange, PropagationResult};
-use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
-use crate::belief::BeliefGraph;
 use super::propagation::PropagationConfig;
+use super::propagation::{ConfidenceChange, PropagationResult};
+use crate::belief::BeliefGraph;
 use crate::errors::Result;
+use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
 
 /// Unique identifier for a preview
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -128,10 +128,7 @@ pub async fn create_preview(
 }
 
 /// Get a page from a preview
-pub fn get_page(
-    preview: &CascadePreview,
-    page_number: usize,
-) -> PreviewPage {
+pub fn get_page(preview: &CascadePreview, page_number: usize) -> PreviewPage {
     // Validate page number
     if page_number >= preview.pagination.total_pages {
         // Return empty page for out-of-bounds request
@@ -168,7 +165,8 @@ pub fn list_cycle_warnings(preview: &CascadePreview) -> Vec<CycleWarning> {
     let mut warnings = Vec::new();
 
     // Find cycles in the changes by looking for repeated hypothesis IDs in paths
-    let mut cycle_members: std::collections::HashSet<HypothesisId> = std::collections::HashSet::new();
+    let mut cycle_members: std::collections::HashSet<HypothesisId> =
+        std::collections::HashSet::new();
 
     for change in &preview.result.changes {
         // Check if the hypothesis appears multiple times in its own propagation path
@@ -185,15 +183,19 @@ pub fn list_cycle_warnings(preview: &CascadePreview) -> Vec<CycleWarning> {
         let members: Vec<_> = cycle_members.iter().cloned().collect();
 
         // Compute average confidence for cycle members
-        let cycle_changes: Vec<_> = preview.result.changes
+        let cycle_changes: Vec<_> = preview
+            .result
+            .changes
             .iter()
             .filter(|c| cycle_members.contains(&c.hypothesis_id))
             .collect();
 
         if !cycle_changes.is_empty() {
-            let avg_confidence: f64 = cycle_changes.iter()
+            let avg_confidence: f64 = cycle_changes
+                .iter()
                 .map(|c| c.new_confidence.get())
-                .sum::<f64>() / cycle_changes.len() as f64;
+                .sum::<f64>()
+                / cycle_changes.len() as f64;
 
             warnings.push(CycleWarning {
                 scc_members: members,
@@ -277,7 +279,10 @@ mod tests {
         let graph = BeliefGraph::new();
 
         // Create a hypothesis
-        let h_id = board.propose("Test", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_id = board
+            .propose("Test", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         // Create preview
         let preview = create_preview(
@@ -287,7 +292,9 @@ mod tests {
             &graph,
             &PropagationConfig::default(),
             50,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(preview.start_hypothesis, h_id);
         assert_eq!(preview.pagination.total_items, 1);
@@ -299,7 +306,10 @@ mod tests {
         let board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
-        let h_id = board.propose("Test", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_id = board
+            .propose("Test", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         let preview = create_preview(
             h_id,
@@ -308,7 +318,9 @@ mod tests {
             &graph,
             &PropagationConfig::default(),
             10,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let page = get_page(&preview, 0);
         assert_eq!(page.page_number, 0);
@@ -322,7 +334,10 @@ mod tests {
         let board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
-        let h_id = board.propose("Test", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_id = board
+            .propose("Test", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         let preview = create_preview(
             h_id,
@@ -331,7 +346,9 @@ mod tests {
             &graph,
             &PropagationConfig::default(),
             10,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let page = get_page(&preview, 99); // Out of bounds
         assert_eq!(page.page_number, 99);
@@ -344,7 +361,10 @@ mod tests {
         let board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
-        let h_id = board.propose("Test", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_id = board
+            .propose("Test", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         let preview = create_preview(
             h_id,
@@ -353,7 +373,9 @@ mod tests {
             &graph,
             &PropagationConfig::default(),
             10,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let warnings = list_cycle_warnings(&preview);
         assert_eq!(warnings.len(), 0);

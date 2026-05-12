@@ -4,10 +4,10 @@
 //! Complex workflows with custom task types should use the Rust API.
 
 use crate::workflow::{
-    task::TaskId,
-    tasks::{GraphQueryTask, GraphQueryType, AgentLoopTask, ShellCommandConfig, ShellCommandTask},
-    dag::{Workflow, WorkflowError},
     builder::WorkflowBuilder,
+    dag::{Workflow, WorkflowError},
+    task::TaskId,
+    tasks::{AgentLoopTask, GraphQueryTask, GraphQueryType, ShellCommandConfig, ShellCommandTask},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,11 +109,19 @@ impl TryFrom<YamlWorkflow> for Workflow {
             match yaml_task.task_type {
                 YamlTaskType::GraphQuery => {
                     // Extract required parameters
-                    let query_type_str = yaml_task.params.params.get("query_type")
+                    let query_type_str = yaml_task
+                        .params
+                        .params
+                        .get("query_type")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| YamlWorkflowError::MissingParameter("query_type".to_string()))?;
+                        .ok_or_else(|| {
+                            YamlWorkflowError::MissingParameter("query_type".to_string())
+                        })?;
 
-                    let target = yaml_task.params.params.get("target")
+                    let target = yaml_task
+                        .params
+                        .params
+                        .get("target")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| YamlWorkflowError::MissingParameter("target".to_string()))?;
 
@@ -122,39 +130,47 @@ impl TryFrom<YamlWorkflow> for Workflow {
                         "find_symbol" => GraphQueryType::FindSymbol,
                         "references" => GraphQueryType::References,
                         "impact" | "impact_analysis" => GraphQueryType::ImpactAnalysis,
-                        _ => return Err(YamlWorkflowError::InvalidSchema(format!("Unknown query_type: {}", query_type_str))),
+                        _ => {
+                            return Err(YamlWorkflowError::InvalidSchema(format!(
+                                "Unknown query_type: {}",
+                                query_type_str
+                            )))
+                        }
                     };
 
-                    let task = GraphQueryTask::with_id(
-                        task_id.clone(),
-                        query_type,
-                        target,
-                    );
+                    let task = GraphQueryTask::with_id(task_id.clone(), query_type, target);
 
                     builder = builder.add_task(Box::new(task));
                 }
                 YamlTaskType::AgentLoop => {
                     // Extract query parameter
-                    let query = yaml_task.params.params.get("query")
+                    let query = yaml_task
+                        .params
+                        .params
+                        .get("query")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| YamlWorkflowError::MissingParameter("query".to_string()))?;
 
-                    let task = AgentLoopTask::new(
-                        task_id.clone(),
-                        yaml_task.name.clone(),
-                        query,
-                    );
+                    let task = AgentLoopTask::new(task_id.clone(), yaml_task.name.clone(), query);
 
                     builder = builder.add_task(Box::new(task));
                 }
                 YamlTaskType::Shell => {
                     // Extract command parameter
-                    let command = yaml_task.params.params.get("command")
+                    let command = yaml_task
+                        .params
+                        .params
+                        .get("command")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| YamlWorkflowError::MissingParameter("command".to_string()))?;
+                        .ok_or_else(|| {
+                            YamlWorkflowError::MissingParameter("command".to_string())
+                        })?;
 
                     // Extract args (optional)
-                    let args: Vec<String> = yaml_task.params.params.get("args")
+                    let args: Vec<String> = yaml_task
+                        .params
+                        .params
+                        .get("args")
                         .and_then(|v| v.as_array())
                         .map(|arr| {
                             arr.iter()
@@ -164,8 +180,7 @@ impl TryFrom<YamlWorkflow> for Workflow {
                         })
                         .unwrap_or_default();
 
-                    let config = ShellCommandConfig::new(command)
-                        .args(args);
+                    let config = ShellCommandConfig::new(command).args(args);
 
                     let task = ShellCommandTask::with_config(
                         task_id.clone(),
@@ -182,26 +197,40 @@ impl TryFrom<YamlWorkflow> for Workflow {
         for yaml_task in &yaml_workflow.tasks {
             let task_id = TaskId::new(yaml_task.id.clone());
             for dep_id in &yaml_task.depends_on {
-                builder = builder.dependency(
-                    TaskId::new(dep_id.clone()),
-                    task_id.clone(),
-                );
+                builder = builder.dependency(TaskId::new(dep_id.clone()), task_id.clone());
             }
         }
 
         // Build and validate workflow
-        let workflow = builder.build()
-            .map_err(|e| match e {
-                WorkflowError::EmptyWorkflow => YamlWorkflowError::InvalidSchema("Workflow has no tasks".to_string()),
-                WorkflowError::CycleDetected(msg) => YamlWorkflowError::ConversionError(format!("Cycle detected: {:?}", msg)),
-                WorkflowError::TaskNotFound(id) => YamlWorkflowError::ConversionError(format!("Task not found: {}", id)),
-                WorkflowError::MissingDependency(id) => YamlWorkflowError::ConversionError(format!("Missing dependency: {}", id)),
-                WorkflowError::CheckpointCorrupted(msg) => YamlWorkflowError::ConversionError(format!("Checkpoint corrupted: {}", msg)),
-                WorkflowError::CheckpointNotFound(msg) => YamlWorkflowError::ConversionError(format!("Checkpoint not found: {}", msg)),
-                WorkflowError::WorkflowChanged(msg) => YamlWorkflowError::ConversionError(format!("Workflow changed: {}", msg)),
-                WorkflowError::Timeout(err) => YamlWorkflowError::ConversionError(format!("Timeout: {}", err)),
-                WorkflowError::TaskFailed(msg) => YamlWorkflowError::ConversionError(format!("Task failed: {}", msg)),
-            })?;
+        let workflow = builder.build().map_err(|e| match e {
+            WorkflowError::EmptyWorkflow => {
+                YamlWorkflowError::InvalidSchema("Workflow has no tasks".to_string())
+            }
+            WorkflowError::CycleDetected(msg) => {
+                YamlWorkflowError::ConversionError(format!("Cycle detected: {:?}", msg))
+            }
+            WorkflowError::TaskNotFound(id) => {
+                YamlWorkflowError::ConversionError(format!("Task not found: {}", id))
+            }
+            WorkflowError::MissingDependency(id) => {
+                YamlWorkflowError::ConversionError(format!("Missing dependency: {}", id))
+            }
+            WorkflowError::CheckpointCorrupted(msg) => {
+                YamlWorkflowError::ConversionError(format!("Checkpoint corrupted: {}", msg))
+            }
+            WorkflowError::CheckpointNotFound(msg) => {
+                YamlWorkflowError::ConversionError(format!("Checkpoint not found: {}", msg))
+            }
+            WorkflowError::WorkflowChanged(msg) => {
+                YamlWorkflowError::ConversionError(format!("Workflow changed: {}", msg))
+            }
+            WorkflowError::Timeout(err) => {
+                YamlWorkflowError::ConversionError(format!("Timeout: {}", err))
+            }
+            WorkflowError::TaskFailed(msg) => {
+                YamlWorkflowError::ConversionError(format!("Task failed: {}", msg))
+            }
+        })?;
 
         Ok(workflow)
     }
@@ -433,7 +462,10 @@ tasks:
         let result: Result<Workflow, _> = yaml_workflow.try_into();
 
         assert!(result.is_err());
-        assert!(matches!(result, Err(YamlWorkflowError::MissingParameter(_))));
+        assert!(matches!(
+            result,
+            Err(YamlWorkflowError::MissingParameter(_))
+        ));
     }
 
     #[test]
@@ -473,7 +505,10 @@ tasks:
         let result: Result<Workflow, _> = yaml_workflow.try_into();
 
         assert!(result.is_err());
-        assert!(matches!(result, Err(YamlWorkflowError::MissingParameter(_))));
+        assert!(matches!(
+            result,
+            Err(YamlWorkflowError::MissingParameter(_))
+        ));
     }
 
     #[test]
@@ -536,8 +571,8 @@ tasks:
 
     #[tokio::test]
     async fn test_load_from_file() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let yaml = r#"
 name: "File Workflow"
@@ -621,11 +656,20 @@ tasks:
         // Verify topological sort respects diamond pattern
         assert_eq!(execution_order[0], TaskId::new("a"));
         // B and C can be in either order after A
-        let b_index = execution_order.iter().position(|id| id == &TaskId::new("b")).unwrap();
-        let c_index = execution_order.iter().position(|id| id == &TaskId::new("c")).unwrap();
+        let b_index = execution_order
+            .iter()
+            .position(|id| id == &TaskId::new("b"))
+            .unwrap();
+        let c_index = execution_order
+            .iter()
+            .position(|id| id == &TaskId::new("c"))
+            .unwrap();
         assert!(b_index > 0 && c_index > 0);
         // D must be after both B and C
-        let d_index = execution_order.iter().position(|id| id == &TaskId::new("d")).unwrap();
+        let d_index = execution_order
+            .iter()
+            .position(|id| id == &TaskId::new("d"))
+            .unwrap();
         assert!(d_index > b_index && d_index > c_index);
     }
 }

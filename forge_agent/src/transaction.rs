@@ -150,15 +150,15 @@ impl Transaction {
                 }
             } else {
                 // File existed before - restore original content
-                tokio::fs::write(&snapshot.path, &snapshot.original_content).await.map_err(
-                    |e| {
+                tokio::fs::write(&snapshot.path, &snapshot.original_content)
+                    .await
+                    .map_err(|e| {
                         AgentError::MutationFailed(format!(
                             "Failed to restore file {}: {}",
                             snapshot.path.display(),
                             e
                         ))
-                    },
-                )?;
+                    })?;
             }
         }
 
@@ -219,7 +219,9 @@ mod tests {
     async fn test_snapshot_existing_file() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.rs");
-        tokio::fs::write(&file_path, "original content").await.unwrap();
+        tokio::fs::write(&file_path, "original content")
+            .await
+            .unwrap();
 
         let mut tx = Transaction::begin().await.unwrap();
         tx.snapshot_file(&file_path).await.unwrap();
@@ -243,12 +245,16 @@ mod tests {
     async fn test_rollback_restores_original_content() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.rs");
-        tokio::fs::write(&file_path, "original content").await.unwrap();
+        tokio::fs::write(&file_path, "original content")
+            .await
+            .unwrap();
 
         // Snapshot and modify
         let mut tx = Transaction::begin().await.unwrap();
         tx.snapshot_file(&file_path).await.unwrap();
-        tokio::fs::write(&file_path, "modified content").await.unwrap();
+        tokio::fs::write(&file_path, "modified content")
+            .await
+            .unwrap();
 
         // Rollback
         tx.rollback().await.unwrap();
@@ -295,14 +301,8 @@ mod tests {
         tx.rollback().await.unwrap();
 
         // Verify both files restored
-        assert_eq!(
-            tokio::fs::read_to_string(&file1).await.unwrap(),
-            "content1"
-        );
-        assert_eq!(
-            tokio::fs::read_to_string(&file2).await.unwrap(),
-            "content2"
-        );
+        assert_eq!(tokio::fs::read_to_string(&file1).await.unwrap(), "content1");
+        assert_eq!(tokio::fs::read_to_string(&file2).await.unwrap(), "content2");
     }
 
     #[tokio::test]

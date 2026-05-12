@@ -66,8 +66,8 @@ impl Confidence {
     /// - Returns error if the resulting posterior is invalid (NaN or out of bounds)
     pub fn update_with_evidence(
         self,
-        likelihood_h: f64,  // P(E|H)
-        likelihood_not_h: f64,  // P(E|¬H)
+        likelihood_h: f64,     // P(E|H)
+        likelihood_not_h: f64, // P(E|¬H)
     ) -> Result<Self, ConfidenceError> {
         let prior = self.0;
 

@@ -8,14 +8,14 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use crate::hypothesis::HypothesisBoard;
-use crate::hypothesis::types::HypothesisId;
-use crate::hypothesis::evidence::{EvidenceType, EvidenceMetadata};
-use crate::errors::Result;
 use super::check::{
-    VerificationCheck, CheckResult, CheckStatus, VerificationCommand,
-    PassAction, FailAction, CheckId,
+    CheckId, CheckResult, CheckStatus, FailAction, PassAction, VerificationCheck,
+    VerificationCommand,
 };
+use crate::errors::Result;
+use crate::hypothesis::evidence::{EvidenceMetadata, EvidenceType};
+use crate::hypothesis::types::HypothesisId;
+use crate::hypothesis::HypothesisBoard;
 
 /// Verification runner for async check execution
 pub struct VerificationRunner {
@@ -44,14 +44,7 @@ impl VerificationRunner {
         on_pass: Option<PassAction>,
         on_fail: Option<FailAction>,
     ) -> Result<CheckId> {
-        let check = VerificationCheck::new(
-            name,
-            hypothesis_id,
-            timeout,
-            command,
-            on_pass,
-            on_fail,
-        );
+        let check = VerificationCheck::new(name, hypothesis_id, timeout, command, on_pass, on_fail);
 
         let check_id = check.id;
         let mut checks = self.checks.lock().await;
@@ -68,7 +61,10 @@ impl VerificationRunner {
     /// List all checks
     pub async fn list_checks(&self) -> Vec<(CheckId, CheckStatus)> {
         let checks = self.checks.lock().await;
-        checks.iter().map(|(id, check)| (*id, check.status.clone())).collect()
+        checks
+            .iter()
+            .map(|(id, check)| (*id, check.status.clone()))
+            .collect()
     }
 
     /// Execute multiple checks in parallel
@@ -96,9 +92,13 @@ impl VerificationRunner {
                         let cmd = match &c.command {
                             VerificationCommand::ShellCommand(cmd) => cmd.clone(),
                             VerificationCommand::CustomAssertion { .. } => {
-                                return (check_id, CheckResult::Panic {
-                                    message: "Custom assertions not yet implemented".to_string()
-                                });
+                                return (
+                                    check_id,
+                                    CheckResult::Panic {
+                                        message: "Custom assertions not yet implemented"
+                                            .to_string(),
+                                    },
+                                );
                             }
                         };
 
@@ -127,7 +127,7 @@ impl VerificationRunner {
                             }
                             Err(e) => CheckResult::Panic {
                                 message: format!("Failed to execute: {}", e),
-                            }
+                            },
                         };
 
                         // Record evidence
@@ -143,12 +143,14 @@ impl VerificationRunner {
                             passed,
                         };
 
-                        let _ = board.attach_evidence(
-                            c.hypothesis_id,
-                            EvidenceType::Experiment,
-                            strength,
-                            metadata,
-                        ).await;
+                        let _ = board
+                            .attach_evidence(
+                                c.hypothesis_id,
+                                EvidenceType::Experiment,
+                                strength,
+                                metadata,
+                            )
+                            .await;
 
                         // Execute actions
                         if result.is_success() {
@@ -164,9 +166,12 @@ impl VerificationRunner {
                         result
                     }
                     None => {
-                        return (check_id, CheckResult::Panic {
-                            message: "Check not found".to_string()
-                        });
+                        return (
+                            check_id,
+                            CheckResult::Panic {
+                                message: "Check not found".to_string(),
+                            },
+                        );
                     }
                 };
 
@@ -206,14 +211,16 @@ mod tests {
         let prior = Confidence::new(0.5).unwrap();
         let h_id = board.propose("Test hypothesis", prior).await.unwrap();
 
-        let check_id = runner.register_check(
-            "test check".to_string(),
-            h_id,
-            VerificationCommand::ShellCommand("echo test".to_string()),
-            Duration::from_secs(5),
-            None,
-            None,
-        ).await;
+        let check_id = runner
+            .register_check(
+                "test check".to_string(),
+                h_id,
+                VerificationCommand::ShellCommand("echo test".to_string()),
+                Duration::from_secs(5),
+                None,
+                None,
+            )
+            .await;
 
         assert!(check_id.is_ok());
 
@@ -259,32 +266,41 @@ mod tests {
         let h3 = board.propose("H3", prior).await.unwrap();
 
         // Register 3 checks
-        let c1 = runner.register_check(
-            "check1".to_string(),
-            h1,
-            VerificationCommand::ShellCommand("sleep 0.1".to_string()),
-            Duration::from_secs(1),
-            None,
-            None,
-        ).await.unwrap();
+        let c1 = runner
+            .register_check(
+                "check1".to_string(),
+                h1,
+                VerificationCommand::ShellCommand("sleep 0.1".to_string()),
+                Duration::from_secs(1),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
-        let c2 = runner.register_check(
-            "check2".to_string(),
-            h2,
-            VerificationCommand::ShellCommand("sleep 0.1".to_string()),
-            Duration::from_secs(1),
-            None,
-            None,
-        ).await.unwrap();
+        let c2 = runner
+            .register_check(
+                "check2".to_string(),
+                h2,
+                VerificationCommand::ShellCommand("sleep 0.1".to_string()),
+                Duration::from_secs(1),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
-        let c3 = runner.register_check(
-            "check3".to_string(),
-            h3,
-            VerificationCommand::ShellCommand("sleep 0.1".to_string()),
-            Duration::from_secs(1),
-            None,
-            None,
-        ).await.unwrap();
+        let c3 = runner
+            .register_check(
+                "check3".to_string(),
+                h3,
+                VerificationCommand::ShellCommand("sleep 0.1".to_string()),
+                Duration::from_secs(1),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         // Execute all 3
         let results = runner.execute_checks(vec![c1, c2, c3]).await;

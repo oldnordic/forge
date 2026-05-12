@@ -232,7 +232,10 @@ impl WorkflowTask for ParallelTasks {
                 TaskResult::Success => continue,
                 TaskResult::Failed(msg) => return Ok(TaskResult::Failed(msg)),
                 TaskResult::Skipped => continue,
-                TaskResult::WithCompensation { result, compensation: _ } => {
+                TaskResult::WithCompensation {
+                    result,
+                    compensation: _,
+                } => {
                     // Note: ParallelTasks doesn't have access to compensation registry
                     // Compensations are lost - this is a known limitation
                     // For proper compensation handling, use DAG-level parallel execution
@@ -465,7 +468,15 @@ mod tests {
 
         // Sequential execution should complete in ~100ms (not ~50ms)
         // Allow some tolerance for scheduling overhead
-        assert!(elapsed.as_millis() >= 80, "Expected ~100ms sequential but got {}ms", elapsed.as_millis());
-        assert!(elapsed.as_millis() < 150, "Expected ~100ms but got {}ms", elapsed.as_millis());
+        assert!(
+            elapsed.as_millis() >= 80,
+            "Expected ~100ms sequential but got {}ms",
+            elapsed.as_millis()
+        );
+        assert!(
+            elapsed.as_millis() < 150,
+            "Expected ~100ms but got {}ms",
+            elapsed.as_millis()
+        );
     }
 }

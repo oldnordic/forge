@@ -4,7 +4,7 @@ use crate::checkpoint::{CheckpointId, CheckpointSummary, SessionId, TemporalChec
 use crate::errors::{ReasoningError, Result, StorageError};
 
 /// Storage backend trait for checkpoints
-/// 
+///
 /// Thread-safe version requires Send + Sync
 pub trait CheckpointStorage: Send + Sync {
     /// Store a checkpoint
@@ -87,15 +87,20 @@ pub fn create_storage(config: &StorageConfig) -> Result<Box<dyn CheckpointStorag
         BackendKind::SQLite => {
             // Check if path is empty - use in-memory storage for testing
             let storage = if config.path.as_os_str().is_empty() {
-                crate::storage_sqlitegraph::SqliteGraphStorage::in_memory()
-                    .map_err(|e| ReasoningError::Storage(StorageError::ConnectionFailed(
-                        format!("Failed to create in-memory SQLite storage: {}", e)
-                    )))?
+                crate::storage_sqlitegraph::SqliteGraphStorage::in_memory().map_err(|e| {
+                    ReasoningError::Storage(StorageError::ConnectionFailed(format!(
+                        "Failed to create in-memory SQLite storage: {}",
+                        e
+                    )))
+                })?
             } else {
-                crate::storage_sqlitegraph::SqliteGraphStorage::open(&config.path)
-                    .map_err(|e| ReasoningError::Storage(StorageError::ConnectionFailed(
-                        format!("Failed to open SQLite storage at {}: {}", config.path.display(), e)
-                    )))?
+                crate::storage_sqlitegraph::SqliteGraphStorage::open(&config.path).map_err(|e| {
+                    ReasoningError::Storage(StorageError::ConnectionFailed(format!(
+                        "Failed to open SQLite storage at {}: {}",
+                        config.path.display(),
+                        e
+                    )))
+                })?
             };
             Ok(Box::new(storage))
         }
@@ -131,7 +136,11 @@ mod tests {
         // by calling a method that requires the trait
         let max_seq = storage.get_max_sequence();
         assert!(max_seq.is_ok(), "Should call get_max_sequence");
-        assert_eq!(max_seq.unwrap(), 0, "New storage should have max sequence 0");
+        assert_eq!(
+            max_seq.unwrap(),
+            0,
+            "New storage should have max sequence 0"
+        );
     }
 
     /// Test SQLite backend creation with empty path (in-memory)
@@ -203,17 +212,26 @@ mod tests {
         // 3. Test list_by_session (empty list)
         let list = storage.list_by_session(session_id);
         assert!(list.is_ok(), "list_by_session should work");
-        assert!(list.unwrap().is_empty(), "New storage should have no checkpoints");
+        assert!(
+            list.unwrap().is_empty(),
+            "New storage should have no checkpoints"
+        );
 
         // 4. Test list_by_tag (empty list)
         let list = storage.list_by_tag("test-tag");
         assert!(list.is_ok(), "list_by_tag should work");
-        assert!(list.unwrap().is_empty(), "New storage should have no checkpoints");
+        assert!(
+            list.unwrap().is_empty(),
+            "New storage should have no checkpoints"
+        );
 
         // 5. Test get_latest (None for new session)
         let latest = storage.get_latest(session_id);
         assert!(latest.is_ok(), "get_latest should work");
-        assert!(latest.unwrap().is_none(), "New storage should have no latest checkpoint");
+        assert!(
+            latest.unwrap().is_none(),
+            "New storage should have no latest checkpoint"
+        );
     }
 
     /// Test SQLite backend can store and retrieve checkpoints

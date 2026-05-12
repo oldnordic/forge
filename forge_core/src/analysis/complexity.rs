@@ -26,7 +26,7 @@ impl ComplexityMetrics {
         let edges = count_edges(cfg);
         let nodes = count_nodes(cfg);
         let connected_components = 1; // Assuming single entry point
-        
+
         // Cyclomatic complexity: CC = E - N + 2P
         // For a connected graph with a single entry/exit, this gives the number
         // of linearly independent paths through the code
@@ -39,10 +39,10 @@ impl ComplexityMetrics {
             let p = connected_components as isize;
             ((e - n + 2 * p).max(1)) as usize
         };
-        
+
         let decision_points = count_decision_points(cfg);
         let max_depth = calculate_max_depth(cfg);
-        
+
         Self {
             cyclomatic_complexity: cc,
             decision_points,
@@ -50,7 +50,7 @@ impl ComplexityMetrics {
             lines_of_code,
         }
     }
-    
+
     /// Returns a risk assessment based on complexity
     pub fn risk_level(&self) -> RiskLevel {
         match self.cyclomatic_complexity {
@@ -60,7 +60,7 @@ impl ComplexityMetrics {
             _ => RiskLevel::VeryHigh,
         }
     }
-    
+
     /// Check if complexity exceeds threshold
     pub fn is_complex(&self, threshold: usize) -> bool {
         self.cyclomatic_complexity > threshold
@@ -96,14 +96,14 @@ fn count_edges(cfg: &TestCfg) -> usize {
 fn count_nodes(cfg: &TestCfg) -> usize {
     let mut nodes: std::collections::HashSet<BlockId> = std::collections::HashSet::new();
     nodes.insert(cfg.entry);
-    
+
     for (from, tos) in &cfg.successors {
         nodes.insert(*from);
         for to in tos {
             nodes.insert(*to);
         }
     }
-    
+
     nodes.len()
 }
 
@@ -120,7 +120,7 @@ fn count_decision_points(cfg: &TestCfg) -> usize {
 fn calculate_max_depth(cfg: &TestCfg) -> usize {
     let mut max_depth = 0;
     let mut visited = std::collections::HashSet::new();
-    
+
     fn dfs(
         cfg: &TestCfg,
         node: BlockId,
@@ -132,16 +132,16 @@ fn calculate_max_depth(cfg: &TestCfg) -> usize {
             return;
         }
         visited.insert(node);
-        
+
         *max_depth = (*max_depth).max(depth);
-        
+
         if let Some(succs) = cfg.successors.get(&node) {
             for succ in succs {
                 dfs(cfg, *succ, depth + 1, visited, max_depth);
             }
         }
     }
-    
+
     dfs(cfg, cfg.entry, 1, &mut visited, &mut max_depth);
     max_depth
 }
@@ -149,32 +149,49 @@ fn calculate_max_depth(cfg: &TestCfg) -> usize {
 /// Analyze source code to estimate complexity without full CFG
 pub fn analyze_source_complexity(source: &str) -> ComplexityMetrics {
     let lines_of_code = source.lines().count();
-    
+
     // Count decision keywords
     let decision_keywords = [
-        "if ", "if(", "else if", "match ", "match{",
-        "for ", "for(", "while ", "while(", "loop ", "loop{",
-        "&&", "||", "?", "unwrap_or", "ok_or",
+        "if ",
+        "if(",
+        "else if",
+        "match ",
+        "match{",
+        "for ",
+        "for(",
+        "while ",
+        "while(",
+        "loop ",
+        "loop{",
+        "&&",
+        "||",
+        "?",
+        "unwrap_or",
+        "ok_or",
     ];
-    
+
     let mut decision_points = 0;
     for keyword in &decision_keywords {
         decision_points += source.matches(keyword).count();
     }
-    
+
     // Estimate nesting depth by counting indentation levels
     let max_depth = source
         .lines()
         .map(|line| {
             let indent = line.len() - line.trim_start().len();
-            if indent > 0 { indent / 4 } else { 0 }
+            if indent > 0 {
+                indent / 4
+            } else {
+                0
+            }
         })
         .max()
         .unwrap_or(0);
-    
+
     // Estimate cyclomatic complexity: decisions + 1
     let cc = decision_points + 1;
-    
+
     ComplexityMetrics {
         cyclomatic_complexity: cc,
         decision_points,
@@ -186,18 +203,18 @@ pub fn analyze_source_complexity(source: &str) -> ComplexityMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_simple_function_complexity() {
         let cfg = TestCfg::new(BlockId(0));
         let metrics = ComplexityMetrics::from_cfg(&cfg, 10);
-        
+
         // For a simple CFG with 1 node and 0 edges:
         // CC = E - N + 2P = 0 - 1 + 2*1 = 1
         assert_eq!(metrics.cyclomatic_complexity, 1);
         assert_eq!(metrics.decision_points, 0);
     }
-    
+
     #[test]
     fn test_risk_levels() {
         let low = ComplexityMetrics {
@@ -207,7 +224,7 @@ mod tests {
             lines_of_code: 20,
         };
         assert_eq!(low.risk_level(), RiskLevel::Low);
-        
+
         let medium = ComplexityMetrics {
             cyclomatic_complexity: 15,
             decision_points: 14,
@@ -215,7 +232,7 @@ mod tests {
             lines_of_code: 50,
         };
         assert_eq!(medium.risk_level(), RiskLevel::Medium);
-        
+
         let high = ComplexityMetrics {
             cyclomatic_complexity: 30,
             decision_points: 29,
@@ -224,7 +241,7 @@ mod tests {
         };
         assert_eq!(high.risk_level(), RiskLevel::High);
     }
-    
+
     #[test]
     fn test_analyze_source_complexity() {
         let source = r#"
@@ -239,7 +256,7 @@ mod tests {
                 x
             }
         "#;
-        
+
         let metrics = analyze_source_complexity(source);
         assert!(metrics.cyclomatic_complexity >= 3); // if + else if
         assert!(metrics.lines_of_code > 0);

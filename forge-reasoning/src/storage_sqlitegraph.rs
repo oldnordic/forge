@@ -7,7 +7,10 @@ use std::path::Path;
 use chrono::Utc;
 use sqlitegraph::{GraphEntity, SqliteGraph};
 
-use crate::checkpoint::{CheckpointId, CheckpointSummary, SessionId, TemporalCheckpoint, DebugStateSnapshot, CheckpointTrigger, AutoTrigger};
+use crate::checkpoint::{
+    AutoTrigger, CheckpointId, CheckpointSummary, CheckpointTrigger, DebugStateSnapshot, SessionId,
+    TemporalCheckpoint,
+};
 use crate::errors::{Result, StorageError};
 use crate::storage::CheckpointStorage;
 
@@ -62,12 +65,13 @@ impl SqliteGraphStorage {
     /// Load all checkpoints from SQLite into cache
     fn load_from_disk(&self) -> Result<()> {
         let graph = self.graph.borrow();
-        let entity_ids = graph.list_entity_ids()
-            .map_err(|e| StorageError::RetrieveFailed(format!("Failed to load entity IDs: {}", e)))?;
-        
+        let entity_ids = graph.list_entity_ids().map_err(|e| {
+            StorageError::RetrieveFailed(format!("Failed to load entity IDs: {}", e))
+        })?;
+
         let mut cache = self.cache.borrow_mut();
         cache.clear();
-        
+
         for entity_id in entity_ids {
             if let Ok(entity) = graph.get_entity(entity_id) {
                 if entity.kind == "Checkpoint" {
@@ -77,72 +81,84 @@ impl SqliteGraphStorage {
                 }
             }
         }
-        
+
         Ok(())
     }
 
     /// Convert a GraphEntity to TemporalCheckpoint
     fn entity_to_checkpoint(&self, entity: &GraphEntity) -> Result<TemporalCheckpoint> {
         let data = &entity.data;
-        
-        let state_data = data.get("state_data")
+
+        let state_data = data
+            .get("state_data")
             .and_then(|v| v.as_str())
             .ok_or_else(|| StorageError::RetrieveFailed("Missing state data".to_string()))?;
-        
-        let state: DebugStateSnapshot = serde_json::from_str(state_data)
-            .map_err(|e| StorageError::RetrieveFailed(format!("Failed to deserialize state: {}", e)))?;
-        
+
+        let state: DebugStateSnapshot = serde_json::from_str(state_data).map_err(|e| {
+            StorageError::RetrieveFailed(format!("Failed to deserialize state: {}", e))
+        })?;
+
         // Parse checkpoint ID from string
-        let id_str = data.get("id")
+        let id_str = data
+            .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| StorageError::RetrieveFailed("Missing checkpoint ID".to_string()))?;
         let checkpoint_id = parse_checkpoint_id(id_str)?;
-        
+
         // Parse timestamp
-        let timestamp_str = data.get("timestamp")
+        let timestamp_str = data
+            .get("timestamp")
             .and_then(|v| v.as_str())
             .ok_or_else(|| StorageError::RetrieveFailed("Missing timestamp".to_string()))?;
         let timestamp = chrono::DateTime::parse_from_rfc3339(timestamp_str)
             .map_err(|e| StorageError::RetrieveFailed(format!("Invalid timestamp: {}", e)))?
             .with_timezone(&Utc);
-        
+
         // Parse sequence number
-        let sequence_number = data.get("sequence_number")
+        let sequence_number = data
+            .get("sequence_number")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| StorageError::RetrieveFailed("Missing sequence number".to_string()))?;
-        
+
         // Parse message
-        let message = data.get("message")
+        let message = data
+            .get("message")
             .and_then(|v: &serde_json::Value| v.as_str())
             .unwrap_or("")
             .to_string();
-        
+
         // Parse tags
-        let tags = data.get("tags")
+        let tags = data
+            .get("tags")
             .and_then(|v: &serde_json::Value| v.as_array())
-            .map(|arr: &Vec<serde_json::Value>| arr.iter()
-                .filter_map(|v: &serde_json::Value| v.as_str().map(String::from))
-                .collect())
+            .map(|arr: &Vec<serde_json::Value>| {
+                arr.iter()
+                    .filter_map(|v: &serde_json::Value| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
-        
+
         // Parse session ID
-        let session_id_str = data.get("session_id")
+        let session_id_str = data
+            .get("session_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| StorageError::RetrieveFailed("Missing session ID".to_string()))?;
         let session_id = parse_session_id(session_id_str)?;
-        
+
         // Parse trigger
-        let trigger_str = data.get("trigger")
+        let trigger_str = data
+            .get("trigger")
             .and_then(|v| v.as_str())
             .unwrap_or("manual");
         let trigger = parse_trigger(trigger_str);
-        
+
         // Parse checksum (may not exist for legacy checkpoints)
-        let checksum = data.get("checksum")
+        let checksum = data
+            .get("checksum")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        
+
         Ok(TemporalCheckpoint {
             id: checkpoint_id,
             timestamp,
@@ -184,11 +200,14 @@ impl CheckpointStorage for SqliteGraphStorage {
 
         // Insert into graph
         let graph = self.graph.borrow();
-        let _entity_id = graph.insert_entity(&entity)
+        let _entity_id = graph
+            .insert_entity(&entity)
             .map_err(|e| StorageError::StoreFailed(format!("Failed to insert: {}", e)))?;
 
         // Also store in cache for easy retrieval
-        self.cache.borrow_mut().insert(checkpoint.id, checkpoint.clone());
+        self.cache
+            .borrow_mut()
+            .insert(checkpoint.id, checkpoint.clone());
 
         tracing::debug!("Stored checkpoint {}", checkpoint.id);
         Ok(())
@@ -199,17 +218,18 @@ impl CheckpointStorage for SqliteGraphStorage {
         if let Some(cp) = self.cache.borrow().get(&id) {
             return Ok(cp.clone());
         }
-        
+
         Err(StorageError::RetrieveFailed(format!("Checkpoint not found: {}", id)).into())
     }
 
     fn get_latest(&self, session_id: SessionId) -> Result<Option<TemporalCheckpoint>> {
         let checkpoints = self.list_by_session(session_id)?;
-        
+
         // Get the one with highest sequence number
-        let latest = checkpoints.iter()
+        let latest = checkpoints
+            .iter()
             .max_by_key(|c: &&CheckpointSummary| c.sequence_number);
-        
+
         match latest {
             Some(summary) => self.get(summary.id).map(Some),
             None => Ok(None),
@@ -219,7 +239,7 @@ impl CheckpointStorage for SqliteGraphStorage {
     fn list_by_session(&self, session_id: SessionId) -> Result<Vec<CheckpointSummary>> {
         let cache = self.cache.borrow();
         let mut summaries = Vec::new();
-        
+
         for (_, checkpoint) in cache.iter() {
             if checkpoint.session_id == session_id {
                 summaries.push(CheckpointSummary {
@@ -233,17 +253,17 @@ impl CheckpointStorage for SqliteGraphStorage {
                 });
             }
         }
-        
+
         // Sort by sequence number
         summaries.sort_by_key(|s: &CheckpointSummary| s.sequence_number);
-        
+
         Ok(summaries)
     }
 
     fn list_by_tag(&self, tag: &str) -> Result<Vec<CheckpointSummary>> {
         let cache = self.cache.borrow();
         let mut summaries = Vec::new();
-        
+
         for (_, checkpoint) in cache.iter() {
             if checkpoint.tags.contains(&tag.to_string()) {
                 summaries.push(CheckpointSummary {
@@ -257,21 +277,21 @@ impl CheckpointStorage for SqliteGraphStorage {
                 });
             }
         }
-        
+
         // Sort by sequence number
         summaries.sort_by_key(|s: &CheckpointSummary| s.sequence_number);
-        
+
         Ok(summaries)
     }
 
     fn delete(&self, id: CheckpointId) -> Result<()> {
         // Remove from cache
         self.cache.borrow_mut().remove(&id);
-        
+
         // Try to remove from SQLite (best effort)
         // Note: This requires entity ID lookup which we don't track
         // For MVP, cache removal is sufficient
-        
+
         Ok(())
     }
 
@@ -281,7 +301,8 @@ impl CheckpointStorage for SqliteGraphStorage {
 
     fn get_max_sequence(&self) -> Result<u64> {
         let cache = self.cache.borrow();
-        let max_seq = cache.values()
+        let max_seq = cache
+            .values()
             .map(|cp| cp.sequence_number)
             .max()
             .unwrap_or(0);

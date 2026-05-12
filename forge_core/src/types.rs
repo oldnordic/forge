@@ -146,7 +146,10 @@ pub enum SymbolKind {
 impl SymbolKind {
     /// Returns true if this symbol represents a type declaration.
     pub fn is_type(&self) -> bool {
-        matches!(self, Self::Struct | Self::Enum | Self::Trait | Self::TypeAlias)
+        matches!(
+            self,
+            Self::Struct | Self::Enum | Self::Trait | Self::TypeAlias
+        )
     }
 
     /// Returns true if this symbol represents a function or method.
@@ -323,8 +326,10 @@ mod tests {
 
     #[test]
     fn test_path_id_display() {
-        let id = PathId([0x01, 0x02, 0xab, 0xcd, 0x00, 0x00, 0x00, 0x00,
-                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        let id = PathId([
+            0x01, 0x02, 0xab, 0xcd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00,
+        ]);
         let display = id.to_string();
         assert!(display.contains("01:02:ab:cd"));
     }
@@ -350,7 +355,10 @@ mod tests {
     fn test_path_id_empty() {
         let bytes = [0u8; 16];
         let id = PathId(bytes);
-        assert_eq!(id.to_string(), "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00");
+        assert_eq!(
+            id.to_string(),
+            "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"
+        );
     }
 
     // Location Tests (5 tests)

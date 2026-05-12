@@ -8,22 +8,22 @@
 //! - Snapshot revert: Undo changes within a time window
 //! - Pagination: Handle large cascades efficiently
 
-pub mod propagation;
 pub mod preview;
+pub mod propagation;
 pub mod snapshot;
 
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::belief::BeliefGraph;
-use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
 use crate::errors::Result;
+use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
 
 // Re-exports from submodules
-pub use propagation::{PropagationConfig, PropagationResult, ConfidenceChange, CascadeError};
-pub use preview::{CascadePreview, PreviewId, PreviewPage, PaginationState, CycleWarning};
-pub use snapshot::{SnapshotId, BeliefSnapshot, SnapshotStore};
+pub use preview::{CascadePreview, CycleWarning, PaginationState, PreviewId, PreviewPage};
+pub use propagation::{CascadeError, ConfidenceChange, PropagationConfig, PropagationResult};
+pub use snapshot::{BeliefSnapshot, SnapshotId, SnapshotStore};
 
 /// Impact analysis engine with two-step preview/confirm API
 ///
@@ -43,10 +43,7 @@ pub struct ImpactAnalysisEngine {
 
 impl ImpactAnalysisEngine {
     /// Create a new impact analysis engine
-    pub fn new(
-        board: Arc<HypothesisBoard>,
-        graph: Arc<BeliefGraph>,
-    ) -> Self {
+    pub fn new(board: Arc<HypothesisBoard>, graph: Arc<BeliefGraph>) -> Self {
         Self {
             board,
             graph,
@@ -101,7 +98,8 @@ impl ImpactAnalysisEngine {
             &self.graph,
             &self.propagation_config,
             self.page_size,
-        ).await?;
+        )
+        .await?;
 
         // Cache the preview for confirm()
         let mut cache = self.preview_cache.lock().await;
@@ -115,16 +113,15 @@ impl ImpactAnalysisEngine {
     ///
     /// Applies the confidence changes computed in the preview step.
     /// Returns error if preview_id not found or expired.
-    pub async fn confirm(
-        &self,
-        preview_id: &PreviewId,
-    ) -> Result<PropagationResult> {
+    pub async fn confirm(&self, preview_id: &PreviewId) -> Result<PropagationResult> {
         // Retrieve preview from cache
         let cache = self.preview_cache.lock().await;
-        let preview = cache.get(preview_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Preview {} not found or expired", preview_id)
-            ))?;
+        let preview = cache.get(preview_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!(
+                "Preview {} not found or expired",
+                preview_id
+            ))
+        })?;
         let result = preview.result.clone();
         drop(cache);
 
@@ -144,25 +141,21 @@ impl ImpactAnalysisEngine {
         preview_id: &PreviewId,
         page_number: usize,
     ) -> Result<PreviewPage> {
-        let cache = self.preview_cache
-            .try_lock()
-            .map_err(|_| crate::errors::ReasoningError::InvalidState(
-                "Failed to acquire preview cache lock".to_string()
-            ))?;
+        let cache = self.preview_cache.try_lock().map_err(|_| {
+            crate::errors::ReasoningError::InvalidState(
+                "Failed to acquire preview cache lock".to_string(),
+            )
+        })?;
 
-        let preview = cache.get(preview_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Preview {} not found", preview_id)
-            ))?;
+        let preview = cache.get(preview_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!("Preview {} not found", preview_id))
+        })?;
 
         Ok(preview::get_page(preview, page_number))
     }
 
     /// Query impact radius (count of affected hypotheses)
-    pub async fn impact_radius(
-        &self,
-        start: HypothesisId,
-    ) -> Result<usize> {
+    pub async fn impact_radius(&self, start: HypothesisId) -> Result<usize> {
         propagation::impact_radius(start, &self.graph).await
     }
 
@@ -170,21 +163,17 @@ impl ImpactAnalysisEngine {
     ///
     /// Restores hypotheses and dependencies from the snapshot.
     /// Returns error if snapshot not found or expired.
-    pub async fn revert(
-        &self,
-        snapshot_id: &SnapshotId,
-    ) -> Result<()> {
+    pub async fn revert(&self, snapshot_id: &SnapshotId) -> Result<()> {
         let snapshots: tokio::sync::MutexGuard<'_, SnapshotStore> = self.snapshots.lock().await;
-        snapshots.restore(snapshot_id, &self.board, &self.graph).await
+        snapshots
+            .restore(snapshot_id, &self.board, &self.graph)
+            .await
     }
 
     /// List all active snapshots
     pub async fn list_snapshots(&self) -> Vec<BeliefSnapshot> {
         let snapshots: tokio::sync::MutexGuard<'_, SnapshotStore> = self.snapshots.lock().await;
-        snapshots.list_snapshots()
-            .into_iter()
-            .cloned()
-            .collect()
+        snapshots.list_snapshots().into_iter().cloned().collect()
     }
 
     /// Get snapshot data for inspection
@@ -219,11 +208,7 @@ mod tests {
             max_cascade_size: 5000,
         };
 
-        let engine = ImpactAnalysisEngine::with_config(
-            board,
-            graph,
-            config,
-        );
+        let engine = ImpactAnalysisEngine::with_config(board, graph, config);
 
         assert_eq!(engine.propagation_config.decay_factor, 0.9);
         assert_eq!(engine.propagation_config.min_confidence, 0.2);
@@ -235,8 +220,7 @@ mod tests {
         let board = Arc::new(HypothesisBoard::in_memory());
         let graph = Arc::new(BeliefGraph::new());
 
-        let engine = ImpactAnalysisEngine::new(board, graph)
-            .with_page_size(100);
+        let engine = ImpactAnalysisEngine::new(board, graph).with_page_size(100);
 
         assert_eq!(engine.page_size, 100);
     }
@@ -251,7 +235,8 @@ mod tests {
         let prior = Confidence::new(0.5).unwrap();
         let h_id = board.propose("Test", prior).await.unwrap();
 
-        let preview = engine.preview(h_id, Confidence::new(0.8).unwrap())
+        let preview = engine
+            .preview(h_id, Confidence::new(0.8).unwrap())
             .await
             .unwrap();
 
@@ -287,7 +272,8 @@ mod tests {
         let h_id = board.propose("Test", prior).await.unwrap();
 
         // Create preview (which saves snapshot)
-        engine.preview(h_id, Confidence::new(0.8).unwrap())
+        engine
+            .preview(h_id, Confidence::new(0.8).unwrap())
             .await
             .unwrap();
 
@@ -306,7 +292,8 @@ mod tests {
         let h_id = board.propose("Test", prior).await.unwrap();
 
         // Create preview
-        engine.preview(h_id, Confidence::new(0.8).unwrap())
+        engine
+            .preview(h_id, Confidence::new(0.8).unwrap())
             .await
             .unwrap();
 
@@ -343,7 +330,8 @@ mod tests {
         let h_id = board.propose("Test", prior).await.unwrap();
 
         // Step 1: Preview
-        let preview = engine.preview(h_id, Confidence::new(0.8).unwrap())
+        let preview = engine
+            .preview(h_id, Confidence::new(0.8).unwrap())
             .await
             .unwrap();
 
@@ -352,8 +340,7 @@ mod tests {
         assert_eq!(hypothesis.current_confidence().get(), 0.5);
 
         // Step 2: Confirm
-        let _result = engine.confirm(&preview.preview_id).await
-            .unwrap();
+        let _result = engine.confirm(&preview.preview_id).await.unwrap();
 
         // Now changes should be applied
         // (In full implementation, this would update the board)
@@ -369,13 +356,13 @@ mod tests {
         let prior = Confidence::new(0.5).unwrap();
         let h_id = board.propose("Test", prior).await.unwrap();
 
-        let preview = engine.preview(h_id, Confidence::new(0.8).unwrap())
+        let preview = engine
+            .preview(h_id, Confidence::new(0.8).unwrap())
             .await
             .unwrap();
 
         // Should be able to get page from cached preview
-        let page = engine.get_preview_page(&preview.preview_id, 0)
-            .unwrap();
+        let page = engine.get_preview_page(&preview.preview_id, 0).unwrap();
 
         assert_eq!(page.page_number, 0);
     }

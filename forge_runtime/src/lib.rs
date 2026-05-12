@@ -40,10 +40,10 @@ use anyhow::Context as _;
 use tokio::sync::Mutex;
 
 // Re-export forge_core types
-pub use forge_core::{Watcher, WatchEvent, IncrementalIndexer, PathFilter, QueryCache, FlushStats};
+pub use forge_core::{FlushStats, IncrementalIndexer, PathFilter, QueryCache, WatchEvent, Watcher};
 
 pub mod metrics;
-pub use metrics::{RuntimeMetrics, MetricKind, MetricsSummary};
+pub use metrics::{MetricKind, MetricsSummary, RuntimeMetrics};
 
 /// Runtime configuration for indexing and caching.
 #[derive(Clone, Debug)]
@@ -130,14 +130,16 @@ impl ForgeRuntime {
         codebase_path: impl AsRef<Path>,
         config: RuntimeConfig,
     ) -> anyhow::Result<Self> {
-        let codebase_path = codebase_path.as_ref().canonicalize()
+        let codebase_path = codebase_path
+            .as_ref()
+            .canonicalize()
             .context("Failed to canonicalize codebase path")?;
 
         // Initialize the graph store
         let store = Arc::new(
             forge_core::UnifiedGraphStore::open(&codebase_path, forge_core::BackendKind::default())
                 .await
-                .context("Failed to open graph store")?
+                .context("Failed to open graph store")?,
         );
 
         // Create indexer with path filter
@@ -177,8 +179,14 @@ impl ForgeRuntime {
             return Err(anyhow::anyhow!("File watching is already active"));
         }
 
-        let store = self.store.clone().ok_or_else(|| anyhow::anyhow!("Store not initialized"))?;
-        let indexer = self.indexer.clone().ok_or_else(|| anyhow::anyhow!("Indexer not initialized"))?;
+        let store = self
+            .store
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Store not initialized"))?;
+        let indexer = self
+            .indexer
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Indexer not initialized"))?;
 
         // Create watcher channel
         let (tx, rx) = Watcher::channel();
@@ -190,11 +198,16 @@ impl ForgeRuntime {
 
         // Verify directory exists before watching
         if !watch_path.exists() {
-            return Err(anyhow::anyhow!("Watch directory does not exist: {}", watch_path.display()));
+            return Err(anyhow::anyhow!(
+                "Watch directory does not exist: {}",
+                watch_path.display()
+            ));
         }
 
         if let Some(watcher) = &self.watcher {
-            watcher.start(watch_path.clone()).await
+            watcher
+                .start(watch_path.clone())
+                .await
                 .context("Failed to start file watcher")?;
         }
 
@@ -250,7 +263,8 @@ impl ForgeRuntime {
 
     /// Stops the file watcher.
     pub async fn stop_watching(&mut self) -> anyhow::Result<()> {
-        self.watch_active.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.watch_active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         if let Some(handle) = self.watch_handle.lock().await.take() {
             handle.await.ok();
@@ -280,7 +294,11 @@ impl ForgeRuntime {
     /// Gets runtime statistics.
     pub fn stats(&self) -> RuntimeStats {
         RuntimeStats {
-            cache_size: self.cache.as_ref().map(|c| futures::executor::block_on(c.len())).unwrap_or(0),
+            cache_size: self
+                .cache
+                .as_ref()
+                .map(|c| futures::executor::block_on(c.len()))
+                .unwrap_or(0),
             watch_active: self.watch_active.load(std::sync::atomic::Ordering::Relaxed),
             reindex_count: self.metrics.count(MetricKind::Reindex),
             metrics: self.metrics.summary(),
@@ -301,7 +319,8 @@ impl ForgeRuntime {
 impl Drop for ForgeRuntime {
     fn drop(&mut self) {
         // Signal shutdown
-        self.watch_active.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.watch_active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -321,7 +340,9 @@ mod tests {
     async fn test_runtime_creation() {
         let temp = tempfile::tempdir().unwrap();
         let config = RuntimeConfig::default();
-        let runtime = ForgeRuntime::with_config(temp.path(), config).await.unwrap();
+        let runtime = ForgeRuntime::with_config(temp.path(), config)
+            .await
+            .unwrap();
 
         let stats = runtime.stats();
         assert_eq!(stats.cache_size, 0);
@@ -339,7 +360,9 @@ mod tests {
             watch_dir: "src".to_string(),
         };
 
-        let runtime = ForgeRuntime::with_config(temp.path(), config).await.unwrap();
+        let runtime = ForgeRuntime::with_config(temp.path(), config)
+            .await
+            .unwrap();
 
         assert_eq!(runtime.config().debounce_ms, 1000);
         assert_eq!(runtime.config().cache_size, 100);
@@ -404,7 +427,9 @@ mod tests {
             ..Default::default()
         };
 
-        let mut runtime = ForgeRuntime::with_config(temp.path(), config).await.unwrap();
+        let mut runtime = ForgeRuntime::with_config(temp.path(), config)
+            .await
+            .unwrap();
 
         assert!(runtime.watch().await.is_err());
     }
@@ -418,7 +443,9 @@ mod tests {
             ..Default::default()
         };
 
-        let mut runtime = ForgeRuntime::with_config(temp.path(), config).await.unwrap();
+        let mut runtime = ForgeRuntime::with_config(temp.path(), config)
+            .await
+            .unwrap();
 
         assert!(runtime.watch().await.is_err());
     }

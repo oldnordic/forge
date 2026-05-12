@@ -10,7 +10,9 @@ use crate::workflow::checkpoint::{
 };
 use crate::workflow::dag::Workflow;
 use crate::workflow::deadlock::{DeadlockDetector, DeadlockError};
-use crate::workflow::rollback::{CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation};
+use crate::workflow::rollback::{
+    CompensationRegistry, RollbackEngine, RollbackReport, RollbackStrategy, ToolCompensation,
+};
 use crate::workflow::state::TaskStatus;
 use crate::workflow::task::{TaskContext, TaskId, TaskResult};
 use crate::workflow::timeout::{TimeoutConfig, TimeoutError};
@@ -263,7 +265,9 @@ impl WorkflowExecutor {
     /// }
     /// ```
     pub fn cancellation_token(&self) -> Option<crate::workflow::cancellation::CancellationToken> {
-        self.cancellation_source.as_ref().map(|source| source.token())
+        self.cancellation_source
+            .as_ref()
+            .map(|source| source.token())
     }
 
     /// Cancels the workflow execution.
@@ -462,7 +466,8 @@ impl WorkflowExecutor {
     /// );
     /// ```
     pub fn register_file_compensation(&mut self, task_id: TaskId, file_path: impl Into<String>) {
-        self.compensation_registry.register_file_creation(task_id, file_path);
+        self.compensation_registry
+            .register_file_creation(task_id, file_path);
     }
 
     /// Validates compensation coverage for all workflow tasks.
@@ -554,7 +559,9 @@ impl WorkflowExecutor {
                 Ok(result) => result,
                 Err(e) => {
                     // Task failed - trigger rollback
-                    return self.handle_task_failure(&workflow_id, task_id, &e.to_string()).await;
+                    return self
+                        .handle_task_failure(&workflow_id, task_id, &e.to_string())
+                        .await;
                 }
             };
 
@@ -567,18 +574,15 @@ impl WorkflowExecutor {
             // Task completed - run validation if configured
             if let Some(validation_config) = &self.validation_config {
                 // Get task name for logging
-                let node_idx = self
-                    .workflow
-                    .task_map
-                    .get(task_id)
-                    .ok_or_else(|| crate::workflow::WorkflowError::TaskNotFound(task_id.clone()))?;
-                let task_node = self
-                    .workflow
-                    .graph
-                    .node_weight(*node_idx)
-                    .ok_or_else(|| crate::workflow::WorkflowError::TaskFailed(
+                let node_idx =
+                    self.workflow.task_map.get(task_id).ok_or_else(|| {
+                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    })?;
+                let task_node = self.workflow.graph.node_weight(*node_idx).ok_or_else(|| {
+                    crate::workflow::WorkflowError::TaskFailed(
                         "Node index exists but node not found in graph".to_string(),
-                    ))?;
+                    )
+                })?;
                 let task_name = task_node.name.clone();
 
                 let validation = validate_checkpoint(&task_result, validation_config);
@@ -639,7 +643,10 @@ impl WorkflowExecutor {
                 }
 
                 // Log warning if validation status is Warning but can proceed
-                if matches!(validation.status, crate::workflow::checkpoint::ValidationStatus::Warning) {
+                if matches!(
+                    validation.status,
+                    crate::workflow::checkpoint::ValidationStatus::Warning
+                ) {
                     eprintln!("Warning: {} - {}", task_id, validation.message);
                 }
             }
@@ -672,7 +679,9 @@ impl WorkflowExecutor {
     /// let mut executor = WorkflowExecutor::new(workflow);
     /// let result = executor.execute_with_validations().await?;
     /// ```
-    pub async fn execute_with_validations(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+    pub async fn execute_with_validations(
+        &mut self,
+    ) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
         // Set default validation config if not already set
         if self.validation_config.is_none() {
             self.validation_config = Some(ValidationCheckpoint::default());
@@ -707,7 +716,9 @@ impl WorkflowExecutor {
     ///     .with_timeout_config(timeout_config);
     /// let result = executor.execute_with_timeout().await?;
     /// ```
-    pub async fn execute_with_timeout(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+    pub async fn execute_with_timeout(
+        &mut self,
+    ) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
         // Check if workflow timeout is configured
         if let Some(config) = &self.timeout_config {
             if let Some(workflow_timeout) = config.workflow_timeout {
@@ -758,16 +769,19 @@ impl WorkflowExecutor {
     ///     println!("Completed {} tasks with parallel execution", result.completed_tasks.len());
     /// }
     /// ```
-    pub async fn execute_parallel(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+    pub async fn execute_parallel(
+        &mut self,
+    ) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
+        use crate::workflow::state::{ConcurrentState, TaskSummary, WorkflowState};
         use tokio::task::JoinSet;
-        use crate::workflow::state::{ConcurrentState, WorkflowState, TaskSummary};
 
         // Record workflow started
         let workflow_id = self.audit_log.tx_id().to_string();
         self.record_workflow_started(&workflow_id).await;
 
         // Check for deadlocks before execution
-        self.check_for_deadlocks_before_execution(&workflow_id).await?;
+        self.check_for_deadlocks_before_execution(&workflow_id)
+            .await?;
 
         // Create thread-safe concurrent state wrapper
         // This allows tasks to read state while executor writes updates
@@ -807,23 +821,21 @@ impl WorkflowExecutor {
                 .await;
 
             // Create JoinSet for concurrent task execution
-            let mut set: JoinSet<Result<(TaskId, String), crate::workflow::WorkflowError>> = JoinSet::new();
+            let mut set: JoinSet<Result<(TaskId, String), crate::workflow::WorkflowError>> =
+                JoinSet::new();
 
             // Spawn all tasks in this layer
             for task_id in layer {
-                let node_idx = self
-                    .workflow
-                    .task_map
-                    .get(task_id)
-                    .ok_or_else(|| crate::workflow::WorkflowError::TaskNotFound(task_id.clone()))?;
+                let node_idx =
+                    self.workflow.task_map.get(task_id).ok_or_else(|| {
+                        crate::workflow::WorkflowError::TaskNotFound(task_id.clone())
+                    })?;
 
-                let task_node = self
-                    .workflow
-                    .graph
-                    .node_weight(*node_idx)
-                    .ok_or_else(|| crate::workflow::WorkflowError::TaskFailed(
+                let task_node = self.workflow.graph.node_weight(*node_idx).ok_or_else(|| {
+                    crate::workflow::WorkflowError::TaskFailed(
                         "Node index exists but node not found in graph".to_string(),
-                    ))?;
+                    )
+                })?;
 
                 // Clone the Arc to the task for move into spawned block
                 let task_arc = std::sync::Arc::clone(task_node.task());
@@ -859,7 +871,8 @@ impl WorkflowExecutor {
 
                     // Create task context
                     let mut context = if let Some(token) = cancellation_token {
-                        TaskContext::new(&workflow_id_clone, task_id_clone.clone()).with_cancellation_token(token)
+                        TaskContext::new(&workflow_id_clone, task_id_clone.clone())
+                            .with_cancellation_token(token)
                     } else {
                         TaskContext::new(&workflow_id_clone, task_id_clone.clone())
                     };
@@ -894,7 +907,11 @@ impl WorkflowExecutor {
 
             // Wait for all tasks in layer to complete
             // Apply deadlock timeout if configured
-            let (layer_succeeded, failed_task, error_message): (bool, Option<TaskId>, Option<String>) = if let Some(timeout) = self.deadlock_timeout {
+            let (layer_succeeded, failed_task, error_message): (
+                bool,
+                Option<TaskId>,
+                Option<String>,
+            ) = if let Some(timeout) = self.deadlock_timeout {
                 // With timeout - check for timeout first
                 let layer_result = tokio::time::timeout(timeout, async {
                     let mut layer_succeeded = true;
@@ -918,7 +935,8 @@ impl WorkflowExecutor {
                                 }
 
                                 // Record task completion in executor's audit log
-                                self.record_task_completed(&workflow_id, &task_id, &task_name).await;
+                                self.record_task_completed(&workflow_id, &task_id, &task_name)
+                                    .await;
                             }
                             Ok(Err(_e)) => {
                                 // Task failed
@@ -942,12 +960,14 @@ impl WorkflowExecutor {
                     Err(_) => {
                         // Layer timed out - treat as deadlock
                         let timeout_secs = timeout.as_secs();
-                        self.record_deadlock_timeout(&workflow_id, layer_index, timeout_secs).await;
+                        self.record_deadlock_timeout(&workflow_id, layer_index, timeout_secs)
+                            .await;
 
                         return Err(DeadlockError::ResourceDeadlock(format!(
                             "Layer {} exceeded deadlock timeout of {} seconds",
                             layer_index, timeout_secs
-                        )).into());
+                        ))
+                        .into());
                     }
                 }
             } else {
@@ -970,7 +990,8 @@ impl WorkflowExecutor {
                                 ));
                             }
 
-                            self.record_task_completed(&workflow_id, &task_id, &task_name).await;
+                            self.record_task_completed(&workflow_id, &task_id, &task_name)
+                                .await;
                         }
                         Ok(Err(_e)) => {
                             layer_succeeded = false;
@@ -1004,7 +1025,10 @@ impl WorkflowExecutor {
                 // For rollback, we need to identify which task failed
                 // Since we're using a stub execution, we'll use a placeholder
                 let failed_id = failed_task.unwrap_or_else(|| {
-                    layer.first().cloned().unwrap_or_else(|| TaskId::new("unknown"))
+                    layer
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| TaskId::new("unknown"))
                 });
 
                 let rollback_set = self
@@ -1028,7 +1052,9 @@ impl WorkflowExecutor {
                         crate::workflow::dag::WorkflowError::TaskNotFound(failed_id.clone())
                     })?;
 
-                let error_msg = error_message.clone().unwrap_or_else(|| "Layer execution failed".to_string());
+                let error_msg = error_message
+                    .clone()
+                    .unwrap_or_else(|| "Layer execution failed".to_string());
                 self.record_workflow_failed(&workflow_id, &failed_id, &error_msg)
                     .await;
 
@@ -1068,13 +1094,11 @@ impl WorkflowExecutor {
             .get(task_id)
             .ok_or_else(|| crate::workflow::WorkflowError::TaskNotFound(task_id.clone()))?;
 
-        let task_node = self
-            .workflow
-            .graph
-            .node_weight(*node_idx)
-            .ok_or_else(|| crate::workflow::WorkflowError::TaskFailed(
+        let task_node = self.workflow.graph.node_weight(*node_idx).ok_or_else(|| {
+            crate::workflow::WorkflowError::TaskFailed(
                 "Node index exists but node not found in graph".to_string(),
-            ))?;
+            )
+        })?;
 
         // Clone the Arc to the task to avoid borrow issues with mutable self
         let task_arc = std::sync::Arc::clone(task_node.task());
@@ -1111,12 +1135,19 @@ impl WorkflowExecutor {
         // Execute the task with timeout if configured
         let execution_result = if let Some(timeout_duration) = context.task_timeout {
             // Execute with task timeout
-            match tokio::time::timeout(timeout_duration, self.do_execute_task(&task_arc, &context)).await {
+            match tokio::time::timeout(timeout_duration, self.do_execute_task(&task_arc, &context))
+                .await
+            {
                 Ok(result) => result,
                 Err(_) => {
                     // Task timed out
-                    self.record_task_timeout(workflow_id, task_id, &task_name, timeout_duration.as_secs())
-                        .await;
+                    self.record_task_timeout(
+                        workflow_id,
+                        task_id,
+                        &task_name,
+                        timeout_duration.as_secs(),
+                    )
+                    .await;
 
                     // Return timeout error
                     return Err(crate::workflow::WorkflowError::Timeout(
@@ -1202,7 +1233,8 @@ impl WorkflowExecutor {
             .await
             .map_err(|_err| crate::workflow::dag::WorkflowError::TaskNotFound(task_id.clone()))?;
 
-        self.record_workflow_failed(workflow_id, task_id, error_msg).await;
+        self.record_workflow_failed(workflow_id, task_id, error_msg)
+            .await;
 
         Ok(WorkflowResult::new_failed_with_rollback(
             completed,
@@ -1238,7 +1270,12 @@ impl WorkflowExecutor {
     }
 
     /// Records task completed event.
-    async fn record_task_completed(&mut self, workflow_id: &str, task_id: &TaskId, task_name: &str) {
+    async fn record_task_completed(
+        &mut self,
+        workflow_id: &str,
+        task_id: &TaskId,
+        task_name: &str,
+    ) {
         let _ = self
             .audit_log
             .record(crate::audit::AuditEvent::WorkflowTaskCompleted {
@@ -1325,10 +1362,8 @@ impl WorkflowExecutor {
         match detector.validate_workflow(&self.workflow) {
             Ok(warnings) => {
                 // No cycles - log warnings if any
-                let warning_strings: Vec<String> = warnings
-                    .iter()
-                    .map(|w| w.description())
-                    .collect();
+                let warning_strings: Vec<String> =
+                    warnings.iter().map(|w| w.description()).collect();
 
                 // Record deadlock check to audit log
                 let _ = self
@@ -1371,7 +1406,12 @@ impl WorkflowExecutor {
     }
 
     /// Records deadlock timeout event.
-    async fn record_deadlock_timeout(&mut self, workflow_id: &str, layer_index: usize, timeout_secs: u64) {
+    async fn record_deadlock_timeout(
+        &mut self,
+        workflow_id: &str,
+        layer_index: usize,
+        timeout_secs: u64,
+    ) {
         let _ = self
             .audit_log
             .record(crate::audit::AuditEvent::WorkflowDeadlockTimeout {
@@ -1596,10 +1636,11 @@ impl WorkflowExecutor {
         &self,
         task_result: &TaskResult,
     ) -> Result<ValidationResult, crate::workflow::WorkflowError> {
-        let config = self.validation_config.as_ref()
-            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointCorrupted(
-                "Validation configuration not set".to_string()
-            ))?;
+        let config = self.validation_config.as_ref().ok_or_else(|| {
+            crate::workflow::WorkflowError::CheckpointCorrupted(
+                "Validation configuration not set".to_string(),
+            )
+        })?;
 
         let validation = validate_checkpoint(task_result, config);
         Ok(validation)
@@ -1650,19 +1691,22 @@ impl WorkflowExecutor {
     /// - `Err(WorkflowError)` - If checkpoint not found, corrupted, or workflow changed
     pub async fn resume(&mut self) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
         // Get checkpoint service
-        let service = self.checkpoint_service.as_ref()
-            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
-                "No checkpoint service configured".to_string()
-            ))?;
+        let service = self.checkpoint_service.as_ref().ok_or_else(|| {
+            crate::workflow::WorkflowError::CheckpointNotFound(
+                "No checkpoint service configured".to_string(),
+            )
+        })?;
 
         // Get workflow ID
         let workflow_id = self.audit_log.tx_id().to_string();
 
         // Load latest checkpoint
-        let checkpoint = service.get_latest(&workflow_id)?
-            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
-                format!("No checkpoint found for workflow: {}", workflow_id)
-            ))?;
+        let checkpoint = service.get_latest(&workflow_id)?.ok_or_else(|| {
+            crate::workflow::WorkflowError::CheckpointNotFound(format!(
+                "No checkpoint found for workflow: {}",
+                workflow_id
+            ))
+        })?;
 
         // Resume from checkpoint
         self.resume_from_checkpoint_id(&checkpoint.id).await
@@ -1686,16 +1730,19 @@ impl WorkflowExecutor {
         checkpoint_id: &crate::workflow::checkpoint::CheckpointId,
     ) -> Result<WorkflowResult, crate::workflow::WorkflowError> {
         // Get checkpoint service
-        let service = self.checkpoint_service.as_ref()
-            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
-                "No checkpoint service configured".to_string()
-            ))?;
+        let service = self.checkpoint_service.as_ref().ok_or_else(|| {
+            crate::workflow::WorkflowError::CheckpointNotFound(
+                "No checkpoint service configured".to_string(),
+            )
+        })?;
 
         // Load checkpoint
-        let checkpoint = service.load(checkpoint_id)?
-            .ok_or_else(|| crate::workflow::WorkflowError::CheckpointNotFound(
-                format!("Checkpoint not found: {}", checkpoint_id)
-            ))?;
+        let checkpoint = service.load(checkpoint_id)?.ok_or_else(|| {
+            crate::workflow::WorkflowError::CheckpointNotFound(format!(
+                "Checkpoint not found: {}",
+                checkpoint_id
+            ))
+        })?;
 
         // Validate checkpoint checksum
         checkpoint.validate()?;
@@ -1723,7 +1770,6 @@ impl WorkflowExecutor {
 
         // Execute remaining tasks
         for (position, task_id) in execution_order.iter().enumerate().skip(start_position) {
-
             // Execute task (ignore result for resume path)
             if let Err(e) = self.execute_task(&workflow_id, task_id).await {
                 // Task failed - trigger rollback
@@ -1795,8 +1841,7 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(Tool::new("echo", "echo")).unwrap();
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_tool_registry(registry);
+        let mut executor = WorkflowExecutor::new(workflow).with_tool_registry(registry);
 
         // Verify tool registry is set
         assert!(executor.tool_registry().is_some());
@@ -1838,16 +1883,20 @@ mod tests {
 
     #[async_trait]
     impl WorkflowTask for MockTask {
-        async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+        async fn execute(
+            &self,
+            _context: &TaskContext,
+        ) -> Result<TaskResult, crate::workflow::TaskError> {
             if self.should_fail {
                 Ok(TaskResult::Failed("Task failed".to_string()))
             } else {
                 // Return WithCompensation to enable rollback testing
                 Ok(TaskResult::WithCompensation {
                     result: Box::new(TaskResult::Success),
-                    compensation: crate::workflow::task::CompensationAction::skip(
-                        format!("Mock compensation for task {}", self.name),
-                    ),
+                    compensation: crate::workflow::task::CompensationAction::skip(format!(
+                        "Mock compensation for task {}",
+                        self.name
+                    )),
                 })
             }
         }
@@ -1890,9 +1939,9 @@ mod tests {
         let mut workflow = Workflow::new();
 
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
-        workflow.add_task(Box::new(MockTask::new("b", "Task B")
-            .with_dep("a")
-            .with_failure()));
+        workflow.add_task(Box::new(
+            MockTask::new("b", "Task B").with_dep("a").with_failure(),
+        ));
         workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("b")));
 
         workflow.add_dependency("a", "b").unwrap();
@@ -1924,7 +1973,10 @@ mod tests {
         assert!(events.len() >= 6);
 
         // Verify workflow started event
-        assert!(matches!(events[0], crate::audit::AuditEvent::WorkflowStarted { .. }));
+        assert!(matches!(
+            events[0],
+            crate::audit::AuditEvent::WorkflowStarted { .. }
+        ));
     }
 
     #[tokio::test]
@@ -1932,7 +1984,9 @@ mod tests {
         let mut workflow = Workflow::new();
 
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
-        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a").with_failure()));
+        workflow.add_task(Box::new(
+            MockTask::new("b", "Task B").with_dep("a").with_failure(),
+        ));
         workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("b")));
 
         workflow.add_dependency("a", "b").unwrap();
@@ -1960,8 +2014,12 @@ mod tests {
 
         // Verify audit events include rollback
         let events = executor.audit_log().replay();
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
     }
 
     #[tokio::test]
@@ -1969,13 +2027,15 @@ mod tests {
         let mut workflow = Workflow::new();
 
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
-        workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a").with_failure()));
+        workflow.add_task(Box::new(
+            MockTask::new("b", "Task B").with_dep("a").with_failure(),
+        ));
 
         workflow.add_dependency("a", "b").unwrap();
 
         // Test with FailedOnly strategy
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_rollback_strategy(RollbackStrategy::FailedOnly);
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_rollback_strategy(RollbackStrategy::FailedOnly);
         assert_eq!(executor.rollback_strategy(), RollbackStrategy::FailedOnly);
 
         let result = executor.execute().await.unwrap();
@@ -1983,8 +2043,19 @@ mod tests {
         // With FailedOnly, only the failed task is in the rollback set
         // But since "b" failed, it didn't register a compensation, so it's skipped
         assert!(result.rollback_report.is_some());
-        assert_eq!(result.rollback_report.as_ref().unwrap().rolled_back_tasks.len(), 0);
-        assert_eq!(result.rollback_report.as_ref().unwrap().skipped_tasks.len(), 1);
+        assert_eq!(
+            result
+                .rollback_report
+                .as_ref()
+                .unwrap()
+                .rolled_back_tasks
+                .len(),
+            0
+        );
+        assert_eq!(
+            result.rollback_report.as_ref().unwrap().skipped_tasks.len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -1995,7 +2066,12 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
         workflow.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
         workflow.add_task(Box::new(MockTask::new("c", "Task C").with_dep("a")));
-        workflow.add_task(Box::new(MockTask::new("d", "Task D").with_dep("b").with_dep("c").with_failure()));
+        workflow.add_task(Box::new(
+            MockTask::new("d", "Task D")
+                .with_dep("b")
+                .with_dep("c")
+                .with_failure(),
+        ));
 
         workflow.add_dependency("a", "b").unwrap();
         workflow.add_dependency("a", "c").unwrap();
@@ -2038,8 +2114,8 @@ mod tests {
         workflow.add_dependency("a", "c").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         let result = executor.execute().await.unwrap();
 
@@ -2061,8 +2137,8 @@ mod tests {
         workflow.add_dependency("a", "b").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         executor.execute().await.unwrap();
 
@@ -2107,8 +2183,8 @@ mod tests {
         workflow.add_dependency("a", "b").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         let result = executor.execute().await.unwrap();
 
@@ -2144,15 +2220,18 @@ mod tests {
         workflow.add_dependency("a", "c").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Execute workflow
         executor.execute().await.unwrap();
 
         // Get the checkpoint
         let workflow_id = executor.audit_log.tx_id().to_string();
-        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint = checkpoint_service
+            .get_latest(&workflow_id)
+            .unwrap()
+            .unwrap();
 
         // Create new executor and restore state
         let mut new_workflow = Workflow::new();
@@ -2170,7 +2249,10 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify state was restored
-        assert_eq!(new_executor.completed_tasks.len(), checkpoint.completed_tasks.len());
+        assert_eq!(
+            new_executor.completed_tasks.len(),
+            checkpoint.completed_tasks.len()
+        );
         assert!(new_executor.completed_tasks.contains(&TaskId::new("a")));
         assert!(new_executor.completed_tasks.contains(&TaskId::new("b")));
         assert!(new_executor.completed_tasks.contains(&TaskId::new("c")));
@@ -2188,15 +2270,18 @@ mod tests {
         workflow.add_dependency("a", "b").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Execute workflow
         executor.execute().await.unwrap();
 
         // Get the checkpoint
         let workflow_id = executor.audit_log.tx_id().to_string();
-        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint = checkpoint_service
+            .get_latest(&workflow_id)
+            .unwrap()
+            .unwrap();
 
         // Create new executor and restore state twice
         let mut new_workflow = Workflow::new();
@@ -2219,7 +2304,10 @@ mod tests {
 
         // State should be identical after both restores
         assert_eq!(completed_count_after_first, completed_count_after_second);
-        assert_eq!(completed_count_after_first, checkpoint.completed_tasks.len());
+        assert_eq!(
+            completed_count_after_first,
+            checkpoint.completed_tasks.len()
+        );
     }
 
     #[tokio::test]
@@ -2231,15 +2319,18 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("b", "Task B")));
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Execute workflow
         executor.execute().await.unwrap();
 
         // Get the checkpoint
         let workflow_id = executor.audit_log.tx_id().to_string();
-        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint = checkpoint_service
+            .get_latest(&workflow_id)
+            .unwrap()
+            .unwrap();
 
         // Create different workflow (different tasks)
         let mut different_workflow = Workflow::new();
@@ -2271,8 +2362,8 @@ mod tests {
         workflow.add_dependency("a", "b").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // No checkpoint initially
         assert!(!executor.can_resume());
@@ -2283,8 +2374,8 @@ mod tests {
         workflow2.add_task(Box::new(MockTask::new("b", "Task B").with_dep("a")));
         workflow2.add_dependency("a", "b").unwrap();
 
-        let mut executor2 = WorkflowExecutor::new(workflow2)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor2 =
+            WorkflowExecutor::new(workflow2).with_checkpoint_service(checkpoint_service.clone());
         executor2.execute().await.unwrap();
 
         // Now can resume
@@ -2315,15 +2406,18 @@ mod tests {
         workflow.add_dependency("a", "c").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Execute workflow
         executor.execute().await.unwrap();
 
         // Get checkpoint ID
         let workflow_id = executor.audit_log.tx_id().to_string();
-        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint = checkpoint_service
+            .get_latest(&workflow_id)
+            .unwrap()
+            .unwrap();
         let checkpoint_id = checkpoint.id;
 
         // Create new executor and resume
@@ -2335,8 +2429,8 @@ mod tests {
         new_workflow.add_dependency("a", "b").unwrap();
         new_workflow.add_dependency("a", "c").unwrap();
 
-        let mut new_executor = WorkflowExecutor::new(new_workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut new_executor =
+            WorkflowExecutor::new(new_workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Resume from checkpoint
         let result = new_executor.resume_from_checkpoint_id(&checkpoint_id).await;
@@ -2362,20 +2456,15 @@ mod tests {
         workflow.add_dependency("b", "c").unwrap();
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Execute workflow partially (only task A completes)
         let workflow_id = executor.audit_log.tx_id().to_string();
 
         // Manually create checkpoint after task A
         executor.completed_tasks.insert(TaskId::new("a"));
-        let partial_checkpoint = WorkflowCheckpoint::from_executor(
-            &workflow_id,
-            0,
-            &executor,
-            0,
-        );
+        let partial_checkpoint = WorkflowCheckpoint::from_executor(&workflow_id, 0, &executor, 0);
         checkpoint_service.save(&partial_checkpoint).unwrap();
 
         let checkpoint_id = partial_checkpoint.id;
@@ -2389,11 +2478,14 @@ mod tests {
         new_workflow.add_dependency("a", "b").unwrap();
         new_workflow.add_dependency("b", "c").unwrap();
 
-        let mut new_executor = WorkflowExecutor::new(new_workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut new_executor =
+            WorkflowExecutor::new(new_workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Resume should skip task A and execute B and C
-        let result = new_executor.resume_from_checkpoint_id(&checkpoint_id).await.unwrap();
+        let result = new_executor
+            .resume_from_checkpoint_id(&checkpoint_id)
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert_eq!(result.completed_tasks.len(), 3);
@@ -2413,15 +2505,18 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("b", "Task B")));
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Execute workflow to completion
         executor.execute().await.unwrap();
 
         // Get checkpoint ID
         let workflow_id = executor.audit_log.tx_id().to_string();
-        let checkpoint = checkpoint_service.get_latest(&workflow_id).unwrap().unwrap();
+        let checkpoint = checkpoint_service
+            .get_latest(&workflow_id)
+            .unwrap()
+            .unwrap();
         let checkpoint_id = checkpoint.id;
 
         // Create new executor and resume
@@ -2429,11 +2524,14 @@ mod tests {
         new_workflow.add_task(Box::new(MockTask::new("a", "Task A")));
         new_workflow.add_task(Box::new(MockTask::new("b", "Task B")));
 
-        let mut new_executor = WorkflowExecutor::new(new_workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut new_executor =
+            WorkflowExecutor::new(new_workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Resume should return immediately (all tasks already completed)
-        let result = new_executor.resume_from_checkpoint_id(&checkpoint_id).await.unwrap();
+        let result = new_executor
+            .resume_from_checkpoint_id(&checkpoint_id)
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert_eq!(result.completed_tasks.len(), 2);
@@ -2447,12 +2545,14 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
 
         let checkpoint_service = WorkflowCheckpointService::new_default();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_checkpoint_service(checkpoint_service.clone());
+        let mut executor =
+            WorkflowExecutor::new(workflow).with_checkpoint_service(checkpoint_service.clone());
 
         // Try to resume from non-existent checkpoint
         let fake_checkpoint_id = CheckpointId::new();
-        let result = executor.resume_from_checkpoint_id(&fake_checkpoint_id).await;
+        let result = executor
+            .resume_from_checkpoint_id(&fake_checkpoint_id)
+            .await;
 
         assert!(result.is_err());
 
@@ -2479,8 +2579,12 @@ mod tests {
         );
 
         // Verify compensation is registered
-        assert!(executor.compensation_registry.has_compensation(&TaskId::new("a")));
-        assert!(!executor.compensation_registry.has_compensation(&TaskId::new("b")));
+        assert!(executor
+            .compensation_registry
+            .has_compensation(&TaskId::new("a")));
+        assert!(!executor
+            .compensation_registry
+            .has_compensation(&TaskId::new("b")));
 
         // Verify we can retrieve it
         let comp = executor.compensation_registry.get(&TaskId::new("a"));
@@ -2499,7 +2603,9 @@ mod tests {
         executor.register_file_compensation(TaskId::new("a"), "/tmp/test.txt");
 
         // Verify compensation is registered
-        assert!(executor.compensation_registry.has_compensation(&TaskId::new("a")));
+        assert!(executor
+            .compensation_registry
+            .has_compensation(&TaskId::new("a")));
 
         let comp = executor.compensation_registry.get(&TaskId::new("a"));
         assert!(comp.is_some());
@@ -2528,8 +2634,12 @@ mod tests {
         assert!(report.tasks_with_compensation.contains(&TaskId::new("a")));
 
         assert_eq!(report.tasks_without_compensation.len(), 2);
-        assert!(report.tasks_without_compensation.contains(&TaskId::new("b")));
-        assert!(report.tasks_without_compensation.contains(&TaskId::new("c")));
+        assert!(report
+            .tasks_without_compensation
+            .contains(&TaskId::new("b")));
+        assert!(report
+            .tasks_without_compensation
+            .contains(&TaskId::new("c")));
 
         // Coverage should be 1/3 = 0.333
         assert!((report.coverage_percentage - 0.333).abs() < 0.01);
@@ -2561,9 +2671,15 @@ mod tests {
         assert!(result.success);
 
         // With actual execution, all tasks that succeeded registered compensations
-        assert!(executor.compensation_registry.has_compensation(&TaskId::new("a")));
-        assert!(executor.compensation_registry.has_compensation(&TaskId::new("b")));
-        assert!(executor.compensation_registry.has_compensation(&TaskId::new("c")));
+        assert!(executor
+            .compensation_registry
+            .has_compensation(&TaskId::new("a")));
+        assert!(executor
+            .compensation_registry
+            .has_compensation(&TaskId::new("b")));
+        assert!(executor
+            .compensation_registry
+            .has_compensation(&TaskId::new("c")));
     }
 
     // Tests for validation checkpoint integration
@@ -2598,8 +2714,7 @@ mod tests {
             rollback_on_failure: true,
         };
 
-        let executor = WorkflowExecutor::new(workflow)
-            .with_validation_config(custom_config);
+        let executor = WorkflowExecutor::new(workflow).with_validation_config(custom_config);
 
         assert!(executor.validation_config.is_some());
         let config = executor.validation_config.unwrap();
@@ -2623,8 +2738,7 @@ mod tests {
             rollback_on_failure: false,
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_validation_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_validation_config(config);
 
         let result = executor.execute().await.unwrap();
 
@@ -2641,8 +2755,7 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
 
         let config = ValidationCheckpoint::default();
-        let executor = WorkflowExecutor::new(workflow)
-            .with_validation_config(config);
+        let executor = WorkflowExecutor::new(workflow).with_validation_config(config);
 
         // Validate Success result
         let result = TaskResult::Success;
@@ -2651,7 +2764,10 @@ mod tests {
         assert!(validation.is_ok());
         let v = validation.unwrap();
         assert_eq!(v.confidence, 1.0);
-        assert_eq!(v.status, crate::workflow::checkpoint::ValidationStatus::Passed);
+        assert_eq!(
+            v.status,
+            crate::workflow::checkpoint::ValidationStatus::Passed
+        );
     }
 
     #[test]
@@ -2694,8 +2810,7 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
 
         let source = CancellationTokenSource::new();
-        let executor = WorkflowExecutor::new(workflow)
-            .with_cancellation_source(source);
+        let executor = WorkflowExecutor::new(workflow).with_cancellation_source(source);
 
         // Cancellation token should be accessible
         assert!(executor.cancellation_token().is_some());
@@ -2706,8 +2821,8 @@ mod tests {
     #[tokio::test]
     async fn test_executor_cancel_stops_execution() {
         use crate::workflow::cancellation::CancellationTokenSource;
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
 
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
@@ -2727,8 +2842,7 @@ mod tests {
         // Create a custom cancellation mechanism
         // For this test, we'll create the source, cancel it, then execute
         let source = CancellationTokenSource::new();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_cancellation_source(source);
+        let mut executor = WorkflowExecutor::new(workflow).with_cancellation_source(source);
 
         // Cancel immediately before execution
         executor.cancel();
@@ -2750,8 +2864,7 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
 
         let source = CancellationTokenSource::new();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_cancellation_source(source);
+        let mut executor = WorkflowExecutor::new(workflow).with_cancellation_source(source);
 
         // Cancel before execution using executor's cancel method
         executor.cancel();
@@ -2763,7 +2876,9 @@ mod tests {
         let events = executor.audit_log().replay();
 
         // Should have WorkflowCancelled event
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCancelled { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCancelled { .. })));
     }
 
     // Tests for timeout integration
@@ -2787,8 +2902,7 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
 
         let config = TimeoutConfig::new();
-        let executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Timeout config should be set
         assert!(executor.timeout_config().is_some());
@@ -2810,8 +2924,7 @@ mod tests {
             workflow_timeout: None,
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute should succeed (task completes within timeout)
         let result = executor.execute().await;
@@ -2836,8 +2949,7 @@ mod tests {
             workflow_timeout: Some(WorkflowTimeout::from_secs(5)),
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute should succeed (workflow completes within timeout)
         let result = executor.execute().await;
@@ -2858,8 +2970,7 @@ mod tests {
             workflow_timeout: None,
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute workflow
         let result = executor.execute().await;
@@ -2884,8 +2995,7 @@ mod tests {
             workflow_timeout: Some(WorkflowTimeout::from_secs(5)),
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute with timeout method
         let result = executor.execute_with_timeout().await;
@@ -2971,7 +3081,12 @@ mod tests {
         // Should have parallel layer events
         let parallel_started_events: Vec<_> = audit_events
             .iter()
-            .filter(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskParallelStarted { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::audit::AuditEvent::WorkflowTaskParallelStarted { .. }
+                )
+            })
             .collect();
 
         // Diamond pattern has 3 layers: [a], [b, c], [d]
@@ -2987,8 +3102,7 @@ mod tests {
         workflow.add_task(Box::new(MockTask::new("b", "Task B")));
 
         let source = CancellationTokenSource::new();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_cancellation_source(source);
+        let mut executor = WorkflowExecutor::new(workflow).with_cancellation_source(source);
 
         // Cancel before execution
         executor.cancel();
@@ -2999,7 +3113,10 @@ mod tests {
         let workflow_result = result.unwrap();
         assert!(!workflow_result.success);
         assert_eq!(workflow_result.completed_tasks.len(), 0);
-        assert_eq!(workflow_result.error, Some("Workflow cancelled".to_string()));
+        assert_eq!(
+            workflow_result.error,
+            Some("Workflow cancelled".to_string())
+        );
     }
 
     #[tokio::test]
@@ -3010,7 +3127,10 @@ mod tests {
         let result = executor.execute_parallel().await;
 
         assert!(result.is_err());
-        assert!(matches!(result, Err(crate::workflow::WorkflowError::EmptyWorkflow)));
+        assert!(matches!(
+            result,
+            Err(crate::workflow::WorkflowError::EmptyWorkflow)
+        ));
     }
 
     #[tokio::test]
@@ -3027,12 +3147,19 @@ mod tests {
         let audit_events = executor.audit_log.replay();
 
         // Should have WorkflowStarted
-        assert!(audit_events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowStarted { .. })));
+        assert!(audit_events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowStarted { .. })));
 
         // Should have WorkflowTaskParallelStarted events
         let parallel_started: Vec<_> = audit_events
             .iter()
-            .filter(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskParallelStarted { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::audit::AuditEvent::WorkflowTaskParallelStarted { .. }
+                )
+            })
             .collect();
 
         assert!(!parallel_started.is_empty());
@@ -3040,16 +3167,25 @@ mod tests {
         // Should have WorkflowTaskParallelCompleted events
         let parallel_completed: Vec<_> = audit_events
             .iter()
-            .filter(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskParallelCompleted { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::audit::AuditEvent::WorkflowTaskParallelCompleted { .. }
+                )
+            })
             .collect();
 
         assert!(!parallel_completed.is_empty());
 
         // Should have WorkflowCompleted
-        assert!(audit_events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCompleted { .. })));
+        assert!(audit_events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCompleted { .. })));
 
         // Should have WorkflowDeadlockCheck event
-        assert!(audit_events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowDeadlockCheck { .. })));
+        assert!(audit_events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowDeadlockCheck { .. })));
     }
 
     #[tokio::test]
@@ -3104,7 +3240,9 @@ mod tests {
 
         // Verify all tasks completed
         for i in 0..10 {
-            assert!(workflow_result.completed_tasks.contains(&TaskId::new(format!("task-{}", i))));
+            assert!(workflow_result
+                .completed_tasks
+                .contains(&TaskId::new(format!("task-{}", i))));
         }
     }
 
@@ -3128,8 +3266,7 @@ mod tests {
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
 
-        let executor = WorkflowExecutor::new(workflow)
-            .without_deadlock_timeout();
+        let executor = WorkflowExecutor::new(workflow).without_deadlock_timeout();
 
         // Verify the timeout is None
         assert!(executor.deadlock_timeout.is_none());

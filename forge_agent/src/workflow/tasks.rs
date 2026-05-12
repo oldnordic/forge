@@ -3,18 +3,24 @@
 //! Provides pre-built task types for graph queries, agent loops, shell commands,
 //! and simple function wrapping.
 
-use crate::workflow::task::{CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
+use crate::workflow::task::{
+    CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask,
+};
 use crate::workflow::tools::{FallbackHandler, FallbackResult, ToolError, ToolInvocation};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::future::Future;
 use std::time::Duration;
 
-type AsyncTaskFn = Box<dyn Fn(&TaskContext) -> Pin<Box<dyn Future<Output = Result<TaskResult, TaskError>> + Send>> + Send + Sync>;
+type AsyncTaskFn = Box<
+    dyn Fn(&TaskContext) -> Pin<Box<dyn Future<Output = Result<TaskResult, TaskError>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Task that wraps an async function for easy workflow definition.
 ///
@@ -51,7 +57,10 @@ impl FunctionTask {
         Self {
             id,
             name,
-            f: Box::new(move |ctx| Box::pin(f(ctx)) as Pin<Box<dyn Future<Output = Result<TaskResult, TaskError>> + Send>>),
+            f: Box::new(move |ctx| {
+                Box::pin(f(ctx))
+                    as Pin<Box<dyn Future<Output = Result<TaskResult, TaskError>> + Send>>
+            }),
         }
     }
 }
@@ -135,15 +144,9 @@ impl WorkflowTask for GraphQueryTask {
         // Phase 8 stub - all graph queries return success
         // Actual Forge SDK integration will be in Phase 10
         match self.query_type {
-            GraphQueryType::FindSymbol => {
-                Ok(TaskResult::Success)
-            }
-            GraphQueryType::References => {
-                Ok(TaskResult::Success)
-            }
-            GraphQueryType::ImpactAnalysis => {
-                Ok(TaskResult::Success)
-            }
+            GraphQueryType::FindSymbol => Ok(TaskResult::Success),
+            GraphQueryType::References => Ok(TaskResult::Success),
+            GraphQueryType::ImpactAnalysis => Ok(TaskResult::Success),
         }
     }
 
@@ -157,7 +160,9 @@ impl WorkflowTask for GraphQueryTask {
 
     fn compensation(&self) -> Option<CompensationAction> {
         // Graph queries are read-only operations with no side effects
-        Some(CompensationAction::skip("Read-only graph query - no undo needed"))
+        Some(CompensationAction::skip(
+            "Read-only graph query - no undo needed",
+        ))
     }
 }
 
@@ -205,7 +210,9 @@ impl WorkflowTask for AgentLoopTask {
     fn compensation(&self) -> Option<CompensationAction> {
         // AgentLoop is read-only in v0.4 - no compensation needed
         // Future versions may implement undo for mutations
-        Some(CompensationAction::skip("Read-only agent loop - no undo needed in v0.4"))
+        Some(CompensationAction::skip(
+            "Read-only agent loop - no undo needed in v0.4",
+        ))
     }
 }
 
@@ -352,7 +359,10 @@ impl ShellCommandTask {
     /// # Deprecated
     ///
     /// Use `with_config()` and `ShellCommandConfig::args()` instead.
-    #[deprecated(since = "0.4.0", note = "Use with_config() instead for better configurability")]
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use with_config() instead for better configurability"
+    )]
     pub fn with_args(mut self, args: Vec<String>) -> Self {
         self.config.args = args;
         self
@@ -746,11 +756,9 @@ impl ToolTask {
 impl WorkflowTask for ToolTask {
     async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
         // Get the tool registry from context
-        let registry = context.tool_registry
-            .as_ref()
-            .ok_or_else(|| TaskError::ExecutionFailed(
-                "ToolRegistry not available in TaskContext".to_string()
-            ))?;
+        let registry = context.tool_registry.as_ref().ok_or_else(|| {
+            TaskError::ExecutionFailed("ToolRegistry not available in TaskContext".to_string())
+        })?;
 
         // Try to invoke the tool
         let invocation_result = registry.invoke(&self.invocation).await;
@@ -773,8 +781,9 @@ impl WorkflowTask for ToolTask {
                                 context,
                                 &self.invocation.tool_name,
                                 &error,
-                                "Retry"
-                            ).await;
+                                "Retry",
+                            )
+                            .await;
 
                             // Retry with modified invocation
                             match registry.invoke(&retry_invocation).await {
@@ -785,13 +794,10 @@ impl WorkflowTask for ToolTask {
                                         Ok(TaskResult::Failed(retry_result.result.stderr))
                                     }
                                 }
-                                Err(retry_error) => {
-                                    Ok(TaskResult::Failed(format!(
-                                        "Tool {} failed after retry: {}",
-                                        self.invocation.tool_name,
-                                        retry_error
-                                    )))
-                                }
+                                Err(retry_error) => Ok(TaskResult::Failed(format!(
+                                    "Tool {} failed after retry: {}",
+                                    self.invocation.tool_name, retry_error
+                                ))),
                             }
                         }
                         FallbackResult::Skip(result) => {
@@ -800,8 +806,9 @@ impl WorkflowTask for ToolTask {
                                 context,
                                 &self.invocation.tool_name,
                                 &error,
-                                "Skip"
-                            ).await;
+                                "Skip",
+                            )
+                            .await;
 
                             Ok(result)
                         }
@@ -811,13 +818,13 @@ impl WorkflowTask for ToolTask {
                                 context,
                                 &self.invocation.tool_name,
                                 &error,
-                                &format!("Fail: {}", fail_error)
-                            ).await;
+                                &format!("Fail: {}", fail_error),
+                            )
+                            .await;
 
                             Ok(TaskResult::Failed(format!(
                                 "Tool {} failed: {}",
-                                self.invocation.tool_name,
-                                fail_error
+                                self.invocation.tool_name, fail_error
                             )))
                         }
                     }
@@ -825,8 +832,7 @@ impl WorkflowTask for ToolTask {
                     // No fallback handler, return error
                     Ok(TaskResult::Failed(format!(
                         "Tool {} failed: {}",
-                        self.invocation.tool_name,
-                        error
+                        self.invocation.tool_name, error
                     )))
                 }
             }
@@ -845,7 +851,7 @@ impl WorkflowTask for ToolTask {
         // Tool side effects are handled by ProcessGuard in the tool registry
         // Return skip compensation
         Some(CompensationAction::skip(
-            "Tool side effects handled by ProcessGuard"
+            "Tool side effects handled by ProcessGuard",
         ))
     }
 }
@@ -929,11 +935,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_command_task_stub() {
-        let task = ShellCommandTask::new(
-            TaskId::new("shell_task"),
-            "Shell Task".to_string(),
-            "echo",
-        ).with_args(vec!["hello".to_string(), "world".to_string()]);
+        let task =
+            ShellCommandTask::new(TaskId::new("shell_task"), "Shell Task".to_string(), "echo")
+                .with_args(vec!["hello".to_string(), "world".to_string()]);
 
         assert_eq!(task.id(), TaskId::new("shell_task"));
         assert_eq!(task.command(), "echo");
@@ -946,11 +950,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_task_args_default() {
-        let task = ShellCommandTask::new(
-            TaskId::new("shell_task"),
-            "Shell Task".to_string(),
-            "ls",
-        );
+        let task = ShellCommandTask::new(TaskId::new("shell_task"), "Shell Task".to_string(), "ls");
 
         assert_eq!(task.args().len(), 0);
         assert!(task.args().is_empty());
@@ -1010,16 +1010,17 @@ mod tests {
     async fn test_shell_command_compensation() {
         // Create a task that spawns a long-running process
         // For testing, we use echo which exits immediately
-        let task = ShellCommandTask::new(
-            TaskId::new("shell_task"),
-            "Shell Task".to_string(),
-            "echo",
-        ).with_args(vec!["test".to_string()]);
+        let task =
+            ShellCommandTask::new(TaskId::new("shell_task"), "Shell Task".to_string(), "echo")
+                .with_args(vec!["test".to_string()]);
 
         // Before execution, compensation should indicate no process spawned
         let compensation = task.compensation();
         assert!(compensation.is_some());
-        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+        assert_eq!(
+            compensation.unwrap().action_type,
+            crate::workflow::task::CompensationType::Skip
+        );
 
         // Execute the task
         let context = TaskContext::new("workflow_1", task.id());
@@ -1029,7 +1030,10 @@ mod tests {
         // After execution, compensation should indicate process termination
         let compensation = task.compensation();
         assert!(compensation.is_some());
-        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::UndoFunction);
+        assert_eq!(
+            compensation.unwrap().action_type,
+            crate::workflow::task::CompensationType::UndoFunction
+        );
     }
 
     #[tokio::test]
@@ -1039,7 +1043,10 @@ mod tests {
         // Graph queries should have Skip compensation
         let compensation = task.compensation();
         assert!(compensation.is_some());
-        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+        assert_eq!(
+            compensation.unwrap().action_type,
+            crate::workflow::task::CompensationType::Skip
+        );
     }
 
     #[tokio::test]
@@ -1053,7 +1060,10 @@ mod tests {
         // AgentLoop should have Skip compensation in v0.4
         let compensation = task.compensation();
         assert!(compensation.is_some());
-        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+        assert_eq!(
+            compensation.unwrap().action_type,
+            crate::workflow::task::CompensationType::Skip
+        );
     }
 
     #[tokio::test]
@@ -1069,18 +1079,17 @@ mod tests {
         // FileEdit should have UndoFunction compensation
         let compensation = task.compensation();
         assert!(compensation.is_some());
-        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::UndoFunction);
+        assert_eq!(
+            compensation.unwrap().action_type,
+            crate::workflow::task::CompensationType::UndoFunction
+        );
     }
 
     // ============== ToolTask Tests ==============
 
     #[tokio::test]
     async fn test_tool_task_creation() {
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Echo Tool".to_string(),
-            "echo"
-        );
+        let task = ToolTask::new(TaskId::new("tool_task"), "Echo Tool".to_string(), "echo");
 
         assert_eq!(task.id(), TaskId::new("tool_task"));
         assert_eq!(task.name(), "Echo Tool");
@@ -1091,12 +1100,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_task_with_args() {
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Echo Tool".to_string(),
-            "echo"
-        )
-        .args(vec!["hello".to_string(), "world".to_string()]);
+        let task = ToolTask::new(TaskId::new("tool_task"), "Echo Tool".to_string(), "echo")
+            .args(vec!["hello".to_string(), "world".to_string()]);
 
         assert_eq!(task.invocation().args.len(), 2);
         assert_eq!(task.invocation().args[0], "hello");
@@ -1105,12 +1110,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_task_with_working_dir() {
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Cargo Test".to_string(),
-            "cargo"
-        )
-        .working_dir("/home/user/project");
+        let task = ToolTask::new(TaskId::new("tool_task"), "Cargo Test".to_string(), "cargo")
+            .working_dir("/home/user/project");
 
         assert_eq!(
             task.invocation().working_dir,
@@ -1120,45 +1121,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_task_with_env() {
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Cargo Test".to_string(),
-            "cargo"
-        )
-        .env("RUST_LOG", "debug");
+        let task = ToolTask::new(TaskId::new("tool_task"), "Cargo Test".to_string(), "cargo")
+            .env("RUST_LOG", "debug");
 
         assert_eq!(task.invocation().env.len(), 1);
-        assert_eq!(task.invocation().env.get("RUST_LOG"), Some(&"debug".to_string()));
+        assert_eq!(
+            task.invocation().env.get("RUST_LOG"),
+            Some(&"debug".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_tool_task_builder_pattern() {
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Cargo Test".to_string(),
-            "cargo"
-        )
-        .args(vec!["test".to_string()])
-        .working_dir("/tmp")
-        .env("TEST_VAR", "value");
+        let task = ToolTask::new(TaskId::new("tool_task"), "Cargo Test".to_string(), "cargo")
+            .args(vec!["test".to_string()])
+            .working_dir("/tmp")
+            .env("TEST_VAR", "value");
 
         assert_eq!(task.invocation().args.len(), 1);
         assert_eq!(task.invocation().working_dir, Some(PathBuf::from("/tmp")));
-        assert_eq!(task.invocation().env.get("TEST_VAR"), Some(&"value".to_string()));
+        assert_eq!(
+            task.invocation().env.get("TEST_VAR"),
+            Some(&"value".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_tool_task_compensation() {
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Echo Tool".to_string(),
-            "echo"
-        );
+        let task = ToolTask::new(TaskId::new("tool_task"), "Echo Tool".to_string(), "echo");
 
         // ToolTask should have Skip compensation
         let compensation = task.compensation();
         assert!(compensation.is_some());
-        assert_eq!(compensation.unwrap().action_type, crate::workflow::task::CompensationType::Skip);
+        assert_eq!(
+            compensation.unwrap().action_type,
+            crate::workflow::task::CompensationType::Skip
+        );
     }
 
     #[tokio::test]
@@ -1167,19 +1165,17 @@ mod tests {
 
         // Create a tool registry with echo
         let mut registry = crate::workflow::tools::ToolRegistry::new();
-        registry.register(crate::workflow::tools::Tool::new("echo", "echo")).unwrap();
+        registry
+            .register(crate::workflow::tools::Tool::new("echo", "echo"))
+            .unwrap();
 
         // Create a context with the tool registry
         let context = TaskContext::new("workflow_1", TaskId::new("tool_task"))
             .with_tool_registry(Arc::new(registry));
 
         // Create a tool task
-        let task = ToolTask::new(
-            TaskId::new("tool_task"),
-            "Echo Tool".to_string(),
-            "echo"
-        )
-        .args(vec!["test".to_string()]);
+        let task = ToolTask::new(TaskId::new("tool_task"), "Echo Tool".to_string(), "echo")
+            .args(vec!["test".to_string()]);
 
         // Execute the task
         let result = task.execute(&context).await.unwrap();
@@ -1192,7 +1188,9 @@ mod tests {
 
         // Create a tool registry with echo
         let mut registry = crate::workflow::tools::ToolRegistry::new();
-        registry.register(crate::workflow::tools::Tool::new("echo", "echo")).unwrap();
+        registry
+            .register(crate::workflow::tools::Tool::new("echo", "echo"))
+            .unwrap();
 
         // Create a context with the tool registry
         let context = TaskContext::new("workflow_1", TaskId::new("tool_task"))
@@ -1202,7 +1200,7 @@ mod tests {
         let task = ToolTask::new(
             TaskId::new("tool_task"),
             "Nonexistent Tool".to_string(),
-            "nonexistent"  // Tool not registered
+            "nonexistent", // Tool not registered
         )
         .with_fallback(Box::new(crate::workflow::tools::SkipFallback::skip()));
 
@@ -1242,18 +1240,13 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(Tool::new("echo", "echo")).unwrap();
 
-        let tool_task = ToolTask::new(
-            task_id.clone(),
-            "Echo Tool".to_string(),
-            "echo"
-        )
-        .args(vec!["hello".to_string()]);
+        let tool_task = ToolTask::new(task_id.clone(), "Echo Tool".to_string(), "echo")
+            .args(vec!["hello".to_string()]);
 
         workflow.add_task(Box::new(tool_task));
 
         // Create executor with tool registry
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_tool_registry(registry);
+        let mut executor = WorkflowExecutor::new(workflow).with_tool_registry(registry);
 
         // Execute the workflow
         let result = executor.execute().await.unwrap();
@@ -1270,7 +1263,9 @@ mod tests {
 
         // Create a tool registry with echo
         let mut registry = crate::workflow::tools::ToolRegistry::new();
-        registry.register(crate::workflow::tools::Tool::new("echo", "echo")).unwrap();
+        registry
+            .register(crate::workflow::tools::Tool::new("echo", "echo"))
+            .unwrap();
 
         // Create a context with the tool registry and audit log
         let context = TaskContext::new("workflow_1", TaskId::new("tool_task"))
@@ -1281,7 +1276,7 @@ mod tests {
         let task = ToolTask::new(
             TaskId::new("tool_task"),
             "Nonexistent Tool".to_string(),
-            "nonexistent"  // Tool not registered
+            "nonexistent", // Tool not registered
         )
         .with_fallback(Box::new(crate::workflow::tools::SkipFallback::skip()));
 

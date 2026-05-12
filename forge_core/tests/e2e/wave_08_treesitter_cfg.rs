@@ -15,23 +15,22 @@ async fn e2e_cfg_c_simple_function() {
         int add(int a, int b) {
             return a + b;
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
+
     // Extract CFG for C function
-    let cfg = forge.cfg()
-        .extract_function_cfg(
-            &temp_dir.path().join("test.c"),
-            "add"
-        )
+    let cfg = forge
+        .cfg()
+        .extract_function_cfg(&temp_dir.path().join("test.c"), "add")
         .await;
-    
+
     assert!(cfg.is_ok());
     let cfg = cfg.unwrap();
     assert!(cfg.is_some(), "Should extract CFG for C function");
-    
+
     let cfg = cfg.unwrap();
     // Simple function: entry -> body -> exit
     assert_eq!(cfg.entry, forge_core::types::BlockId(0));
@@ -50,22 +49,27 @@ async fn e2e_cfg_c_if_statement() {
                 return b;
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.c"), "max")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     // If statement creates branches
     let paths = cfg.enumerate_paths();
-    assert!(paths.len() >= 2, "If statement should create at least 2 paths");
+    assert!(
+        paths.len() >= 2,
+        "If statement should create at least 2 paths"
+    );
 }
 
 #[tokio::test]
@@ -81,19 +85,21 @@ async fn e2e_cfg_c_for_loop() {
             }
             return total;
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.c"), "sum")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     // Should detect loop
     let loops = cfg.detect_loops();
     assert!(!loops.is_empty(), "Should detect for loop");
@@ -111,19 +117,21 @@ async fn e2e_cfg_c_while_loop() {
             }
             return n;
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.c"), "countdown")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     let loops = cfg.detect_loops();
     assert!(!loops.is_empty(), "Should detect while loop");
 }
@@ -142,22 +150,25 @@ async fn e2e_cfg_c_multiple_functions() {
             int result = helper(5);
             return result;
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
+
     // Should extract both functions
-    let helper_cfg = forge.cfg()
+    let helper_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.c"), "helper")
         .await
         .unwrap();
-    
-    let main_cfg = forge.cfg()
+
+    let main_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.c"), "main")
         .await
         .unwrap();
-    
+
     assert!(helper_cfg.is_some());
     assert!(main_cfg.is_some());
 }
@@ -175,15 +186,17 @@ async fn e2e_cfg_java_simple_method() {
                 return a + b;
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Test.java"), "add")
         .await;
-    
+
     assert!(cfg.is_ok());
     let cfg = cfg.unwrap();
     assert!(cfg.is_some(), "Should extract CFG for Java method");
@@ -204,19 +217,21 @@ async fn e2e_cfg_java_if_else() {
                 }
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Test.java"), "max")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     let paths = cfg.enumerate_paths();
     assert!(paths.len() >= 2, "If-else should create 2+ paths");
 }
@@ -236,19 +251,21 @@ async fn e2e_cfg_java_for_loop() {
                 return total;
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Test.java"), "sum")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     let loops = cfg.detect_loops();
     assert!(!loops.is_empty(), "Should detect for loop in Java");
 }
@@ -270,19 +287,21 @@ async fn e2e_cfg_java_nested_loops() {
                 return sum;
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Test.java"), "matrixSum")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     let loops = cfg.detect_loops();
     assert!(loops.len() >= 2, "Should detect nested loops");
 }
@@ -306,27 +325,31 @@ async fn e2e_cfg_java_multiple_methods() {
                 return a * b;
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
+
     // Extract all three methods
-    let add_cfg = forge.cfg()
+    let add_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Calculator.java"), "add")
         .await
         .unwrap();
-    
-    let sub_cfg = forge.cfg()
+
+    let sub_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Calculator.java"), "subtract")
         .await
         .unwrap();
-    
-    let mul_cfg = forge.cfg()
+
+    let mul_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Calculator.java"), "multiply")
         .await
         .unwrap();
-    
+
     assert!(add_cfg.is_some());
     assert!(sub_cfg.is_some());
     assert!(mul_cfg.is_some());
@@ -343,15 +366,17 @@ async fn e2e_cfg_rust_simple_function() {
         fn add(a: i32, b: i32) -> i32 {
             a + b
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.rs"), "add")
         .await;
-    
+
     assert!(cfg.is_ok());
     let cfg = cfg.unwrap();
     assert!(cfg.is_some(), "Should extract CFG for Rust function");
@@ -366,19 +391,21 @@ async fn e2e_cfg_rust_if_expression() {
         fn max(a: i32, b: i32) -> i32 {
             if a > b { a } else { b }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.rs"), "max")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     // CFG extraction works for Rust if expressions
     let dom_tree = cfg.compute_dominators();
     assert_eq!(dom_tree.root, forge_core::types::BlockId(0));
@@ -397,16 +424,18 @@ async fn e2e_cfg_rust_loop_expression() {
             }
             n
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.rs"), "countdown")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
 }
 
@@ -423,16 +452,18 @@ async fn e2e_cfg_rust_for_loop() {
             }
             total
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.rs"), "sum")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
 }
 
@@ -449,16 +480,18 @@ async fn e2e_cfg_rust_match_expression() {
                 _ => "other",
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.rs"), "classify")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
 }
 
@@ -476,21 +509,24 @@ async fn e2e_cfg_rust_multiple_functions() {
             let result = helper(5);
             println!("{}", result);
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let helper_cfg = forge.cfg()
+
+    let helper_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("lib.rs"), "helper")
         .await
         .unwrap();
-    
-    let main_cfg = forge.cfg()
+
+    let main_cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("lib.rs"), "main")
         .await
         .unwrap();
-    
+
     assert!(helper_cfg.is_some());
     assert!(main_cfg.is_some());
 }
@@ -510,21 +546,23 @@ async fn e2e_cfg_c_dominator_analysis() {
             }
             return 0;
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("test.c"), "test")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     let dom_tree = cfg.compute_dominators();
-    
+
     // Entry block should dominate all blocks
     assert!(dom_tree.dominates(forge_core::types::BlockId(0), forge_core::types::BlockId(0)));
 }
@@ -544,19 +582,21 @@ async fn e2e_cfg_java_dominator_analysis() {
                 return 0;
             }
         }
-        "#
-    ).unwrap();
-    
+        "#,
+    )
+    .unwrap();
+
     let forge = Forge::open(temp_dir.path()).await.unwrap();
-    
-    let cfg = forge.cfg()
+
+    let cfg = forge
+        .cfg()
         .extract_function_cfg(&temp_dir.path().join("Test.java"), "test")
         .await
         .unwrap();
-    
+
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
-    
+
     let dom_tree = cfg.compute_dominators();
     assert_eq!(dom_tree.root, forge_core::types::BlockId(0));
 }

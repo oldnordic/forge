@@ -51,21 +51,25 @@ impl EditModule {
     /// Apply an edit operation using splice.
     pub async fn apply(&mut self, op: EditOperation) -> Result<()> {
         match op {
-            EditOperation::Replace { file_path, start, end, new_content } => {
+            EditOperation::Replace {
+                file_path,
+                start,
+                end,
+                new_content,
+            } => {
                 #[cfg(feature = "splice")]
                 {
-                    splice::patch::replace_span(
-                        &file_path,
-                        start,
-                        end,
-                        &new_content,
-                    ).map_err(|e| ForgeError::DatabaseError(format!("Splice replace failed: {}", e)))?;
+                    splice::patch::replace_span(&file_path, start, end, &new_content).map_err(
+                        |e| ForgeError::DatabaseError(format!("Splice replace failed: {}", e)),
+                    )?;
                     Ok(())
                 }
                 #[cfg(not(feature = "splice"))]
                 {
                     let _ = (file_path, start, end, new_content);
-                    Err(ForgeError::DatabaseError("splice feature not enabled".to_string()))
+                    Err(ForgeError::DatabaseError(
+                        "splice feature not enabled".to_string(),
+                    ))
                 }
             }
         }
@@ -76,15 +80,12 @@ impl EditModule {
     /// Uses magellan to find the symbol's byte span, then splice to apply
     /// the replacement with validation. Falls back to file-system scanning
     /// when no database is available.
-    pub async fn patch_symbol(
-        &self,
-        symbol: &str,
-        replacement: &str,
-    ) -> Result<EditResult> {
+    pub async fn patch_symbol(&self, symbol: &str, replacement: &str) -> Result<EditResult> {
         let db_path = self.store.db_path.join("graph.db");
 
         if db_path.exists() {
-            self.patch_symbol_via_db(symbol, replacement, &db_path).await
+            self.patch_symbol_via_db(symbol, replacement, &db_path)
+                .await
         } else {
             self.patch_symbol_via_files(symbol, replacement).await
         }
@@ -101,13 +102,15 @@ impl EditModule {
         let mut graph = magellan::CodeGraph::open(db_path)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
 
-        let file_nodes = graph.all_file_nodes()
+        let file_nodes = graph
+            .all_file_nodes()
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e)))?;
 
         let mut changed_files = Vec::new();
 
         for (file_path, _file_node) in file_nodes {
-            let symbols = graph.symbols_in_file(&file_path)
+            let symbols = graph
+                .symbols_in_file(&file_path)
                 .map_err(|e| ForgeError::DatabaseError(format!("Failed to get symbols: {}", e)))?;
 
             for sym in symbols {
@@ -126,19 +129,26 @@ impl EditModule {
                                 changed_files.push(PathBuf::from(&file_path));
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to patch {} in {}: {}", symbol, file_path, e);
+                                tracing::warn!(
+                                    "Failed to patch {} in {}: {}",
+                                    symbol,
+                                    file_path,
+                                    e
+                                );
                             }
                         }
                     }
 
                     #[cfg(not(feature = "splice"))]
                     {
-                        let content = tokio::fs::read_to_string(&full_path).await
-                            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read file: {}", e)))?;
+                        let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
+                            ForgeError::DatabaseError(format!("Failed to read file: {}", e))
+                        })?;
                         let mut modified = content.clone();
                         modified.replace_range(sym.byte_start..sym.byte_end, replacement);
-                        tokio::fs::write(&full_path, modified).await
-                            .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                        tokio::fs::write(&full_path, modified).await.map_err(|e| {
+                            ForgeError::DatabaseError(format!("Failed to write file: {}", e))
+                        })?;
                         changed_files.push(PathBuf::from(&file_path));
                     }
                 }
@@ -146,7 +156,10 @@ impl EditModule {
         }
 
         if changed_files.is_empty() {
-            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", symbol)));
+            return Err(ForgeError::SymbolNotFound(format!(
+                "Symbol '{}' not found",
+                symbol
+            )));
         }
 
         Ok(EditResult::success(changed_files))
@@ -159,26 +172,29 @@ impl EditModule {
         _replacement: &str,
         _db_path: &Path,
     ) -> Result<EditResult> {
-        Err(ForgeError::DatabaseError("magellan feature not enabled".to_string()))
+        Err(ForgeError::DatabaseError(
+            "magellan feature not enabled".to_string(),
+        ))
     }
 
     /// Patch by scanning files in the codebase directory.
-    async fn patch_symbol_via_files(
-        &self,
-        symbol: &str,
-        replacement: &str,
-    ) -> Result<EditResult> {
+    async fn patch_symbol_via_files(&self, symbol: &str, replacement: &str) -> Result<EditResult> {
         let codebase = &self.store.codebase_path;
         let mut changed_files = Vec::new();
 
         let mut entries = match tokio::fs::read_dir(codebase).await {
             Ok(entries) => entries,
-            Err(_) => return Err(ForgeError::SymbolNotFound(
-                format!("Symbol '{}' not found (no files in codebase)", symbol),
-            )),
+            Err(_) => {
+                return Err(ForgeError::SymbolNotFound(format!(
+                    "Symbol '{}' not found (no files in codebase)",
+                    symbol
+                )))
+            }
         };
 
-        while let Some(entry) = entries.next_entry().await
+        while let Some(entry) = entries
+            .next_entry()
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to read directory: {}", e)))?
         {
             let path = entry.path();
@@ -196,15 +212,19 @@ impl EditModule {
                 modified.extend_from_slice(replacement.as_bytes());
                 modified.extend_from_slice(&content.as_bytes()[span.1..]);
 
-                tokio::fs::write(&path, modified).await
-                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                tokio::fs::write(&path, modified).await.map_err(|e| {
+                    ForgeError::DatabaseError(format!("Failed to write file: {}", e))
+                })?;
 
                 changed_files.push(path.strip_prefix(codebase).unwrap_or(&path).to_path_buf());
             }
         }
 
         if changed_files.is_empty() {
-            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", symbol)));
+            return Err(ForgeError::SymbolNotFound(format!(
+                "Symbol '{}' not found",
+                symbol
+            )));
         }
 
         Ok(EditResult::success(changed_files))
@@ -215,15 +235,12 @@ impl EditModule {
     /// Uses magellan to find all references to the symbol, then splice
     /// to apply span-safe replacements. Falls back to word-boundary
     /// replacement when no database is available.
-    pub async fn rename_symbol(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<EditResult> {
+    pub async fn rename_symbol(&self, old_name: &str, new_name: &str) -> Result<EditResult> {
         let db_path = self.store.db_path.join("graph.db");
 
         if db_path.exists() {
-            self.rename_symbol_via_db(old_name, new_name, &db_path).await
+            self.rename_symbol_via_db(old_name, new_name, &db_path)
+                .await
         } else {
             self.rename_symbol_via_files(old_name, new_name).await
         }
@@ -241,7 +258,8 @@ impl EditModule {
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
 
         let mut all_refs: Vec<magellan::references::ReferenceFact> = Vec::new();
-        let file_nodes = graph.all_file_nodes()
+        let file_nodes = graph
+            .all_file_nodes()
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e)))?;
 
         for (file_path, _file_node) in file_nodes {
@@ -267,7 +285,10 @@ impl EditModule {
         }
 
         if all_refs.is_empty() {
-            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", old_name)));
+            return Err(ForgeError::SymbolNotFound(format!(
+                "Symbol '{}' not found",
+                old_name
+            )));
         }
 
         let mut changed_files = Vec::new();
@@ -278,10 +299,7 @@ impl EditModule {
             for (file_path, _refs) in by_file {
                 let full_path = self.store.codebase_path.join(&file_path);
                 match splice::graph::rename::apply_replacements_in_file(
-                    &full_path,
-                    old_name,
-                    new_name,
-                    &all_refs,
+                    &full_path, old_name, new_name, &all_refs,
                 ) {
                     Ok(count) if count > 0 => {
                         changed_files.push(file_path);
@@ -299,21 +317,24 @@ impl EditModule {
             let by_file = splice::graph::rename::group_references_by_file(&all_refs);
             for (file_path, _refs) in by_file {
                 let full_path = self.store.codebase_path.join(&file_path);
-                let content = tokio::fs::read_to_string(&full_path).await
-                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to read file: {}", e)))?;
+                let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
+                    ForgeError::DatabaseError(format!("Failed to read file: {}", e))
+                })?;
                 let modified = simple_word_replace(&content, old_name, new_name);
                 if modified != content {
-                    tokio::fs::write(&full_path, modified).await
-                        .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                    tokio::fs::write(&full_path, modified).await.map_err(|e| {
+                        ForgeError::DatabaseError(format!("Failed to write file: {}", e))
+                    })?;
                     changed_files.push(file_path.into());
                 }
             }
         }
 
         if changed_files.is_empty() {
-            return Err(ForgeError::SymbolNotFound(
-                format!("Symbol '{}' references found but no files changed", old_name),
-            ));
+            return Err(ForgeError::SymbolNotFound(format!(
+                "Symbol '{}' references found but no files changed",
+                old_name
+            )));
         }
 
         Ok(EditResult::success(changed_files))
@@ -326,27 +347,30 @@ impl EditModule {
         _new_name: &str,
         _db_path: &Path,
     ) -> Result<EditResult> {
-        Err(ForgeError::DatabaseError("magellan feature not enabled".to_string()))
+        Err(ForgeError::DatabaseError(
+            "magellan feature not enabled".to_string(),
+        ))
     }
 
     /// Rename by scanning files and doing word-boundary replacement.
-    async fn rename_symbol_via_files(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<EditResult> {
+    async fn rename_symbol_via_files(&self, old_name: &str, new_name: &str) -> Result<EditResult> {
         let codebase = &self.store.codebase_path;
         let mut changed_files = Vec::new();
         let mut found_any = false;
 
         let mut entries = match tokio::fs::read_dir(codebase).await {
             Ok(entries) => entries,
-            Err(_) => return Err(ForgeError::SymbolNotFound(
-                format!("Symbol '{}' not found (no files in codebase)", old_name),
-            )),
+            Err(_) => {
+                return Err(ForgeError::SymbolNotFound(format!(
+                    "Symbol '{}' not found (no files in codebase)",
+                    old_name
+                )))
+            }
         };
 
-        while let Some(entry) = entries.next_entry().await
+        while let Some(entry) = entries
+            .next_entry()
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to read directory: {}", e)))?
         {
             let path = entry.path();
@@ -371,14 +395,18 @@ impl EditModule {
 
             let modified = simple_word_replace(&content, old_name, new_name);
             if modified != content {
-                tokio::fs::write(&path, modified).await
-                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                tokio::fs::write(&path, modified).await.map_err(|e| {
+                    ForgeError::DatabaseError(format!("Failed to write file: {}", e))
+                })?;
                 changed_files.push(path.strip_prefix(codebase).unwrap_or(&path).to_path_buf());
             }
         }
 
         if !found_any {
-            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", old_name)));
+            return Err(ForgeError::SymbolNotFound(format!(
+                "Symbol '{}' not found",
+                old_name
+            )));
         }
 
         Ok(EditResult::success(changed_files))
@@ -457,7 +485,11 @@ fn simple_word_replace(content: &str, old: &str, new: &str) -> String {
     let mut last_end = 0;
 
     for (i, _) in content.match_indices(old) {
-        let before = if i > 0 { content.as_bytes().get(i - 1).copied() } else { None };
+        let before = if i > 0 {
+            content.as_bytes().get(i - 1).copied()
+        } else {
+            None
+        };
         let after = content.as_bytes().get(i + old.len()).copied();
 
         let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';

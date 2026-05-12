@@ -4,10 +4,7 @@
 //! relevant context from the code graph to inform intelligent operations.
 
 use crate::Result;
-use forge_core::{
-    types::SymbolId,
-    Forge,
-};
+use forge_core::{types::SymbolId, Forge};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -121,8 +118,8 @@ pub struct ObservedSymbol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use forge_core::Forge;
+    use tempfile::TempDir;
 
     async fn create_test_observer() -> (Observer, TempDir) {
         let temp_dir = TempDir::new().unwrap();

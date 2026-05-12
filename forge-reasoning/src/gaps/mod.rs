@@ -10,7 +10,7 @@ pub mod suggestions;
 
 // Public exports
 pub use analyzer::{
-    KnowledgeGapAnalyzer, KnowledgeGap, GapId, GapCriticality, GapType, ScoringConfig,
-    GapSuggestion, SuggestedAction,
+    GapCriticality, GapId, GapSuggestion, GapType, KnowledgeGap, KnowledgeGapAnalyzer,
+    ScoringConfig, SuggestedAction,
 };
 pub use scoring::{compute_gap_score, recompute_all_scores, PriorityQueue};

@@ -3,7 +3,7 @@
 //! This module implements graph traversal using sqlitegraph's high-level API.
 
 use crate::error::{ForgeError, Result};
-use crate::types::{Reference, SymbolId, ReferenceKind, Location};
+use crate::types::{Location, Reference, ReferenceKind, SymbolId};
 use std::path::Path;
 
 /// Graph query engine using sqlitegraph
@@ -21,21 +21,22 @@ impl GraphQueryEngine {
 
     /// Find all callers of a symbol by name
     pub fn find_callers(&self, symbol_name: &str) -> Result<Vec<Reference>> {
-        use sqlitegraph::{open_graph, GraphConfig, snapshot::SnapshotId};
-        
+        use sqlitegraph::{open_graph, snapshot::SnapshotId, GraphConfig};
+
         let config = GraphConfig::sqlite();
         let backend = open_graph(&self.db_path, &config)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
-        
+
         let target_id = match self.find_symbol_id(&*backend, symbol_name)? {
             Some(id) => id,
             None => return Ok(Vec::new()),
         };
-        
+
         let snapshot = SnapshotId::current();
-        let caller_ids = backend.fetch_incoming(target_id)
+        let caller_ids = backend
+            .fetch_incoming(target_id)
             .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?;
-        
+
         let mut refs = Vec::new();
         for caller_id in caller_ids {
             if let Ok(node) = backend.get_node(snapshot, caller_id) {
@@ -52,27 +53,28 @@ impl GraphQueryEngine {
                 });
             }
         }
-        
+
         Ok(refs)
     }
 
     /// Find all references to a symbol
     pub fn find_references(&self, symbol_name: &str) -> Result<Vec<Reference>> {
-        use sqlitegraph::{open_graph, GraphConfig, snapshot::SnapshotId};
-        
+        use sqlitegraph::{open_graph, snapshot::SnapshotId, GraphConfig};
+
         let config = GraphConfig::sqlite();
         let backend = open_graph(&self.db_path, &config)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
-        
+
         let target_id = match self.find_symbol_id(&*backend, symbol_name)? {
             Some(id) => id,
             None => return Ok(Vec::new()),
         };
-        
+
         let snapshot = SnapshotId::current();
-        let neighbor_ids = backend.fetch_incoming(target_id)
+        let neighbor_ids = backend
+            .fetch_incoming(target_id)
             .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?;
-        
+
         let mut refs = Vec::new();
         for neighbor_id in neighbor_ids {
             if let Ok(node) = backend.get_node(snapshot, neighbor_id) {
@@ -89,18 +91,23 @@ impl GraphQueryEngine {
                 });
             }
         }
-        
+
         Ok(refs)
     }
 
     /// Find symbol ID by name
-    fn find_symbol_id(&self, backend: &dyn sqlitegraph::GraphBackend, symbol_name: &str) -> Result<Option<i64>> {
+    fn find_symbol_id(
+        &self,
+        backend: &dyn sqlitegraph::GraphBackend,
+        symbol_name: &str,
+    ) -> Result<Option<i64>> {
         use sqlitegraph::snapshot::SnapshotId;
-        
+
         let snapshot = SnapshotId::current();
-        let ids = backend.entity_ids()
+        let ids = backend
+            .entity_ids()
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to list entities: {}", e)))?;
-        
+
         for id in ids {
             if let Ok(node) = backend.get_node(snapshot, id) {
                 if node.name == symbol_name {
@@ -108,37 +115,40 @@ impl GraphQueryEngine {
                 }
             }
         }
-        
+
         Ok(None)
     }
 
     /// K-hop traversal to find impacted symbols
     pub fn find_impacted_symbols(
-        &self, 
-        start_symbol: &str, 
-        max_hops: u32
+        &self,
+        start_symbol: &str,
+        max_hops: u32,
     ) -> Result<Vec<ImpactedSymbol>> {
-        use sqlitegraph::{open_graph, GraphConfig, snapshot::SnapshotId, backend::BackendDirection};
-        
+        use sqlitegraph::{
+            backend::BackendDirection, open_graph, snapshot::SnapshotId, GraphConfig,
+        };
+
         let config = GraphConfig::sqlite();
         let backend = open_graph(&self.db_path, &config)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
-        
+
         let start_id = match self.find_symbol_id(&*backend, start_symbol)? {
             Some(id) => id,
             None => return Ok(Vec::new()),
         };
-        
+
         let snapshot = SnapshotId::current();
-        let impacted_ids = backend.k_hop(snapshot, start_id, max_hops, BackendDirection::Outgoing)
+        let impacted_ids = backend
+            .k_hop(snapshot, start_id, max_hops, BackendDirection::Outgoing)
             .map_err(|e| ForgeError::DatabaseError(format!("k-hop query failed: {}", e)))?;
-        
+
         let mut results = Vec::new();
         for id in impacted_ids {
             if id == start_id {
                 continue;
             }
-            
+
             if let Ok(node) = backend.get_node(snapshot, id) {
                 results.push(ImpactedSymbol {
                     symbol_id: id,
@@ -150,7 +160,7 @@ impl GraphQueryEngine {
                 });
             }
         }
-        
+
         Ok(results)
     }
 }
@@ -170,15 +180,15 @@ pub struct ImpactedSymbol {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    
+
     // Note: Tests require a properly initialized sqlitegraph database
     // which has a specific schema. We test the API surface here.
-    
+
     #[test]
     fn test_query_engine_creation() {
         let temp = tempdir().unwrap();
         let db_path = temp.path().join("test.db");
-        
+
         let engine = GraphQueryEngine::new(&db_path);
         assert_eq!(engine.db_path, db_path);
     }

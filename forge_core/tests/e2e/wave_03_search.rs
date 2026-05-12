@@ -11,10 +11,10 @@ async fn create_search_test_project() -> (tempfile::TempDir, std::path::PathBuf)
     let temp_dir = tempdir().unwrap();
     let project_path = temp_dir.path().join("search_test_project");
     std::fs::create_dir(&project_path).unwrap();
-    
+
     let src_dir = project_path.join("src");
     std::fs::create_dir(&src_dir).unwrap();
-    
+
     // Create main.rs with searchable content
     let main_rs = r#"
 fn main() {
@@ -44,10 +44,10 @@ impl DataProcessor {
     }
 }
 "#;
-    
+
     let mut file = std::fs::File::create(src_dir.join("main.rs")).unwrap();
     file.write_all(main_rs.as_bytes()).unwrap();
-    
+
     (temp_dir, project_path)
 }
 
@@ -55,12 +55,12 @@ impl DataProcessor {
 #[tokio::test]
 async fn e2e_search_pattern_function_defs() {
     let (_temp_dir, project_path) = create_search_test_project().await;
-    
+
     let forge = Forge::open(&project_path).await.unwrap();
-    
+
     // Search for function definitions with "process" in name
     let results = forge.search().pattern_search(r"fn \w+process").await;
-    
+
     assert!(results.is_ok(), "Pattern search should work");
     // Results depend on regex implementation
 }
@@ -69,12 +69,12 @@ async fn e2e_search_pattern_function_defs() {
 #[tokio::test]
 async fn e2e_search_pattern_alias() {
     let (_temp_dir, project_path) = create_search_test_project().await;
-    
+
     let forge = Forge::open(&project_path).await.unwrap();
-    
+
     // Use pattern() alias
     let results = forge.search().pattern(r"fn main").await;
-    
+
     assert!(results.is_ok(), "Pattern alias should work");
 }
 
@@ -82,12 +82,12 @@ async fn e2e_search_pattern_alias() {
 #[tokio::test]
 async fn e2e_search_semantic() {
     let (_temp_dir, project_path) = create_search_test_project().await;
-    
+
     let forge = Forge::open(&project_path).await.unwrap();
-    
+
     // Search for "sum calculation"
     let results = forge.search().semantic_search("sum calculation").await;
-    
+
     assert!(results.is_ok(), "Semantic search should work");
 }
 
@@ -95,12 +95,12 @@ async fn e2e_search_semantic() {
 #[tokio::test]
 async fn e2e_search_index() {
     let (_temp_dir, project_path) = create_search_test_project().await;
-    
+
     let forge = Forge::open(&project_path).await.unwrap();
-    
+
     // Index should succeed (even if no-op)
     let result = forge.search().index().await;
-    
+
     assert!(result.is_ok(), "Index should succeed");
 }
 
@@ -108,13 +108,16 @@ async fn e2e_search_index() {
 #[tokio::test]
 async fn e2e_search_empty_query() {
     let (_temp_dir, project_path) = create_search_test_project().await;
-    
+
     let forge = Forge::open(&project_path).await.unwrap();
-    
+
     // Empty query should return empty results, not error
     let results = forge.search().semantic_search("").await;
-    
+
     assert!(results.is_ok(), "Empty query should not fail");
     let results = results.unwrap();
-    assert!(results.is_empty(), "Empty query should return empty results");
+    assert!(
+        results.is_empty(),
+        "Empty query should return empty results"
+    );
 }

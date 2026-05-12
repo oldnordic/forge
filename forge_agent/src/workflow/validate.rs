@@ -106,7 +106,10 @@ impl WorkflowValidator {
     ///
     /// - `Ok(ValidationReport)` - Report with validation results
     /// - `Err(WorkflowError)` - If workflow is empty or has other issues
-    pub fn validate(&self, workflow: &Workflow) -> Result<ValidationReport, crate::workflow::WorkflowError> {
+    pub fn validate(
+        &self,
+        workflow: &Workflow,
+    ) -> Result<ValidationReport, crate::workflow::WorkflowError> {
         if workflow.task_count() == 0 {
             return Err(crate::workflow::WorkflowError::EmptyWorkflow);
         }
@@ -255,7 +258,10 @@ mod tests {
 
     #[async_trait]
     impl WorkflowTask for MockTask {
-        async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+        async fn execute(
+            &self,
+            _context: &TaskContext,
+        ) -> Result<TaskResult, crate::workflow::TaskError> {
             Ok(TaskResult::Success)
         }
 
@@ -324,14 +330,18 @@ mod tests {
     fn test_detect_missing_dependencies() {
         let mut workflow = Workflow::new();
 
-        workflow.add_task(Box::new(MockTask::new("a", "Task A").with_dep("nonexistent")));
+        workflow.add_task(Box::new(
+            MockTask::new("a", "Task A").with_dep("nonexistent"),
+        ));
 
         let validator = WorkflowValidator::new();
         let report = validator.validate(&workflow).unwrap();
 
         assert!(!report.is_valid());
         assert!(report.missing_dependencies().len() > 0);
-        assert!(report.missing_dependencies().contains(&TaskId::new("nonexistent")));
+        assert!(report
+            .missing_dependencies()
+            .contains(&TaskId::new("nonexistent")));
     }
 
     #[test]
@@ -360,6 +370,9 @@ mod tests {
         let validator = WorkflowValidator::new();
 
         let result = validator.validate(&workflow);
-        assert!(matches!(result, Err(crate::workflow::WorkflowError::EmptyWorkflow)));
+        assert!(matches!(
+            result,
+            Err(crate::workflow::WorkflowError::EmptyWorkflow)
+        ));
     }
 }

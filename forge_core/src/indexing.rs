@@ -43,10 +43,7 @@ impl PathFilter {
     pub fn new_with_defaults() -> Self {
         Self {
             // Only index src/ and tests/ directories
-            include_patterns: vec![
-                "**/src/**".to_string(),
-                "**/tests/**".to_string(),
-            ],
+            include_patterns: vec!["**/src/**".to_string(), "**/tests/**".to_string()],
             // Exclude common non-source directories and files
             exclude_patterns: vec![
                 "**/target/**".to_string(),
@@ -85,10 +82,7 @@ impl PathFilter {
     /// * `dirs` - Directories to include (e.g., ["src", "tests"])
     pub fn include_dirs(dirs: &[&str]) -> Self {
         Self {
-            include_patterns: dirs
-                .iter()
-                .map(|d| format!("**/{}/**", d))
-                .collect(),
+            include_patterns: dirs.iter().map(|d| format!("**/{}/**", d)).collect(),
             ..Self::default()
         }
     }
@@ -145,17 +139,17 @@ impl PathFilter {
     fn match_glob(path: &str, pattern: &str) -> bool {
         // Handle **/dir/** pattern (matches dir anywhere in path, with contents)
         if pattern.starts_with("**/") && pattern.ends_with("/**") {
-            let dir = &pattern[3..pattern.len()-3]; // Extract "dir" from "**/dir/**"
-            // Path should contain the directory
+            let dir = &pattern[3..pattern.len() - 3]; // Extract "dir" from "**/dir/**"
+                                                      // Path should contain the directory
             return path.contains(&format!("{}/", dir)) || path.starts_with(&format!("{}/", dir));
         }
-        
+
         // Handle **/suffix pattern (matches suffix anywhere in path)
         if let Some(suffix) = pattern.strip_prefix("**/") {
             // Remove "**/"
             return path.contains(suffix) || path.ends_with(suffix);
         }
-        
+
         // Handle pattern with ** in the middle (e.g., "src/**/test.rs")
         if pattern.contains("/**/") {
             let parts: Vec<&str> = pattern.split("/**/").collect();
@@ -165,13 +159,13 @@ impl PathFilter {
                 return path.starts_with(prefix) && path.contains(suffix);
             }
         }
-        
+
         // Handle single * wildcard (matches within a path component)
         if pattern.contains('*') {
             // Convert glob pattern to regex
             let mut regex_str = String::with_capacity(pattern.len() * 2);
             regex_str.push('^');
-            
+
             for c in pattern.chars() {
                 match c {
                     '*' => regex_str.push_str(".*"),
@@ -186,12 +180,12 @@ impl PathFilter {
                 }
             }
             regex_str.push('$');
-            
+
             if let Ok(re) = regex::Regex::new(&regex_str) {
                 return re.is_match(path);
             }
         }
-        
+
         // Exact match or substring match
         path == pattern || path.contains(pattern)
     }
@@ -406,10 +400,11 @@ impl IncrementalIndexer {
             if path.is_dir() {
                 // Skip excluded directories early
                 let path_str = path.to_string_lossy();
-                if path_str.contains("/target/") 
+                if path_str.contains("/target/")
                     || path_str.contains("/node_modules/")
                     || path_str.contains("/.git/")
-                    || path_str.contains("/.forge/") {
+                    || path_str.contains("/.forge/")
+                {
                     continue;
                 }
 
@@ -487,7 +482,7 @@ pub struct FlushStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{UnifiedGraphStore, BackendKind};
+    use crate::storage::{BackendKind, UnifiedGraphStore};
 
     #[tokio::test]
     async fn test_indexer_creation() {
@@ -519,10 +514,12 @@ mod tests {
         // These should be indexed (src/ and tests/)
         indexer.queue(WatchEvent::Created(PathBuf::from("src/a.rs")));
         indexer.queue(WatchEvent::Modified(PathBuf::from("tests/b.rs")));
-        
+
         // These should be filtered out
         indexer.queue(WatchEvent::Modified(PathBuf::from("target/debug/build.rs")));
-        indexer.queue(WatchEvent::Modified(PathBuf::from("node_modules/foo/index.js")));
+        indexer.queue(WatchEvent::Modified(PathBuf::from(
+            "node_modules/foo/index.js",
+        )));
         indexer.queue(WatchEvent::Modified(PathBuf::from(".git/config")));
         indexer.queue(WatchEvent::Modified(PathBuf::from("Cargo.lock")));
         indexer.queue(WatchEvent::Modified(PathBuf::from("README.md"))); // Not in src/ or tests/
@@ -646,7 +643,11 @@ mod tests {
     #[tokio::test]
     async fn test_full_rescan() {
         let temp = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(temp.path(), BackendKind::default()).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp.path(), BackendKind::default())
+                .await
+                .unwrap(),
+        );
         let indexer = IncrementalIndexer::new(store);
 
         // Create a directory structure
@@ -658,11 +659,21 @@ mod tests {
         tokio::fs::create_dir(&target_dir).await.unwrap();
 
         // Create source files
-        tokio::fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").await.unwrap();
-        tokio::fs::write(src_dir.join("main.rs"), "fn main() {}").await.unwrap();
-        tokio::fs::write(tests_dir.join("test.rs"), "#[test] fn test() {}").await.unwrap();
-        tokio::fs::write(target_dir.join("build.rs"), "// build").await.unwrap(); // Should be ignored
-        tokio::fs::write(temp.path().join("README.md"), "# Project").await.unwrap(); // Should be ignored
+        tokio::fs::write(src_dir.join("lib.rs"), "pub fn foo() {}")
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("main.rs"), "fn main() {}")
+            .await
+            .unwrap();
+        tokio::fs::write(tests_dir.join("test.rs"), "#[test] fn test() {}")
+            .await
+            .unwrap();
+        tokio::fs::write(target_dir.join("build.rs"), "// build")
+            .await
+            .unwrap(); // Should be ignored
+        tokio::fs::write(temp.path().join("README.md"), "# Project")
+            .await
+            .unwrap(); // Should be ignored
 
         // Perform rescan
         let count = indexer.full_rescan(temp.path()).await.unwrap();

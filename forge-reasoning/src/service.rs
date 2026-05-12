@@ -8,8 +8,10 @@ use std::sync::{Mutex, RwLock};
 
 use chrono::Utc;
 
-use crate::checkpoint::{AutoTrigger, CheckpointId, CheckpointSummary, SessionId, TemporalCheckpoint};
-use crate::errors::{Result, ReasoningError};
+use crate::checkpoint::{
+    AutoTrigger, CheckpointId, CheckpointSummary, SessionId, TemporalCheckpoint,
+};
+use crate::errors::{ReasoningError, Result};
 use crate::thread_safe::{ThreadSafeCheckpointManager, ThreadSafeStorage};
 
 /// Configuration for auto-checkpointing
@@ -142,13 +144,13 @@ struct SessionInfo {
 
 impl CheckpointService {
     /// Create a new checkpoint service
-    /// 
+    ///
     /// Initializes the global sequence counter from storage to ensure
     /// monotonic sequences across service restarts.
     pub fn new(storage: ThreadSafeStorage) -> Self {
         // Initialize global sequence from storage (find max existing sequence)
         let initial_sequence = Self::find_max_sequence(&storage);
-        
+
         Self {
             storage,
             sessions: RwLock::new(HashMap::new()),
@@ -166,7 +168,7 @@ impl CheckpointService {
     }
 
     /// Get the current global sequence number
-    /// 
+    ///
     /// Returns the sequence number of the most recently created checkpoint.
     /// Returns 0 if no checkpoints have been created yet.
     pub fn global_sequence(&self) -> u64 {
@@ -174,7 +176,7 @@ impl CheckpointService {
     }
 
     /// Get the next sequence number atomically
-    /// 
+    ///
     /// Returns 1-based sequence numbers (first checkpoint is 1, not 0)
     fn next_sequence(&self) -> u64 {
         self.global_sequence.fetch_add(1, Ordering::SeqCst) + 1
@@ -193,10 +195,8 @@ impl CheckpointService {
     /// Create a new session
     pub fn create_session(&self, _name: &str) -> Result<SessionId> {
         let session_id = SessionId::new();
-        let info = SessionInfo {
-            auto_config: None,
-        };
-        
+        let info = SessionInfo { auto_config: None };
+
         self.sessions.write().unwrap().insert(session_id, info);
         Ok(session_id)
     }
@@ -207,22 +207,28 @@ impl CheckpointService {
     }
 
     /// Create a checkpoint with global sequence number
-    pub fn checkpoint(&self, session_id: &SessionId, message: impl Into<String>) -> Result<CheckpointId> {
+    pub fn checkpoint(
+        &self,
+        session_id: &SessionId,
+        message: impl Into<String>,
+    ) -> Result<CheckpointId> {
         if !self.is_running() {
-            return Err(ReasoningError::InvalidState("Service not running".to_string()));
+            return Err(ReasoningError::InvalidState(
+                "Service not running".to_string(),
+            ));
         }
-        
+
         let manager = self.get_manager(*session_id);
         let seq = self.next_sequence();
         let id = manager.checkpoint_with_sequence(message, seq)?;
-        
+
         // Emit event
         self.emit_event(CheckpointEvent::Created {
             checkpoint_id: id,
             session_id: *session_id,
             timestamp: Utc::now(),
         });
-        
+
         Ok(id)
     }
 
@@ -233,39 +239,54 @@ impl CheckpointService {
     }
 
     /// Restore a checkpoint
-    pub fn restore(&self, session_id: &SessionId, checkpoint_id: &CheckpointId) -> Result<crate::checkpoint::DebugStateSnapshot> {
+    pub fn restore(
+        &self,
+        session_id: &SessionId,
+        checkpoint_id: &CheckpointId,
+    ) -> Result<crate::checkpoint::DebugStateSnapshot> {
         let manager = self.get_manager(*session_id);
         let checkpoint = manager.get(checkpoint_id)?.ok_or_else(|| {
             ReasoningError::NotFound(format!("Checkpoint {} not found", checkpoint_id))
         })?;
-        
+
         let state = manager.restore(&checkpoint)?;
-        
+
         self.emit_event(CheckpointEvent::Restored {
             checkpoint_id: *checkpoint_id,
             session_id: *session_id,
         });
-        
+
         Ok(state)
     }
 
     /// Enable auto-checkpointing for a session
-    pub fn enable_auto_checkpoint(&self, session_id: &SessionId, config: AutoCheckpointConfig) -> Result<()> {
+    pub fn enable_auto_checkpoint(
+        &self,
+        session_id: &SessionId,
+        config: AutoCheckpointConfig,
+    ) -> Result<()> {
         let mut sessions = self.sessions.write().unwrap();
         if let Some(info) = sessions.get_mut(session_id) {
             info.auto_config = Some(config);
             Ok(())
         } else {
-            Err(ReasoningError::NotFound(format!("Session {:?} not found", session_id)))
+            Err(ReasoningError::NotFound(format!(
+                "Session {:?} not found",
+                session_id
+            )))
         }
     }
 
     /// Trigger an auto-checkpoint with global sequence
-    pub fn trigger_auto_checkpoint(&self, session_id: &SessionId, trigger: AutoTrigger) -> Result<Option<CheckpointId>> {
+    pub fn trigger_auto_checkpoint(
+        &self,
+        session_id: &SessionId,
+        trigger: AutoTrigger,
+    ) -> Result<Option<CheckpointId>> {
         let manager = self.get_manager(*session_id);
         let seq = self.next_sequence();
         let result = manager.auto_checkpoint_with_sequence(trigger, seq)?;
-        
+
         if let Some(id) = result {
             self.emit_event(CheckpointEvent::Created {
                 checkpoint_id: id,
@@ -273,17 +294,20 @@ impl CheckpointService {
                 timestamp: Utc::now(),
             });
         }
-        
+
         Ok(result)
     }
 
     /// Subscribe to checkpoint events for a session
-    pub fn subscribe(&self, session_id: &SessionId) -> Result<tokio::sync::mpsc::Receiver<CheckpointEvent>> {
+    pub fn subscribe(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<tokio::sync::mpsc::Receiver<CheckpointEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // Buffer up to 100 events
-        
+
         let mut subscribers = self.subscribers.lock().unwrap();
         subscribers.entry(*session_id).or_default().push(tx);
-        
+
         Ok(rx)
     }
 
@@ -295,7 +319,7 @@ impl CheckpointService {
             CheckpointEvent::Deleted { session_id, .. } => *session_id,
             CheckpointEvent::Compacted { session_id, .. } => *session_id,
         };
-        
+
         let subscribers = self.subscribers.lock().unwrap();
         if let Some(subs) = subscribers.get(&session_id) {
             for tx in subs {
@@ -308,7 +332,11 @@ impl CheckpointService {
     /// Execute a command
     pub fn execute(&self, command: CheckpointCommand) -> Result<CommandResult> {
         match command {
-            CheckpointCommand::Create { session_id, message, tags } => {
+            CheckpointCommand::Create {
+                session_id,
+                message,
+                tags,
+            } => {
                 let manager = self.get_manager(session_id);
                 let seq = self.next_sequence();
                 let id = if tags.is_empty() {
@@ -316,13 +344,13 @@ impl CheckpointService {
                 } else {
                     manager.checkpoint_with_tags_and_sequence(message, tags, seq)?
                 };
-                
+
                 self.emit_event(CheckpointEvent::Created {
                     checkpoint_id: id,
                     session_id,
                     timestamp: Utc::now(),
                 });
-                
+
                 Ok(CommandResult::Created(id))
             }
             CheckpointCommand::List { session_id } => {
@@ -330,7 +358,10 @@ impl CheckpointService {
                 let checkpoints = manager.list()?;
                 Ok(CommandResult::List(checkpoints))
             }
-            CheckpointCommand::Restore { session_id, checkpoint_id } => {
+            CheckpointCommand::Restore {
+                session_id,
+                checkpoint_id,
+            } => {
                 let _checkpoint = self.restore(&session_id, &checkpoint_id)?;
                 // Create a minimal TemporalCheckpoint for the result
                 let manager = self.get_manager(session_id);
@@ -346,23 +377,26 @@ impl CheckpointService {
                     let manager = self.get_manager(*session_id);
                     let _ = manager.delete(&checkpoint_id);
                 }
-                
+
                 self.emit_event(CheckpointEvent::Deleted {
                     checkpoint_id,
                     session_id: SessionId::new(), // Simplified
                 });
-                
+
                 Ok(CommandResult::Deleted)
             }
-            CheckpointCommand::Compact { session_id, keep_recent } => {
+            CheckpointCommand::Compact {
+                session_id,
+                keep_recent,
+            } => {
                 let manager = self.get_manager(session_id);
                 let deleted = manager.compact(keep_recent)?;
-                
+
                 self.emit_event(CheckpointEvent::Compacted {
                     session_id,
                     remaining: keep_recent,
                 });
-                
+
                 Ok(CommandResult::Compacted(deleted))
             }
         }
@@ -376,7 +410,11 @@ impl CheckpointService {
     }
 
     /// Annotate a checkpoint
-    pub fn annotate(&self, checkpoint_id: &CheckpointId, annotation: CheckpointAnnotation) -> Result<()> {
+    pub fn annotate(
+        &self,
+        checkpoint_id: &CheckpointId,
+        annotation: CheckpointAnnotation,
+    ) -> Result<()> {
         // Verify checkpoint exists
         let sessions = self.sessions.read().unwrap();
         let mut found = false;
@@ -387,49 +425,61 @@ impl CheckpointService {
                 break;
             }
         }
-        
+
         if !found {
-            return Err(ReasoningError::NotFound(format!("Checkpoint {} not found", checkpoint_id)));
+            return Err(ReasoningError::NotFound(format!(
+                "Checkpoint {} not found",
+                checkpoint_id
+            )));
         }
-        
+
         // Store annotation
         let mut annotations = self.annotations.write().unwrap();
-        annotations.entry(*checkpoint_id).or_default().push(annotation);
-        
+        annotations
+            .entry(*checkpoint_id)
+            .or_default()
+            .push(annotation);
+
         Ok(())
     }
 
     /// Get checkpoint with annotations
-    pub fn get_with_annotations(&self, checkpoint_id: &CheckpointId) -> Result<AnnotatedCheckpoint> {
+    pub fn get_with_annotations(
+        &self,
+        checkpoint_id: &CheckpointId,
+    ) -> Result<AnnotatedCheckpoint> {
         let sessions = self.sessions.read().unwrap();
         let annotations = self.annotations.read().unwrap();
-        
+
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
             if let Some(checkpoint) = manager.get(checkpoint_id)? {
-                let checkpoint_annotations = annotations.get(checkpoint_id)
-                    .cloned()
-                    .unwrap_or_default();
-                
+                let checkpoint_annotations =
+                    annotations.get(checkpoint_id).cloned().unwrap_or_default();
+
                 return Ok(AnnotatedCheckpoint {
                     checkpoint,
                     annotations: checkpoint_annotations,
                 });
             }
         }
-        Err(ReasoningError::NotFound(format!("Checkpoint {} not found", checkpoint_id)))
+        Err(ReasoningError::NotFound(format!(
+            "Checkpoint {} not found",
+            checkpoint_id
+        )))
     }
 
     /// Get service metrics
     pub fn metrics(&self) -> Result<ServiceMetrics> {
         let sessions = self.sessions.read().unwrap();
-        let total_checkpoints: usize = sessions.keys()
+        let total_checkpoints: usize = sessions
+            .keys()
             .map(|session_id| {
                 let manager = self.get_manager(*session_id);
                 manager.list().map(|cps| cps.len()).unwrap_or(0)
             })
             .sum();
-        
+
         Ok(ServiceMetrics {
             total_checkpoints,
             active_sessions: sessions.len(),
@@ -445,7 +495,7 @@ impl CheckpointService {
                 message: "Service is stopped".to_string(),
             });
         }
-        
+
         // Try a simple operation
         match self.storage.list_by_session(SessionId::new()) {
             Ok(_) => Ok(HealthStatus {
@@ -460,13 +510,17 @@ impl CheckpointService {
     }
 
     /// List checkpoints by global sequence number range
-    /// 
+    ///
     /// Returns all checkpoints (across all sessions) with sequence numbers
     /// in the inclusive range [start_seq, end_seq].
-    pub fn list_by_sequence_range(&self, start_seq: u64, end_seq: u64) -> Result<Vec<CheckpointSummary>> {
+    pub fn list_by_sequence_range(
+        &self,
+        start_seq: u64,
+        end_seq: u64,
+    ) -> Result<Vec<CheckpointSummary>> {
         let sessions = self.sessions.read().unwrap();
         let mut all_checkpoints = Vec::new();
-        
+
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
             let cps = manager.list()?;
@@ -476,20 +530,20 @@ impl CheckpointService {
                 }
             }
         }
-        
+
         // Sort by sequence number
         all_checkpoints.sort_by_key(|cp| cp.sequence_number);
         Ok(all_checkpoints)
     }
 
     /// Export all checkpoints from all sessions
-    /// 
+    ///
     /// Returns a JSON-serializable export containing all checkpoints
     /// and the current global sequence number.
     pub fn export_all_checkpoints(&self) -> Result<String> {
         let sessions = self.sessions.read().unwrap();
         let mut all_checkpoints: Vec<TemporalCheckpoint> = Vec::new();
-        
+
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
             let cps = manager.list()?;
@@ -499,36 +553,35 @@ impl CheckpointService {
                 }
             }
         }
-        
+
         // Sort by sequence number
         all_checkpoints.sort_by_key(|cp| cp.sequence_number);
-        
+
         let export = ExportData {
             checkpoints: all_checkpoints,
             global_sequence: self.global_sequence(),
             exported_at: Utc::now(),
         };
-        
-        serde_json::to_string_pretty(&export)
-            .map_err(ReasoningError::Serialization)
+
+        serde_json::to_string_pretty(&export).map_err(ReasoningError::Serialization)
     }
 
     /// Import checkpoints from export data
-    /// 
+    ///
     /// Imports all checkpoints and restores the global sequence counter.
     /// Skips checkpoints that already exist (by ID).
     pub fn import_checkpoints(&self, export_data: &str) -> Result<ImportResult> {
-        let export: ExportData = serde_json::from_str(export_data)
-            .map_err(ReasoningError::Serialization)?;
-        
+        let export: ExportData =
+            serde_json::from_str(export_data).map_err(ReasoningError::Serialization)?;
+
         let mut imported = 0;
         let mut skipped = 0;
         let mut max_sequence = 0u64;
-        
+
         for checkpoint in export.checkpoints {
             // Track the maximum sequence number
             max_sequence = max_sequence.max(checkpoint.sequence_number);
-            
+
             // Check if checkpoint already exists
             let manager = self.get_manager(checkpoint.session_id);
             match manager.get(&checkpoint.id) {
@@ -546,27 +599,27 @@ impl CheckpointService {
                 }
             }
         }
-        
+
         // Update global sequence if imported checkpoints have higher sequences
         let current = self.global_sequence();
         if max_sequence > current {
             self.global_sequence.store(max_sequence, Ordering::SeqCst);
         }
-        
+
         Ok(ImportResult { imported, skipped })
     }
 
     /// Validate a single checkpoint by ID
-    /// 
+    ///
     /// Returns true if the checkpoint's checksum is valid, false otherwise.
     pub fn validate_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<bool> {
         let cp = self.get_with_annotations(checkpoint_id)?;
-        
+
         // Empty checksum means legacy checkpoint (skip validation)
         if cp.checkpoint.checksum.is_empty() {
             return Ok(true);
         }
-        
+
         match cp.checkpoint.validate() {
             Ok(()) => Ok(true),
             Err(_) => Ok(false),
@@ -574,7 +627,7 @@ impl CheckpointService {
     }
 
     /// Health check with validation of recent checkpoints
-    /// 
+    ///
     /// Performs a health check and additionally validates the most
     /// recent checkpoints to detect data corruption.
     pub fn health_check_with_validation(&self) -> Result<HealthStatus> {
@@ -583,12 +636,12 @@ impl CheckpointService {
         if !basic.healthy {
             return Ok(basic);
         }
-        
+
         // Validate recent checkpoints from all sessions
         let sessions = self.sessions.read().unwrap();
         let mut checked = 0;
         let mut invalid = 0;
-        
+
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
             if let Ok(cps) = manager.list() {
@@ -606,14 +659,17 @@ impl CheckpointService {
                 }
             }
         }
-        
+
         if invalid > 0 {
             return Ok(HealthStatus {
                 healthy: false,
-                message: format!("{} of {} recent checkpoints failed validation", invalid, checked),
+                message: format!(
+                    "{} of {} recent checkpoints failed validation",
+                    invalid, checked
+                ),
             });
         }
-        
+
         Ok(HealthStatus {
             healthy: true,
             message: format!("Service healthy, {} recent checkpoints validated", checked),
@@ -621,7 +677,7 @@ impl CheckpointService {
     }
 
     /// Validate all checkpoints
-    /// 
+    ///
     /// Performs a full validation of all checkpoints in the system.
     /// Returns a report with validation statistics.
     pub fn validate_all_checkpoints(&self) -> Result<ValidationReport> {
@@ -629,7 +685,7 @@ impl CheckpointService {
         let mut valid = 0;
         let mut invalid = 0;
         let mut skipped = 0;
-        
+
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
             if let Ok(cps) = manager.list() {
@@ -651,7 +707,7 @@ impl CheckpointService {
                 }
             }
         }
-        
+
         Ok(ValidationReport {
             valid,
             invalid,
@@ -691,7 +747,7 @@ impl ValidationReport {
     pub fn total(&self) -> usize {
         self.valid + self.invalid + self.skipped
     }
-    
+
     /// Whether all checked checkpoints were valid
     pub fn all_valid(&self) -> bool {
         self.invalid == 0
@@ -721,7 +777,7 @@ mod tests {
     fn test_service_basic() {
         let service = CheckpointService::new(ThreadSafeStorage::in_memory().unwrap());
         assert!(service.is_running());
-        
+
         let session = service.create_session("test").unwrap();
         let id = service.checkpoint(&session, "Test").unwrap();
         assert!(!id.to_string().is_empty());

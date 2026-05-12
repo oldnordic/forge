@@ -71,14 +71,14 @@
 //! # }
 //! ```
 
-use async_trait::async_trait;
+#[cfg(any(doc, test))]
+use crate::workflow::tasks::{AgentLoopTask, FunctionTask, GraphQueryTask};
 use crate::workflow::{
     builder::WorkflowBuilder,
     task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask},
     Workflow,
 };
-#[cfg(any(doc, test))]
-use crate::workflow::tasks::{AgentLoopTask, FunctionTask, GraphQueryTask};
+use async_trait::async_trait;
 
 /// Creates a linear workflow that executes tasks sequentially.
 ///
@@ -197,7 +197,10 @@ pub fn example_graph_aware_workflow() -> Result<Workflow, WorkflowError> {
             TaskId::new("graph_query_FindSymbol"),
             TaskId::new("graph_query_References"),
         )
-        .dependency(TaskId::new("graph_query_References"), TaskId::new("analyze"))
+        .dependency(
+            TaskId::new("graph_query_References"),
+            TaskId::new("analyze"),
+        )
         .build()
 }
 
@@ -636,7 +639,10 @@ mod tests {
                 TaskId::new("graph_query_FindSymbol"),
                 TaskId::new("graph_query_References"),
             )
-            .dependency(TaskId::new("graph_query_References"), TaskId::new("analyze"))
+            .dependency(
+                TaskId::new("graph_query_References"),
+                TaskId::new("analyze"),
+            )
             .build();
 
         assert!(result.is_ok());
@@ -794,7 +800,8 @@ mod tests {
         let result = tokio::time::timeout(
             tokio::time::Duration::from_millis(100),
             task.execute(&context),
-        ).await;
+        )
+        .await;
         let elapsed = start.elapsed();
 
         // Should timeout at 100ms (not 5s work duration, not 30s internal timeout)

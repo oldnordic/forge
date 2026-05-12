@@ -3,11 +3,11 @@
 //! This module implements the mutation phase, applying changes through
 //! the edit module with transaction support.
 
-use crate::{AgentError, Result};
 use crate::transaction::Transaction;
+use crate::{AgentError, Result};
 use std::path::Path;
-use uuid::Uuid;
 use tokio::fs;
+use uuid::Uuid;
 
 /// Mutator for transaction-based code changes.
 ///
@@ -54,7 +54,10 @@ impl Mutator {
                 if old_path.exists() {
                     let new_path = Path::new(new);
                     fs::rename(old_path, new_path).await.map_err(|e| {
-                        AgentError::MutationFailed(format!("Failed to rename {} to {}: {}", old, new, e))
+                        AgentError::MutationFailed(format!(
+                            "Failed to rename {} to {}: {}",
+                            old, new, e
+                        ))
                     })?;
                 }
             }
@@ -84,7 +87,12 @@ impl Mutator {
             crate::planner::PlanOperation::Inspect { .. } => {
                 // No mutation needed for read-only operations
             }
-            crate::planner::PlanOperation::Modify { file, start, end, replacement } => {
+            crate::planner::PlanOperation::Modify {
+                file,
+                start,
+                end,
+                replacement,
+            } => {
                 let file_path = Path::new(file);
                 transaction.snapshot_file(file_path).await?;
 
@@ -100,9 +108,13 @@ impl Mutator {
                         AgentError::MutationFailed(format!("Failed to write {}: {}", file, e))
                     })?;
                 } else {
-                    return Err(AgentError::MutationFailed(
-                        format!("Invalid byte span {}..{} for {} ({} bytes)", start, end, file, content_bytes.len()),
-                    ));
+                    return Err(AgentError::MutationFailed(format!(
+                        "Invalid byte span {}..{} for {} ({} bytes)",
+                        start,
+                        end,
+                        file,
+                        content_bytes.len()
+                    )));
                 }
             }
         }
@@ -239,7 +251,9 @@ mod tests {
     async fn test_apply_step_modify_snapshots_file() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.rs");
-        tokio::fs::write(&file_path, "original content").await.unwrap();
+        tokio::fs::write(&file_path, "original content")
+            .await
+            .unwrap();
 
         let mut mutator = Mutator::new();
         mutator.begin_transaction().await.unwrap();
@@ -288,7 +302,10 @@ mod tests {
 
         // into_transaction consumes self, so we can't check mutator after
         // But we can verify the transaction is in Active state
-        assert_eq!(transaction.state(), &crate::transaction::TransactionState::Active);
+        assert_eq!(
+            transaction.state(),
+            &crate::transaction::TransactionState::Active
+        );
     }
 
     #[tokio::test]
@@ -304,7 +321,9 @@ mod tests {
     async fn test_rollback_restores_file_content() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.rs");
-        tokio::fs::write(&file_path, "original content").await.unwrap();
+        tokio::fs::write(&file_path, "original content")
+            .await
+            .unwrap();
 
         let mut mutator = Mutator::new();
         mutator.begin_transaction().await.unwrap();

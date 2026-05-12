@@ -45,9 +45,9 @@ impl Agent {
         let path = codebase_path.as_ref();
 
         // Create runtime first
-        let runtime = ForgeRuntime::new(path)
-            .await
-            .map_err(|e| AgentError::ObservationFailed(format!("Failed to create runtime: {}", e)))?;
+        let runtime = ForgeRuntime::new(path).await.map_err(|e| {
+            AgentError::ObservationFailed(format!("Failed to create runtime: {}", e))
+        })?;
 
         // Create agent with runtime's forge (shares the same graph store)
         let agent = Agent::new(path).await?;

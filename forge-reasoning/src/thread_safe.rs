@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 
 use crate::checkpoint::{
-    CheckpointId, CheckpointSummary, CompactionPolicy, DebugStateSnapshot, 
-    SessionId, TemporalCheckpoint
+    CheckpointId, CheckpointSummary, CompactionPolicy, DebugStateSnapshot, SessionId,
+    TemporalCheckpoint,
 };
 use crate::errors::Result;
 use crate::storage::CheckpointStorage;
@@ -97,7 +97,7 @@ unsafe impl Send for ThreadSafeStorage {}
 unsafe impl Sync for ThreadSafeStorage {}
 
 /// Thread-safe checkpoint manager
-/// 
+///
 /// Wraps operations in Mutex for concurrent access
 pub struct ThreadSafeCheckpointManager {
     storage: ThreadSafeStorage,
@@ -196,10 +196,16 @@ impl ThreadSafeCheckpointManager {
     }
 
     /// Create an automatic checkpoint with auto-generated sequence
-    pub fn auto_checkpoint(&self, trigger: crate::checkpoint::AutoTrigger) -> Result<Option<CheckpointId>> {
+    pub fn auto_checkpoint(
+        &self,
+        trigger: crate::checkpoint::AutoTrigger,
+    ) -> Result<Option<CheckpointId>> {
         let should_checkpoint = match trigger {
             crate::checkpoint::AutoTrigger::SignificantTimePassed => {
-                let last = *self.last_checkpoint_time.lock().expect("Time lock poisoned");
+                let last = *self
+                    .last_checkpoint_time
+                    .lock()
+                    .expect("Time lock poisoned");
                 Utc::now().signed_duration_since(last).num_minutes() > 5
             }
             _ => true,
@@ -214,7 +220,7 @@ impl ThreadSafeCheckpointManager {
             *counter += 1;
             *counter
         };
-        
+
         self.auto_checkpoint_with_sequence(trigger, seq)
     }
 
@@ -280,7 +286,7 @@ impl ThreadSafeCheckpointManager {
     /// Compact with policy
     pub fn compact_with_policy(&self, policy: CompactionPolicy) -> Result<usize> {
         let all_checkpoints = self.storage.list_by_session(self.session_id)?;
-        
+
         // Determine which checkpoints to keep
         let ids_to_keep: std::collections::HashSet<CheckpointId> = match &policy {
             CompactionPolicy::KeepRecent(n) => {
@@ -288,31 +294,33 @@ impl ThreadSafeCheckpointManager {
                 sorted.sort_by_key(|cp| cp.sequence_number);
                 sorted.iter().rev().take(*n).map(|cp| cp.id).collect()
             }
-            CompactionPolicy::PreserveTagged(tags) => {
-                all_checkpoints.iter()
-                    .filter(|cp| cp.tags.iter().any(|t| tags.contains(t)))
-                    .map(|cp| cp.id)
-                    .collect()
-            }
-            CompactionPolicy::Hybrid { keep_recent, preserve_tags } => {
+            CompactionPolicy::PreserveTagged(tags) => all_checkpoints
+                .iter()
+                .filter(|cp| cp.tags.iter().any(|t| tags.contains(t)))
+                .map(|cp| cp.id)
+                .collect(),
+            CompactionPolicy::Hybrid {
+                keep_recent,
+                preserve_tags,
+            } => {
                 let mut to_keep = std::collections::HashSet::new();
-                
+
                 let mut sorted = all_checkpoints.clone();
                 sorted.sort_by_key(|cp| cp.sequence_number);
                 for cp in sorted.iter().rev().take(*keep_recent) {
                     to_keep.insert(cp.id);
                 }
-                
+
                 for cp in &all_checkpoints {
                     if cp.tags.iter().any(|t| preserve_tags.contains(t)) {
                         to_keep.insert(cp.id);
                     }
                 }
-                
+
                 to_keep
             }
         };
-        
+
         // Delete checkpoints not in keep list
         let mut deleted = 0;
         for cp in &all_checkpoints {
@@ -321,7 +329,7 @@ impl ThreadSafeCheckpointManager {
                 deleted += 1;
             }
         }
-        
+
         Ok(deleted)
     }
 
@@ -329,7 +337,7 @@ impl ThreadSafeCheckpointManager {
     pub fn restore(&self, checkpoint: &TemporalCheckpoint) -> Result<DebugStateSnapshot> {
         if checkpoint.state.working_dir.is_none() {
             return Err(crate::errors::ReasoningError::InvalidState(
-                "Checkpoint has no working directory".to_string()
+                "Checkpoint has no working directory".to_string(),
             ));
         }
         Ok(checkpoint.state.clone())
@@ -364,7 +372,10 @@ impl ThreadSafeCheckpointManager {
     }
 
     fn update_last_checkpoint_time(&self) {
-        *self.last_checkpoint_time.lock().expect("Time lock poisoned") = Utc::now();
+        *self
+            .last_checkpoint_time
+            .lock()
+            .expect("Time lock poisoned") = Utc::now();
     }
 }
 
@@ -388,7 +399,7 @@ mod tests {
         let storage = ThreadSafeStorage::in_memory().unwrap();
         let session_id = SessionId::new();
         let manager = ThreadSafeCheckpointManager::new(storage, session_id);
-        
+
         // Should be able to create checkpoint
         let id = manager.checkpoint("Test").unwrap();
         assert!(!id.to_string().is_empty());

@@ -30,29 +30,35 @@ pub use checkpoint::{
 };
 
 pub use hypothesis::{
-    Confidence, ConfidenceError,
-    Hypothesis, HypothesisBoard, HypothesisId, HypothesisStatus,
-    HypothesisStorage, InMemoryHypothesisStorage,
-    Evidence, EvidenceId, EvidenceType, EvidenceMetadata,
-    strength_to_likelihood,
+    strength_to_likelihood, Confidence, ConfidenceError, Evidence, EvidenceId, EvidenceMetadata,
+    EvidenceType, Hypothesis, HypothesisBoard, HypothesisId, HypothesisStatus, HypothesisStorage,
+    InMemoryHypothesisStorage,
 };
 
 pub use belief::{BeliefGraph, ReasoningSystem};
 
 pub use gaps::{
-    KnowledgeGapAnalyzer, KnowledgeGap, GapId, GapCriticality, GapType,
-    GapSuggestion, SuggestedAction, ScoringConfig, compute_gap_score,
+    compute_gap_score, GapCriticality, GapId, GapSuggestion, GapType, KnowledgeGap,
+    KnowledgeGapAnalyzer, ScoringConfig, SuggestedAction,
 };
 
 pub use impact::{
+    BeliefSnapshot,
+    // Preview types
+    CascadePreview,
+    // Propagation types
+    ConfidenceChange,
+    CycleWarning,
     // Impact analysis engine
     ImpactAnalysisEngine,
-    // Propagation types
-    ConfidenceChange, PropagationConfig, PropagationResult,
-    // Preview types
-    CascadePreview, PreviewId, PreviewPage, PaginationState, CycleWarning,
+    PaginationState,
+    PreviewId,
+    PreviewPage,
+    PropagationConfig,
+    PropagationResult,
     // Snapshot types
-    SnapshotId, BeliefSnapshot, SnapshotStore,
+    SnapshotId,
+    SnapshotStore,
 };
 
 pub use export_import::{CheckpointExporter, CheckpointImporter};
@@ -66,20 +72,19 @@ pub use storage_sqlitegraph::SqliteGraphStorage;
 pub use thread_safe::{ThreadSafeCheckpointManager, ThreadSafeStorage};
 
 pub use verification::{
-    VerificationRunner, VerificationCheck, CheckId, CheckResult, CheckStatus,
-    VerificationCommand, PassAction, FailAction, RetryConfig,
+    CheckId, CheckResult, CheckStatus, FailAction, PassAction, RetryConfig, VerificationCheck,
+    VerificationCommand, VerificationRunner,
 };
 
 pub use service::{
-    AnnotationSeverity, AutoCheckpointConfig, CheckpointAnnotation, CheckpointCommand,
-    CheckpointEvent, CheckpointService, CommandResult, HealthStatus, ImportResult, ServiceMetrics,
-    AnnotatedCheckpoint, ValidationReport,
+    AnnotatedCheckpoint, AnnotationSeverity, AutoCheckpointConfig, CheckpointAnnotation,
+    CheckpointCommand, CheckpointEvent, CheckpointService, CommandResult, HealthStatus,
+    ImportResult, ServiceMetrics, ValidationReport,
 };
 
 #[cfg(feature = "websocket")]
 pub use websocket::{
-    CheckpointWebSocketServer, WebSocketCommand, WebSocketConfig, WebSocketEvent,
-    WebSocketResponse,
+    CheckpointWebSocketServer, WebSocketCommand, WebSocketConfig, WebSocketEvent, WebSocketResponse,
 };
 
 /// Version of the reasoning tools crate

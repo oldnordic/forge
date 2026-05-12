@@ -32,18 +32,17 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{ForgeError, Result};
-use crate::types::{Symbol, SymbolId, Reference, SymbolKind, ReferenceKind, Language, Location};
+use crate::types::{Language, Location, Reference, ReferenceKind, Symbol, SymbolId, SymbolKind};
 
 // Re-export sqlitegraph types for advanced usage
-pub use sqlitegraph::backend::{NodeSpec, EdgeSpec};
+pub use sqlitegraph::backend::{EdgeSpec, NodeSpec};
+pub use sqlitegraph::config::{open_graph, BackendKind as SqliteGraphBackendKind, GraphConfig};
 pub use sqlitegraph::graph::{GraphEntity, SqliteGraph};
-pub use sqlitegraph::config::{BackendKind as SqliteGraphBackendKind, GraphConfig, open_graph};
 
 /// Backend kind selection for UnifiedGraphStore.
 ///
 /// Users choose which backend to use based on their requirements.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum BackendKind {
     /// SQLite backend - stable, mature, works with current tools
     #[default]
@@ -51,7 +50,6 @@ pub enum BackendKind {
     /// Native V3 backend - high performance, pure Rust, updated tools required
     NativeV3,
 }
-
 
 impl std::fmt::Display for BackendKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -149,14 +147,15 @@ impl UnifiedGraphStore {
     /// A `UnifiedGraphStore` instance or an error if initialization fails
     pub async fn open(codebase_path: impl AsRef<Path>, backend_kind: BackendKind) -> Result<Self> {
         let codebase = codebase_path.as_ref();
-        let db_path = codebase.join(".forge").join(backend_kind.default_filename());
+        let db_path = codebase
+            .join(".forge")
+            .join(backend_kind.default_filename());
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
-            tokio::fs::create_dir_all(parent).await
-                .map_err(|e| ForgeError::DatabaseError(
-                    format!("Failed to create database directory: {}", e)
-                ))?;
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                ForgeError::DatabaseError(format!("Failed to create database directory: {}", e))
+            })?;
         }
 
         // Open the graph (this validates the database works)
@@ -166,9 +165,7 @@ impl UnifiedGraphStore {
         };
 
         let _graph = open_graph(&db_path, &config)
-            .map_err(|e| ForgeError::DatabaseError(
-                    format!("Failed to open database: {}", e)
-                ))?;
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to open database: {}", e)))?;
 
         Ok(UnifiedGraphStore {
             codebase_path: codebase.to_path_buf(),
@@ -195,10 +192,9 @@ impl UnifiedGraphStore {
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = db.parent() {
-            tokio::fs::create_dir_all(parent).await
-                .map_err(|e| ForgeError::DatabaseError(
-                    format!("Failed to create database directory: {}", e)
-                ))?;
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                ForgeError::DatabaseError(format!("Failed to create database directory: {}", e))
+            })?;
         }
 
         // Open the graph (this validates the database works)
@@ -208,9 +204,7 @@ impl UnifiedGraphStore {
         };
 
         let _graph = open_graph(db, &config)
-            .map_err(|e| ForgeError::DatabaseError(
-                    format!("Failed to open database: {}", e)
-                ))?;
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to open database: {}", e)))?;
 
         Ok(UnifiedGraphStore {
             codebase_path: codebase.to_path_buf(),
@@ -224,11 +218,11 @@ impl UnifiedGraphStore {
     #[cfg(test)]
     pub async fn memory() -> Result<Self> {
         use tempfile::tempdir;
-        
-        let temp = tempdir().map_err(|e| ForgeError::DatabaseError(
-            format!("Failed to create temp directory: {}", e)
-        ))?;
-        
+
+        let temp = tempdir().map_err(|e| {
+            ForgeError::DatabaseError(format!("Failed to create temp directory: {}", e))
+        })?;
+
         Self::open(temp.path(), BackendKind::SQLite).await
     }
 
@@ -263,7 +257,7 @@ impl UnifiedGraphStore {
         // we need to open a new graph connection for each operation in async context.
         // In a production implementation, you would use a connection pool or
         // a dedicated sync thread for graph operations.
-        
+
         // Placeholder implementation - returns a dummy ID
         Ok(SymbolId(1))
     }
@@ -310,13 +304,16 @@ impl UnifiedGraphStore {
     /// Search codebase files for symbols matching a pattern.
     async fn search_codebase_files(&self, pattern: &str) -> Result<Vec<Symbol>> {
         use tokio::fs;
-        
+
         let mut symbols = Vec::new();
-        let mut entries = fs::read_dir(&self.codebase_path).await
+        let mut entries = fs::read_dir(&self.codebase_path)
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to read codebase: {}", e)))?;
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
         {
             let path = entry.path();
             if path.extension().map(|e| e == "rs").unwrap_or(false) {
@@ -324,12 +321,13 @@ impl UnifiedGraphStore {
                     for (line_num, line) in content.lines().enumerate() {
                         if line.contains(pattern) {
                             // Extract potential symbol name
-                            let name = line.split_whitespace()
+                            let name = line
+                                .split_whitespace()
                                 .find(|w| w.contains(pattern))
                                 .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'))
                                 .unwrap_or(pattern)
                                 .to_string();
-                            
+
                             symbols.push(Symbol {
                                 id: SymbolId(symbols.len() as i64 + 1),
                                 name: name.clone(),
@@ -351,7 +349,7 @@ impl UnifiedGraphStore {
                 }
             }
         }
-        
+
         Ok(symbols)
     }
 
@@ -393,7 +391,7 @@ impl UnifiedGraphStore {
         if self.backend_kind == BackendKind::NativeV3 {
             let refs = self.references.lock().unwrap();
             let target_symbol = format!("sym_{}", symbol_id.0);
-            
+
             let mut result = Vec::new();
             for stored in refs.iter() {
                 if stored.to_symbol == target_symbol {
@@ -412,7 +410,7 @@ impl UnifiedGraphStore {
             }
             return Ok(result);
         }
-        
+
         // For SQLite backend, return empty (cross-file references not supported by magellan SQLite)
         Ok(Vec::new())
     }
@@ -426,7 +424,7 @@ impl UnifiedGraphStore {
     pub async fn symbol_count(&self) -> Result<usize> {
         Ok(0)
     }
-    
+
     /// Scans and indexes cross-file references for Native V3 backend.
     ///
     /// This is a capability that Native V3 enables over SQLite.
@@ -439,21 +437,23 @@ impl UnifiedGraphStore {
         if self.backend_kind != BackendKind::NativeV3 {
             return Ok(0); // Only supported on Native V3
         }
-        
+
         // For now, use the legacy implementation that scans files
         // In a full implementation, this would use magellan's side tables
         self.legacy_index_cross_file_references().await
     }
-    
+
     /// Legacy implementation using in-memory storage
     async fn legacy_index_cross_file_references(&self) -> Result<usize> {
-        use tokio::fs;
         use regex::Regex;
-        
+        use tokio::fs;
+
         // First pass: collect all symbol definitions
-        let mut symbols: std::collections::HashMap<String, (PathBuf, usize)> = std::collections::HashMap::new();
-        self.collect_symbols_recursive(&self.codebase_path, &mut symbols).await?;
-        
+        let mut symbols: std::collections::HashMap<String, (PathBuf, usize)> =
+            std::collections::HashMap::new();
+        self.collect_symbols_recursive(&self.codebase_path, &mut symbols)
+            .await?;
+
         // Second pass: find all references
         let reference_pattern = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(").unwrap();
 
@@ -497,19 +497,22 @@ impl UnifiedGraphStore {
 
         Ok(ref_count)
     }
-    
+
     async fn collect_symbols_recursive(
         &self,
         dir: &Path,
         symbols: &mut std::collections::HashMap<String, (PathBuf, usize)>,
     ) -> Result<()> {
         use tokio::fs;
-        
-        let mut entries = fs::read_dir(dir).await
+
+        let mut entries = fs::read_dir(dir)
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
         {
             let path = entry.path();
             if path.is_dir() {
@@ -520,7 +523,9 @@ impl UnifiedGraphStore {
                         // Extract function definitions
                         if let Some(fn_pos) = line.find("fn ") {
                             let after_fn = &line[fn_pos + 3..];
-                            if let Some(end_pos) = after_fn.find(|c: char| c.is_whitespace() || c == '(') {
+                            if let Some(end_pos) =
+                                after_fn.find(|c: char| c.is_whitespace() || c == '(')
+                            {
                                 let name = after_fn[..end_pos].trim().to_string();
                                 if !name.is_empty() {
                                     symbols.insert(name, (path.clone(), line_num + 1));
@@ -530,7 +535,9 @@ impl UnifiedGraphStore {
                         // Extract struct definitions
                         if let Some(struct_pos) = line.find("struct ") {
                             let after_struct = &line[struct_pos + 7..];
-                            if let Some(end_pos) = after_struct.find(|c: char| c.is_whitespace() || c == '{' || c == ';') {
+                            if let Some(end_pos) = after_struct
+                                .find(|c: char| c.is_whitespace() || c == '{' || c == ';')
+                            {
                                 let name = after_struct[..end_pos].trim().to_string();
                                 if !name.is_empty() {
                                     symbols.insert(name, (path.clone(), line_num + 1));
@@ -541,23 +548,24 @@ impl UnifiedGraphStore {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Query references by symbol name (for Native V3 backend).
     /// This enables cross-file references that magellan doesn't support.
     pub async fn query_references_for_symbol(&self, symbol_name: &str) -> Result<Vec<Reference>> {
         if self.backend_kind != BackendKind::NativeV3 {
             return Ok(Vec::new());
         }
-        
+
         let refs = self.references.lock().unwrap();
         let mut result = Vec::new();
-        
+
         for stored in refs.iter() {
-            if stored.to_symbol == format!("sym_{}", symbol_name) ||
-               stored.to_symbol.contains(symbol_name) {
+            if stored.to_symbol == format!("sym_{}", symbol_name)
+                || stored.to_symbol.contains(symbol_name)
+            {
                 result.push(Reference {
                     from: SymbolId(0),
                     to: SymbolId(0),
@@ -571,7 +579,7 @@ impl UnifiedGraphStore {
                 });
             }
         }
-        
+
         Ok(result)
     }
 }
@@ -589,8 +597,14 @@ mod tests {
     // Test that to_sqlitegraph_kind() converts correctly
     #[test]
     fn test_backend_kind_to_sqlitegraph() {
-        assert_eq!(BackendKind::SQLite.to_sqlitegraph_kind(), SqliteGraphBackendKind::SQLite);
-        assert_eq!(BackendKind::NativeV3.to_sqlitegraph_kind(), SqliteGraphBackendKind::Native);
+        assert_eq!(
+            BackendKind::SQLite.to_sqlitegraph_kind(),
+            SqliteGraphBackendKind::SQLite
+        );
+        assert_eq!(
+            BackendKind::NativeV3.to_sqlitegraph_kind(),
+            SqliteGraphBackendKind::Native
+        );
     }
 
     // Test that file_extension() returns correct values
@@ -618,7 +632,9 @@ mod tests {
     #[tokio::test]
     async fn test_open_sqlite_creates_database() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite).await.unwrap();
+        let store = UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+            .await
+            .unwrap();
 
         assert_eq!(store.backend_kind(), BackendKind::SQLite);
         assert!(store.db_path().ends_with("graph.db"));
@@ -629,7 +645,9 @@ mod tests {
     #[tokio::test]
     async fn test_open_native_v3_creates_database() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = UnifiedGraphStore::open(temp_dir.path(), BackendKind::NativeV3).await.unwrap();
+        let store = UnifiedGraphStore::open(temp_dir.path(), BackendKind::NativeV3)
+            .await
+            .unwrap();
 
         assert_eq!(store.backend_kind(), BackendKind::NativeV3);
         assert!(store.db_path().ends_with("graph.v3"));
@@ -642,11 +660,10 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let custom_db = temp_dir.path().join("custom").join("graph.db");
 
-        let store = UnifiedGraphStore::open_with_path(
-            temp_dir.path(),
-            &custom_db,
-            BackendKind::SQLite
-        ).await.unwrap();
+        let store =
+            UnifiedGraphStore::open_with_path(temp_dir.path(), &custom_db, BackendKind::SQLite)
+                .await
+                .unwrap();
 
         assert_eq!(store.db_path(), custom_db);
         assert!(store.is_connected());
@@ -681,7 +698,9 @@ mod tests {
     #[tokio::test]
     async fn test_query_symbols_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite).await.unwrap();
+        let store = UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+            .await
+            .unwrap();
 
         // Query for non-existent pattern
         let results = store.query_symbols("nonexistent_xyz").await.unwrap();

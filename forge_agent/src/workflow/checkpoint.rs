@@ -145,19 +145,15 @@ pub fn validate_checkpoint(
 
     // Generate message with percentage
     let percentage = (confidence * 100.0) as u32;
-    let message = format!(
-        "Confidence: {}% (status: {:?})",
-        percentage, status
-    );
+    let message = format!("Confidence: {}% (status: {:?})", percentage, status);
 
     // Determine rollback recommendation
-    let rollback_recommendation = if matches!(status, ValidationStatus::Failed)
-        && config.rollback_on_failure
-    {
-        Some(RollbackRecommendation::FullRollback)
-    } else {
-        None
-    };
+    let rollback_recommendation =
+        if matches!(status, ValidationStatus::Failed) && config.rollback_on_failure {
+            Some(RollbackRecommendation::FullRollback)
+        } else {
+            None
+        };
 
     ValidationResult {
         confidence,
@@ -197,10 +193,8 @@ pub fn can_proceed(validation: &ValidationResult) -> bool {
 ///
 /// true if rollback is required, false otherwise
 pub fn requires_rollback(validation: &ValidationResult) -> bool {
-    matches!(
-        validation.status,
-        ValidationStatus::Failed
-    ) && validation.rollback_recommendation.is_some()
+    matches!(validation.status, ValidationStatus::Failed)
+        && validation.rollback_recommendation.is_some()
 }
 
 /// Unique identifier for a workflow checkpoint.
@@ -338,7 +332,10 @@ impl WorkflowCheckpoint {
         let expected = self.compute_checksum();
         if self.checksum != expected {
             return Err(crate::workflow::WorkflowError::CheckpointCorrupted(
-                format!("Checksum mismatch: expected {}, got {}", expected, self.checksum),
+                format!(
+                    "Checksum mismatch: expected {}, got {}",
+                    expected, self.checksum
+                ),
             ));
         }
         Ok(())
@@ -401,13 +398,11 @@ pub fn validate_workflow_consistency(
 ) -> Result<(), crate::workflow::WorkflowError> {
     // Check 1: Task count matches
     if workflow.task_count() != checkpoint.total_tasks {
-        return Err(crate::workflow::WorkflowError::WorkflowChanged(
-            format!(
-                "Task count mismatch: checkpoint has {} tasks, current workflow has {} tasks",
-                checkpoint.total_tasks,
-                workflow.task_count()
-            ),
-        ));
+        return Err(crate::workflow::WorkflowError::WorkflowChanged(format!(
+            "Task count mismatch: checkpoint has {} tasks, current workflow has {} tasks",
+            checkpoint.total_tasks,
+            workflow.task_count()
+        )));
     }
 
     // Check 2 & 3: All checkpointed tasks still exist
@@ -415,23 +410,19 @@ pub fn validate_workflow_consistency(
 
     for task_id in &checkpoint.completed_tasks {
         if !workflow_task_ids.contains(task_id) {
-            return Err(crate::workflow::WorkflowError::WorkflowChanged(
-                format!(
-                    "Completed task from checkpoint not found in workflow: {}",
-                    task_id
-                ),
-            ));
+            return Err(crate::workflow::WorkflowError::WorkflowChanged(format!(
+                "Completed task from checkpoint not found in workflow: {}",
+                task_id
+            )));
         }
     }
 
     for task_id in &checkpoint.failed_tasks {
         if !workflow_task_ids.contains(task_id) {
-            return Err(crate::workflow::WorkflowError::WorkflowChanged(
-                format!(
-                    "Failed task from checkpoint not found in workflow: {}",
-                    task_id
-                ),
-            ));
+            return Err(crate::workflow::WorkflowError::WorkflowChanged(format!(
+                "Failed task from checkpoint not found in workflow: {}",
+                task_id
+            )));
         }
     }
 
@@ -449,12 +440,10 @@ pub fn validate_workflow_consistency(
     let current_task_ids = workflow.task_ids();
     let current_checksum = compute_task_ids_checksum(&current_task_ids);
     if current_checksum != checkpoint.task_ids_checksum {
-        return Err(crate::workflow::WorkflowError::WorkflowChanged(
-            format!(
-                "Workflow structure changed: task IDs checksum mismatch. Expected: {}, Got: {}",
-                checkpoint.task_ids_checksum, current_checksum
-            ),
-        ));
+        return Err(crate::workflow::WorkflowError::WorkflowChanged(format!(
+            "Workflow structure changed: task IDs checksum mismatch. Expected: {}, Got: {}",
+            checkpoint.task_ids_checksum, current_checksum
+        )));
     }
 
     Ok(())
@@ -507,7 +496,10 @@ pub struct WorkflowCheckpointService {
     /// Namespace prefix for workflow checkpoints
     namespace: String,
     /// In-memory checkpoint storage (key: checkpoint ID, value: checkpoint data)
-    #[allow(dead_code, reason = "Planned for persistent storage integration in Phase 10")]
+    #[allow(
+        dead_code,
+        reason = "Planned for persistent storage integration in Phase 10"
+    )]
     storage: CheckpointStore,
     /// Map from workflow ID to latest checkpoint
     latest_by_workflow: WorkflowLatestMap,
@@ -545,16 +537,21 @@ impl WorkflowCheckpointService {
     ///
     /// - `Ok(())` if checkpoint was saved successfully
     /// - `Err(WorkflowError)` if serialization or storage fails
-    pub fn save(&self, checkpoint: &WorkflowCheckpoint) -> Result<(), crate::workflow::WorkflowError> {
+    pub fn save(
+        &self,
+        checkpoint: &WorkflowCheckpoint,
+    ) -> Result<(), crate::workflow::WorkflowError> {
         // Validate checkpoint before saving
         checkpoint.validate()?;
 
         // Serialize checkpoint using JSON (bincode requires Encode/Decode traits
         // which we'll add in future tasks when we integrate with SQLiteGraph)
-        let data = serde_json::to_vec(checkpoint)
-            .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                format!("Serialization failed: {}", e)
-            ))?;
+        let data = serde_json::to_vec(checkpoint).map_err(|e| {
+            crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                "Serialization failed: {}",
+                e
+            ))
+        })?;
 
         // Create checkpoint summary
         let summary = CheckpointSummary::from_checkpoint(checkpoint);
@@ -562,19 +559,23 @@ impl WorkflowCheckpointService {
         // Store checkpoint data
         let key = format!("{}:{}", self.namespace, checkpoint.id);
         {
-            let mut storage = self.storage.write()
-                .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                    format!("Storage lock failed: {}", e)
-                ))?;
+            let mut storage = self.storage.write().map_err(|e| {
+                crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                    "Storage lock failed: {}",
+                    e
+                ))
+            })?;
             storage.insert(key, (data, summary.clone()));
         }
 
         // Update latest checkpoint for workflow
         {
-            let mut latest = self.latest_by_workflow.write()
-                .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                    format!("Latest lock failed: {}", e)
-                ))?;
+            let mut latest = self.latest_by_workflow.write().map_err(|e| {
+                crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                    "Latest lock failed: {}",
+                    e
+                ))
+            })?;
             latest.insert(checkpoint.workflow_id.clone(), summary);
         }
 
@@ -592,19 +593,26 @@ impl WorkflowCheckpointService {
     /// - `Ok(Some(checkpoint))` if found
     /// - `Ok(None)` if not found
     /// - `Err(WorkflowError)` if deserialization fails or data is corrupted
-    pub fn load(&self, id: &CheckpointId) -> Result<Option<WorkflowCheckpoint>, crate::workflow::WorkflowError> {
+    pub fn load(
+        &self,
+        id: &CheckpointId,
+    ) -> Result<Option<WorkflowCheckpoint>, crate::workflow::WorkflowError> {
         let key = format!("{}:{}", self.namespace, id);
 
-        let storage = self.storage.read()
-            .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                format!("Storage lock failed: {}", e)
-            ))?;
+        let storage = self.storage.read().map_err(|e| {
+            crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                "Storage lock failed: {}",
+                e
+            ))
+        })?;
 
         if let Some((data, _)) = storage.get(&key) {
-            let checkpoint: WorkflowCheckpoint = serde_json::from_slice(data)
-                .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                    format!("Deserialization failed: {}", e)
-                ))?;
+            let checkpoint: WorkflowCheckpoint = serde_json::from_slice(data).map_err(|e| {
+                crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                    "Deserialization failed: {}",
+                    e
+                ))
+            })?;
 
             // Validate loaded checkpoint
             checkpoint.validate()?;
@@ -626,11 +634,16 @@ impl WorkflowCheckpointService {
     /// - `Ok(Some(checkpoint))` if latest checkpoint exists
     /// - `Ok(None)` if no checkpoints found for workflow
     /// - `Err(WorkflowError)` if retrieval fails
-    pub fn get_latest(&self, workflow_id: &str) -> Result<Option<WorkflowCheckpoint>, crate::workflow::WorkflowError> {
-        let latest = self.latest_by_workflow.read()
-            .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                format!("Latest lock failed: {}", e)
-            ))?;
+    pub fn get_latest(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Option<WorkflowCheckpoint>, crate::workflow::WorkflowError> {
+        let latest = self.latest_by_workflow.read().map_err(|e| {
+            crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                "Latest lock failed: {}",
+                e
+            ))
+        })?;
 
         if let Some(summary) = latest.get(workflow_id) {
             self.load(&summary.id)
@@ -649,17 +662,20 @@ impl WorkflowCheckpointService {
     ///
     /// - `Ok(summaries)` - Vector of checkpoint summaries in sequence order
     /// - `Err(WorkflowError)` if listing fails
-    pub fn list_by_workflow(&self, _workflow_id: &str) -> Result<Vec<CheckpointSummary>, crate::workflow::WorkflowError> {
-        let storage = self.storage.read()
-            .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                format!("Storage lock failed: {}", e)
-            ))?;
+    pub fn list_by_workflow(
+        &self,
+        _workflow_id: &str,
+    ) -> Result<Vec<CheckpointSummary>, crate::workflow::WorkflowError> {
+        let storage = self.storage.read().map_err(|e| {
+            crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                "Storage lock failed: {}",
+                e
+            ))
+        })?;
 
         let mut summaries: Vec<CheckpointSummary> = storage
             .values()
-            .map(|(_, summary)| {
-                summary.clone()
-            })
+            .map(|(_, summary)| summary.clone())
             .collect();
 
         // Sort by sequence number
@@ -681,10 +697,12 @@ impl WorkflowCheckpointService {
     pub fn delete(&self, id: &CheckpointId) -> Result<(), crate::workflow::WorkflowError> {
         let key = format!("{}:{}", self.namespace, id);
 
-        let mut storage = self.storage.write()
-            .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
-                format!("Storage lock failed: {}", e)
-            ))?;
+        let mut storage = self.storage.write().map_err(|e| {
+            crate::workflow::WorkflowError::CheckpointCorrupted(format!(
+                "Storage lock failed: {}",
+                e
+            ))
+        })?;
 
         storage.remove(&key);
 
@@ -833,7 +851,8 @@ mod tests {
         assert!(serialized.is_ok());
 
         // Deserialize back
-        let deserialized: Result<WorkflowCheckpoint, _> = serde_json::from_str(&serialized.unwrap());
+        let deserialized: Result<WorkflowCheckpoint, _> =
+            serde_json::from_str(&serialized.unwrap());
         assert!(deserialized.is_ok());
 
         let restored = deserialized.unwrap();
@@ -1153,8 +1172,16 @@ mod tests {
         let workflow1 = Workflow::new();
         let workflow2 = Workflow::new();
 
-        let ids1 = vec![TaskId::new("task-3"), TaskId::new("task-1"), TaskId::new("task-2")];
-        let ids2 = vec![TaskId::new("task-1"), TaskId::new("task-2"), TaskId::new("task-3")];
+        let ids1 = vec![
+            TaskId::new("task-3"),
+            TaskId::new("task-1"),
+            TaskId::new("task-2"),
+        ];
+        let ids2 = vec![
+            TaskId::new("task-1"),
+            TaskId::new("task-2"),
+            TaskId::new("task-3"),
+        ];
 
         let checksum1 = compute_task_ids_checksum(&ids1);
         let checksum2 = compute_task_ids_checksum(&ids2);

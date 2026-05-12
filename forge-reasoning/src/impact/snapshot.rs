@@ -97,11 +97,7 @@ impl SnapshotStore {
     ///
     /// Captures all hypotheses and dependency relationships from the board and graph.
     /// Automatically cleans up expired snapshots before saving.
-    pub async fn save(
-        &mut self,
-        board: &HypothesisBoard,
-        graph: &BeliefGraph,
-    ) -> SnapshotId {
+    pub async fn save(&mut self, board: &HypothesisBoard, graph: &BeliefGraph) -> SnapshotId {
         // Capture current state
         let hypotheses = board.list().await.unwrap_or_default();
         let dependencies = self.capture_dependencies(graph);
@@ -130,9 +126,7 @@ impl SnapshotStore {
 
     /// Get a snapshot by ID
     pub fn get(&self, id: &SnapshotId) -> Option<&BeliefSnapshot> {
-        self.snapshots
-            .values()
-            .find(|s| &s.id == id)
+        self.snapshots.values().find(|s| &s.id == id)
     }
 
     /// Restore state from a snapshot
@@ -181,7 +175,8 @@ impl SnapshotStore {
     /// Remove all expired snapshots
     fn cleanup_expired(&mut self) {
         let now = Utc::now();
-        self.snapshots.retain(|&created, _| created + self.window_duration > now);
+        self.snapshots
+            .retain(|&created, _| created + self.window_duration > now);
     }
 
     /// List all active (non-expired) snapshots
@@ -195,9 +190,7 @@ impl SnapshotStore {
 
     /// Check if a snapshot is expired
     pub fn is_expired(&self, id: &SnapshotId) -> bool {
-        self.get(id)
-            .map(|s| s.is_expired())
-            .unwrap_or(true)
+        self.get(id).map(|s| s.is_expired()).unwrap_or(true)
     }
 
     /// Get the number of active snapshots
@@ -228,7 +221,12 @@ impl SnapshotStore {
     /// Manually remove a snapshot by ID
     pub fn remove(&mut self, id: &SnapshotId) -> bool {
         // Find and remove the snapshot
-        if let Some(created_at) = self.snapshots.values().find(|s| &s.id == id).map(|s| s.created_at) {
+        if let Some(created_at) = self
+            .snapshots
+            .values()
+            .find(|s| &s.id == id)
+            .map(|s| s.created_at)
+        {
             self.snapshots.remove(&created_at);
             true
         } else {
@@ -451,14 +449,8 @@ mod tests {
 
         let board = HypothesisBoard::in_memory();
         let prior = Confidence::new(0.5).unwrap();
-        let _h1 = board
-            .propose("Test hypothesis 1", prior)
-            .await
-            .unwrap();
-        let _h2 = board
-            .propose("Test hypothesis 2", prior)
-            .await
-            .unwrap();
+        let _h1 = board.propose("Test hypothesis 1", prior).await.unwrap();
+        let _h2 = board.propose("Test hypothesis 2", prior).await.unwrap();
 
         let graph = BeliefGraph::new();
 

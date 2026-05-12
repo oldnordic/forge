@@ -454,8 +454,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_with_task_timeout() {
-        use crate::workflow::{dag::Workflow, executor::WorkflowExecutor, task::TaskId};
         use crate::workflow::task::{TaskContext, TaskResult, WorkflowTask};
+        use crate::workflow::{dag::Workflow, executor::WorkflowExecutor, task::TaskId};
         use async_trait::async_trait;
 
         // Create a slow task that sleeps
@@ -467,7 +467,10 @@ mod tests {
 
         #[async_trait]
         impl WorkflowTask for SlowTask {
-            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+            async fn execute(
+                &self,
+                _context: &TaskContext,
+            ) -> Result<TaskResult, crate::workflow::TaskError> {
                 tokio::time::sleep(self.sleep_duration).await;
                 Ok(TaskResult::Success)
             }
@@ -495,8 +498,7 @@ mod tests {
             workflow_timeout: None,
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute workflow
         let result = executor.execute().await;
@@ -509,8 +511,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_with_workflow_timeout() {
-        use crate::workflow::{dag::Workflow, executor::WorkflowExecutor, task::TaskId};
         use crate::workflow::task::{TaskContext, TaskResult, WorkflowTask};
+        use crate::workflow::{dag::Workflow, executor::WorkflowExecutor, task::TaskId};
         use async_trait::async_trait;
 
         // Create multiple slow tasks
@@ -521,7 +523,10 @@ mod tests {
 
         #[async_trait]
         impl WorkflowTask for SlowTask {
-            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+            async fn execute(
+                &self,
+                _context: &TaskContext,
+            ) -> Result<TaskResult, crate::workflow::TaskError> {
                 // Simulate some work
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 Ok(TaskResult::Success)
@@ -551,8 +556,7 @@ mod tests {
             workflow_timeout: Some(WorkflowTimeout::from_millis(200)),
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute with timeout
         let result = executor.execute_with_timeout().await;
@@ -562,9 +566,10 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            matches!(err, crate::workflow::WorkflowError::Timeout(
-                TimeoutError::WorkflowTimeout { .. }
-            )),
+            matches!(
+                err,
+                crate::workflow::WorkflowError::Timeout(TimeoutError::WorkflowTimeout { .. })
+            ),
             "Expected WorkflowTimeout, got {:?}",
             err
         );
@@ -572,8 +577,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_timeout_configured_but_not_exceeded() {
-        use crate::workflow::{dag::Workflow, executor::WorkflowExecutor, task::TaskId};
         use crate::workflow::task::{TaskContext, TaskResult, WorkflowTask};
+        use crate::workflow::{dag::Workflow, executor::WorkflowExecutor, task::TaskId};
         use async_trait::async_trait;
 
         // Create a fast task
@@ -584,7 +589,10 @@ mod tests {
 
         #[async_trait]
         impl WorkflowTask for FastTask {
-            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+            async fn execute(
+                &self,
+                _context: &TaskContext,
+            ) -> Result<TaskResult, crate::workflow::TaskError> {
                 // Task completes quickly
                 Ok(TaskResult::Success)
             }
@@ -611,8 +619,7 @@ mod tests {
             workflow_timeout: Some(WorkflowTimeout::from_secs(10)),
         };
 
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_timeout_config(config);
+        let mut executor = WorkflowExecutor::new(workflow).with_timeout_config(config);
 
         // Execute should succeed
         let result = executor.execute().await;

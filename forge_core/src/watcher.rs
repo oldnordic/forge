@@ -45,10 +45,7 @@ impl Watcher {
     ///
     /// * `store` - The graph store for event correlation
     /// * `sender` - Channel to send watch events
-    pub fn new(
-        store: Arc<UnifiedGraphStore>,
-        sender: mpsc::UnboundedSender<WatchEvent>,
-    ) -> Self {
+    pub fn new(store: Arc<UnifiedGraphStore>, sender: mpsc::UnboundedSender<WatchEvent>) -> Self {
         Self {
             _store: store,
             sender,
@@ -115,10 +112,7 @@ impl Watcher {
         };
 
         // Create watcher and store it to keep alive
-        let mut watcher = RecommendedWatcher::new(
-            event_handler,
-            notify::Config::default(),
-        )?;
+        let mut watcher = RecommendedWatcher::new(event_handler, notify::Config::default())?;
         watcher.watch(&path, RecursiveMode::Recursive)?;
 
         // Store the watcher to keep it alive
@@ -132,7 +126,10 @@ impl Watcher {
     /// # Returns
     ///
     /// A tuple of (sender, receiver) for watch events.
-    pub fn channel() -> (mpsc::UnboundedSender<WatchEvent>, mpsc::UnboundedReceiver<WatchEvent>) {
+    pub fn channel() -> (
+        mpsc::UnboundedSender<WatchEvent>,
+        mpsc::UnboundedReceiver<WatchEvent>,
+    ) {
         mpsc::unbounded_channel()
     }
 }
@@ -171,10 +168,22 @@ mod tests {
     async fn test_watch_event_equality() {
         let path = PathBuf::from("/test/file.rs");
 
-        assert_eq!(WatchEvent::Created(path.clone()), WatchEvent::Created(path.clone()));
-        assert_eq!(WatchEvent::Modified(path.clone()), WatchEvent::Modified(path.clone()));
-        assert_eq!(WatchEvent::Deleted(path), WatchEvent::Deleted(PathBuf::from("/test/file.rs")));
-        assert_ne!(WatchEvent::Created(PathBuf::from("/a.rs")), WatchEvent::Created(PathBuf::from("/b.rs")));
+        assert_eq!(
+            WatchEvent::Created(path.clone()),
+            WatchEvent::Created(path.clone())
+        );
+        assert_eq!(
+            WatchEvent::Modified(path.clone()),
+            WatchEvent::Modified(path.clone())
+        );
+        assert_eq!(
+            WatchEvent::Deleted(path),
+            WatchEvent::Deleted(PathBuf::from("/test/file.rs"))
+        );
+        assert_ne!(
+            WatchEvent::Created(PathBuf::from("/a.rs")),
+            WatchEvent::Created(PathBuf::from("/b.rs"))
+        );
     }
 
     #[tokio::test]
@@ -229,7 +238,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         // Modify the file
-        tokio::fs::write(&test_file, "fn test() { println!(\"modified\"); }").await.unwrap();
+        tokio::fs::write(&test_file, "fn test() { println!(\"modified\"); }")
+            .await
+            .unwrap();
 
         // Wait for the modify event (with longer timeout for file system)
         let event = timeout(Duration::from_secs(3), rx.recv())
@@ -302,7 +313,9 @@ mod tests {
 
         // Create a file in the subdirectory
         let test_file = subdir.join("nested.rs");
-        tokio::fs::write(&test_file, "fn nested() {}").await.unwrap();
+        tokio::fs::write(&test_file, "fn nested() {}")
+            .await
+            .unwrap();
 
         // Wait for the create event from the subdirectory
         let event = timeout(Duration::from_secs(2), rx.recv())
@@ -342,7 +355,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         // Modify
-        tokio::fs::write(&test_file, "fn test() { println!(\"modified\"); }").await.unwrap();
+        tokio::fs::write(&test_file, "fn test() { println!(\"modified\"); }")
+            .await
+            .unwrap();
 
         // Wait for modify event (with longer timeout)
         let event2 = timeout(Duration::from_secs(3), rx.recv())
@@ -402,7 +417,9 @@ mod tests {
 
         // Rapidly modify the same file 3 times
         for i in 0..3 {
-            tokio::fs::write(&test_file, format!("fn test() {{ println!(\"{}\"); }}", i)).await.unwrap();
+            tokio::fs::write(&test_file, format!("fn test() {{ println!(\"{}\"); }}", i))
+                .await
+                .unwrap();
             // Small delay between writes (less than debounce threshold of 100ms)
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -424,7 +441,11 @@ mod tests {
 
         // Due to debouncing (100ms threshold), we should receive fewer than 3 events
         // The exact number depends on timing, but it should be less than 3
-        assert!(events.len() < 3, "Expected fewer than 3 events due to debouncing, got {}", events.len());
+        assert!(
+            events.len() < 3,
+            "Expected fewer than 3 events due to debouncing, got {}",
+            events.len()
+        );
 
         // Verify the last event represents the final state
         if let Some(last_event) = events.last() {

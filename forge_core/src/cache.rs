@@ -242,8 +242,14 @@ mod tests {
         // key1 should be evicted (FIFO)
         assert_eq!(cache.len().await, 2);
         assert!(cache.get(&"key1".to_string()).await.is_none());
-        assert_eq!(cache.get(&"key2".to_string()).await, Some("value2".to_string()));
-        assert_eq!(cache.get(&"key3".to_string()).await, Some("value3".to_string()));
+        assert_eq!(
+            cache.get(&"key2".to_string()).await,
+            Some("value2".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key3".to_string()).await,
+            Some("value3".to_string())
+        );
     }
 
     #[tokio::test]
@@ -286,9 +292,18 @@ mod tests {
         // Verify key2 is evicted (not key1 which was touched)
         assert_eq!(cache.len().await, 3);
         assert!(cache.get(&"key2".to_string()).await.is_none());
-        assert_eq!(cache.get(&"key1".to_string()).await, Some("value1".to_string()));
-        assert_eq!(cache.get(&"key3".to_string()).await, Some("value3".to_string()));
-        assert_eq!(cache.get(&"key4".to_string()).await, Some("value4".to_string()));
+        assert_eq!(
+            cache.get(&"key1".to_string()).await,
+            Some("value1".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key3".to_string()).await,
+            Some("value3".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key4".to_string()).await,
+            Some("value4".to_string())
+        );
     }
 
     #[tokio::test]
@@ -305,13 +320,19 @@ mod tests {
         cache.insert("key".to_string(), "valueB".to_string()).await;
 
         // Immediately get key - should return B with fresh TTL
-        assert_eq!(cache.get(&"key".to_string()).await, Some("valueB".to_string()));
+        assert_eq!(
+            cache.get(&"key".to_string()).await,
+            Some("valueB".to_string())
+        );
 
         // Wait for original TTL to pass (100ms total)
         tokio::time::sleep(Duration::from_millis(60)).await;
 
         // Should still be valid because update refreshed TTL
-        assert_eq!(cache.get(&"key".to_string()).await, Some("valueB".to_string()));
+        assert_eq!(
+            cache.get(&"key".to_string()).await,
+            Some("valueB".to_string())
+        );
     }
 
     #[tokio::test]
@@ -323,7 +344,9 @@ mod tests {
         for i in 0..10 {
             let cache_clone = cache.clone();
             handles.push(tokio::spawn(async move {
-                cache_clone.insert(format!("key{}", i), format!("value{}", i)).await;
+                cache_clone
+                    .insert(format!("key{}", i), format!("value{}", i))
+                    .await;
             }));
         }
 
@@ -348,7 +371,9 @@ mod tests {
 
         // Insert 100 items sequentially
         for i in 0..100 {
-            cache.insert(format!("key{}", i), format!("value{}", i)).await;
+            cache
+                .insert(format!("key{}", i), format!("value{}", i))
+                .await;
         }
 
         // Verify only 5 items remain
@@ -357,11 +382,26 @@ mod tests {
         // Verify remaining are the last 5 inserted
         assert!(cache.get(&"key0".to_string()).await.is_none());
         assert!(cache.get(&"key94".to_string()).await.is_none());
-        assert_eq!(cache.get(&"key95".to_string()).await, Some("value95".to_string()));
-        assert_eq!(cache.get(&"key96".to_string()).await, Some("value96".to_string()));
-        assert_eq!(cache.get(&"key97".to_string()).await, Some("value97".to_string()));
-        assert_eq!(cache.get(&"key98".to_string()).await, Some("value98".to_string()));
-        assert_eq!(cache.get(&"key99".to_string()).await, Some("value99".to_string()));
+        assert_eq!(
+            cache.get(&"key95".to_string()).await,
+            Some("value95".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key96".to_string()).await,
+            Some("value96".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key97".to_string()).await,
+            Some("value97".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key98".to_string()).await,
+            Some("value98".to_string())
+        );
+        assert_eq!(
+            cache.get(&"key99".to_string()).await,
+            Some("value99".to_string())
+        );
     }
 
     #[tokio::test]

@@ -1,8 +1,8 @@
 //! Integration test for core runtime modules (Watcher, Indexing, Cache)
 
-use forge_core::{Watcher, WatchEvent, PathFilter, QueryCache};
-use std::time::Duration;
+use forge_core::{PathFilter, QueryCache, WatchEvent, Watcher};
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[tokio::test]
 async fn test_watcher_module_accessible() {

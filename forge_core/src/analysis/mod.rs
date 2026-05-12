@@ -2,21 +2,20 @@
 //!
 //! This module provides composite operations using graph, search, cfg, and edit modules.
 
-use crate::graph::GraphModule;
-use crate::search::SearchModule;
 use crate::cfg::CfgModule;
 use crate::edit::EditModule;
 use crate::error::Result;
+use crate::graph::GraphModule;
+use crate::search::SearchModule;
 use crate::types::Symbol;
 use std::time::Instant;
 
-
-pub mod dead_code;
 pub mod complexity;
+pub mod dead_code;
 pub mod modules;
 
-pub use dead_code::{DeadCodeAnalyzer, DeadSymbol};
 pub use complexity::{ComplexityMetrics, RiskLevel};
+pub use dead_code::{DeadCodeAnalyzer, DeadSymbol};
 pub use modules::{ModuleAnalyzer, ModuleDependencyGraph, ModuleInfo};
 
 /// Analysis module for combined operations.
@@ -111,7 +110,11 @@ impl Diff {
     /// Create a new diff.
     pub fn new(original: String, new: String) -> Self {
         let changed_lines = compute_changed_lines(&original, &new);
-        Self { original, new, changed_lines }
+        Self {
+            original,
+            new,
+            changed_lines,
+        }
     }
 
     /// Returns true if there are any changes.
@@ -172,7 +175,10 @@ impl EditOperation for InsertOperation {
         let symbols = module.graph().find_symbol(&self.after_symbol).await?;
 
         if symbols.is_empty() {
-            return Ok(ApplyResult::Failed(format!("Symbol '{}' not found", self.after_symbol)));
+            return Ok(ApplyResult::Failed(format!(
+                "Symbol '{}' not found",
+                self.after_symbol
+            )));
         }
 
         Ok(ApplyResult::Pending)
@@ -184,7 +190,10 @@ impl EditOperation for InsertOperation {
         if symbols.is_empty() {
             return Ok(Diff::new(
                 String::from(""),
-                format!("// Would insert after: {}\n{}", self.after_symbol, self.content),
+                format!(
+                    "// Would insert after: {}\n{}",
+                    self.after_symbol, self.content
+                ),
             ));
         }
 
@@ -198,13 +207,21 @@ impl EditOperation for InsertOperation {
         let symbols = module.graph().find_symbol(&self.after_symbol).await?;
 
         if symbols.is_empty() {
-            return Ok(ApplyResult::Failed(format!("Symbol '{}' not found", self.after_symbol)));
+            return Ok(ApplyResult::Failed(format!(
+                "Symbol '{}' not found",
+                self.after_symbol
+            )));
         }
 
         let sym = &symbols[0];
         let file_path = &sym.location.file_path;
-        let content = tokio::fs::read_to_string(file_path).await
-            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read {}: {}", file_path.display(), e)))?;
+        let content = tokio::fs::read_to_string(file_path).await.map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to read {}: {}",
+                file_path.display(),
+                e
+            ))
+        })?;
 
         let insert_pos = sym.location.byte_end as usize;
         let content_bytes = content.as_bytes();
@@ -212,8 +229,13 @@ impl EditOperation for InsertOperation {
         modified.extend_from_slice(self.content.as_bytes());
         modified.extend_from_slice(&content_bytes[insert_pos..]);
 
-        tokio::fs::write(file_path, modified).await
-            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to write {}: {}", file_path.display(), e)))?;
+        tokio::fs::write(file_path, modified).await.map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to write {}: {}",
+                file_path.display(),
+                e
+            ))
+        })?;
 
         Ok(ApplyResult::Applied)
     }
@@ -232,7 +254,10 @@ impl EditOperation for DeleteOperation {
         let symbols = module.graph().find_symbol(&self.symbol_name).await?;
 
         if symbols.is_empty() {
-            return Ok(ApplyResult::Failed(format!("Symbol '{}' not found", self.symbol_name)));
+            return Ok(ApplyResult::Failed(format!(
+                "Symbol '{}' not found",
+                self.symbol_name
+            )));
         }
 
         // Check if anything references this symbol
@@ -250,7 +275,10 @@ impl EditOperation for DeleteOperation {
     }
 
     async fn preview(&self, _module: &AnalysisModule) -> Result<Diff> {
-        let original = format!("fn {}() {{\n    // original implementation\n}}\n", self.symbol_name);
+        let original = format!(
+            "fn {}() {{\n    // original implementation\n}}\n",
+            self.symbol_name
+        );
         let new_content = String::from("// Symbol deleted\n");
 
         Ok(Diff::new(original, new_content))
@@ -283,15 +311,25 @@ impl RenameOperation {
     /// Validate the new name is acceptable.
     fn validate_name(&self) -> Result<()> {
         if self.new_name.is_empty() {
-            return Err(crate::error::ForgeError::InvalidQuery("New name cannot be empty".to_string()));
+            return Err(crate::error::ForgeError::InvalidQuery(
+                "New name cannot be empty".to_string(),
+            ));
         }
 
         if self.new_name.chars().any(|c| c.is_whitespace()) {
-            return Err(crate::error::ForgeError::InvalidQuery("New name cannot contain spaces".to_string()));
+            return Err(crate::error::ForgeError::InvalidQuery(
+                "New name cannot contain spaces".to_string(),
+            ));
         }
 
         // Check if it's a valid Rust identifier
-        if !self.new_name.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false) {
+        if !self
+            .new_name
+            .chars()
+            .next()
+            .map(|c| c.is_alphabetic() || c == '_')
+            .unwrap_or(false)
+        {
             return Err(crate::error::ForgeError::InvalidQuery(
                 "New name must start with a letter or underscore".to_string(),
             ));
@@ -313,7 +351,10 @@ impl EditOperation for RenameOperation {
         let old_symbols = module.graph().find_symbol(&self.old_name).await?;
 
         if old_symbols.is_empty() {
-            return Ok(ApplyResult::Failed(format!("Symbol '{}' not found", self.old_name)));
+            return Ok(ApplyResult::Failed(format!(
+                "Symbol '{}' not found",
+                self.old_name
+            )));
         }
 
         // Check if new name already exists
@@ -338,7 +379,10 @@ impl EditOperation for RenameOperation {
 
     async fn apply(&self, module: &mut AnalysisModule) -> Result<ApplyResult> {
         // Use the edit module to perform the rename
-        let result = module.edit().rename_symbol(&self.old_name, &self.new_name).await?;
+        let result = module
+            .edit()
+            .rename_symbol(&self.old_name, &self.new_name)
+            .await?;
 
         if result.success {
             Ok(ApplyResult::Applied)
@@ -411,7 +455,12 @@ pub struct ModuleDependency {
 impl AnalysisModule {
     /// Create a new AnalysisModule.
     pub fn new(graph: GraphModule, cfg: CfgModule, edit: EditModule, search: SearchModule) -> Self {
-        Self { graph, search, cfg, edit }
+        Self {
+            graph,
+            search,
+            cfg,
+            edit,
+        }
     }
 
     /// Get the graph module
@@ -441,15 +490,16 @@ impl AnalysisModule {
         let start = Instant::now();
 
         // Get all callers
-        let callers = self.graph.callers_of(symbol).await
-            .unwrap_or_default();
+        let callers = self.graph.callers_of(symbol).await.unwrap_or_default();
 
         // Get all references
-        let refs = self.graph.references(symbol).await
-            .unwrap_or_default();
+        let refs = self.graph.references(symbol).await.unwrap_or_default();
 
         // Also search for the symbol to get its metadata
-        let _symbol_info = self.graph.find_symbol(symbol).await
+        let _symbol_info = self
+            .graph
+            .find_symbol(symbol)
+            .await
             .unwrap_or_default()
             .into_iter()
             .next();
@@ -459,13 +509,18 @@ impl AnalysisModule {
         let call_count = callers.len();
         let impact_score = ref_count + call_count * 2; // Calls weigh more
 
-        tracing::debug!("Impact analysis for '{}' completed in {:?}", symbol, start.elapsed());
+        tracing::debug!(
+            "Impact analysis for '{}' completed in {:?}",
+            symbol,
+            start.elapsed()
+        );
 
         Ok(ImpactData {
             symbol: symbol.to_string(),
             ref_count,
             call_count,
-            referenced_by: callers.into_iter()
+            referenced_by: callers
+                .into_iter()
                 .map(|r| Symbol {
                     id: r.from,
                     name: String::new(),
@@ -477,7 +532,8 @@ impl AnalysisModule {
                     metadata: serde_json::Value::Null,
                 })
                 .collect(),
-            references: refs.into_iter()
+            references: refs
+                .into_iter()
                 .map(|r| Symbol {
                     id: r.from,
                     name: String::new(),
@@ -514,7 +570,10 @@ impl AnalysisModule {
 
         // Check if database exists first
         if !db_path.exists() {
-            tracing::debug!("No graph database found at {:?}, returning empty dead code list", db_path);
+            tracing::debug!(
+                "No graph database found at {:?}, returning empty dead code list",
+                db_path
+            );
             return Ok(Vec::new());
         }
 
@@ -523,7 +582,11 @@ impl AnalysisModule {
         match analyzer.find_dead_code() {
             Ok(dead_symbols) => {
                 let result: Vec<Symbol> = dead_symbols.into_iter().map(Into::into).collect();
-                tracing::debug!("Dead code detection found {} symbols in {:?}", result.len(), start.elapsed());
+                tracing::debug!(
+                    "Dead code detection found {} symbols in {:?}",
+                    result.len(),
+                    start.elapsed()
+                );
                 Ok(result)
             }
             Err(e) => {
@@ -537,7 +600,11 @@ impl AnalysisModule {
     /// Perform deep impact analysis with k-hop traversal.
     ///
     /// Returns all symbols within k hops of the target symbol.
-    pub async fn deep_impact_analysis(&self, symbol_name: &str, depth: u32) -> Result<Vec<crate::graph::queries::ImpactedSymbol>> {
+    pub async fn deep_impact_analysis(
+        &self,
+        symbol_name: &str,
+        depth: u32,
+    ) -> Result<Vec<crate::graph::queries::ImpactedSymbol>> {
         self.graph.impact_analysis(symbol_name, Some(depth)).await
     }
 
@@ -558,7 +625,8 @@ impl AnalysisModule {
         let refs = self.graph.references(symbol).await?;
 
         // Return direct references as symbols
-        let chain: Vec<Symbol> = refs.into_iter()
+        let chain: Vec<Symbol> = refs
+            .into_iter()
             .map(|r| Symbol {
                 id: r.from,
                 name: String::new(),
@@ -571,7 +639,12 @@ impl AnalysisModule {
             })
             .collect();
 
-        tracing::debug!("Reference chain for '{}' has {} symbols, found in {:?}", symbol, chain.len(), start.elapsed());
+        tracing::debug!(
+            "Reference chain for '{}' has {} symbols, found in {:?}",
+            symbol,
+            chain.len(),
+            start.elapsed()
+        );
         Ok(chain)
     }
 
@@ -584,7 +657,8 @@ impl AnalysisModule {
         let callers = self.graph.callers_of(symbol).await?;
 
         // Return direct callers as symbols
-        let chain: Vec<Symbol> = callers.into_iter()
+        let chain: Vec<Symbol> = callers
+            .into_iter()
             .map(|r| Symbol {
                 id: r.from,
                 name: String::new(),
@@ -597,7 +671,12 @@ impl AnalysisModule {
             })
             .collect();
 
-        tracing::debug!("Call chain for '{}' has {} symbols, found in {:?}", symbol, chain.len(), start.elapsed());
+        tracing::debug!(
+            "Call chain for '{}' has {} symbols, found in {:?}",
+            symbol,
+            chain.len(),
+            start.elapsed()
+        );
         Ok(chain)
     }
 
@@ -643,9 +722,17 @@ impl AnalysisModule {
     /// Looks up the symbol's source code and analyzes it for complexity.
     pub async fn complexity_metrics(&self, symbol_name: &str) -> Result<ComplexityMetrics> {
         // Try to find the symbol's source and analyze it
-        let symbols = self.graph.find_symbol(symbol_name).await.unwrap_or_default();
+        let symbols = self
+            .graph
+            .find_symbol(symbol_name)
+            .await
+            .unwrap_or_default();
         if let Some(sym) = symbols.first() {
-            let full_path = self.graph.store().codebase_path.join(&sym.location.file_path);
+            let full_path = self
+                .graph
+                .store()
+                .codebase_path
+                .join(&sym.location.file_path);
             if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
                 // Extract the function body from byte span
                 let start = sym.location.byte_start as usize;
@@ -684,32 +771,35 @@ impl AnalysisModule {
         let caller_refs = self.graph.callers_of(symbol_name).await?;
         let callee_refs = self.graph.references(symbol_name).await?;
 
-        let callers = caller_refs.iter().map(|r| Symbol {
-            id: r.from,
-            name: String::new(),
-            fully_qualified_name: String::new(),
-            kind: crate::types::SymbolKind::Function,
-            language: crate::types::Language::Unknown(String::new()),
-            location: r.location.clone(),
-            parent_id: None,
-            metadata: serde_json::Value::Null,
-        }).collect();
+        let callers = caller_refs
+            .iter()
+            .map(|r| Symbol {
+                id: r.from,
+                name: String::new(),
+                fully_qualified_name: String::new(),
+                kind: crate::types::SymbolKind::Function,
+                language: crate::types::Language::Unknown(String::new()),
+                location: r.location.clone(),
+                parent_id: None,
+                metadata: serde_json::Value::Null,
+            })
+            .collect();
 
-        let callees = callee_refs.iter().map(|r| Symbol {
-            id: r.to,
-            name: String::new(),
-            fully_qualified_name: String::new(),
-            kind: crate::types::SymbolKind::Function,
-            language: crate::types::Language::Unknown(String::new()),
-            location: r.location.clone(),
-            parent_id: None,
-            metadata: serde_json::Value::Null,
-        }).collect();
+        let callees = callee_refs
+            .iter()
+            .map(|r| Symbol {
+                id: r.to,
+                name: String::new(),
+                fully_qualified_name: String::new(),
+                kind: crate::types::SymbolKind::Function,
+                language: crate::types::Language::Unknown(String::new()),
+                location: r.location.clone(),
+                parent_id: None,
+                metadata: serde_json::Value::Null,
+            })
+            .collect();
 
-        Ok(CrossReferences {
-            callers,
-            callees,
-        })
+        Ok(CrossReferences { callers, callees })
     }
 
     /// Analyze module dependencies.
@@ -718,16 +808,19 @@ impl AnalysisModule {
     pub async fn module_dependencies(&self) -> Result<Vec<ModuleDependency>> {
         let db_path = self.graph.store().db_path();
         let analyzer = ModuleAnalyzer::new(db_path);
-        
+
         let graph = analyzer.analyze_dependencies()?;
-        
+
         let mut deps = Vec::new();
         for (from, tos) in graph.dependencies {
             for to in tos {
-                deps.push(ModuleDependency { from: from.clone(), to });
+                deps.push(ModuleDependency {
+                    from: from.clone(),
+                    to,
+                });
             }
         }
-        
+
         Ok(deps)
     }
 
@@ -765,7 +858,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -785,7 +879,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -804,7 +899,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -823,7 +919,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -842,7 +939,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -865,7 +963,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -885,7 +984,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -950,7 +1050,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -972,7 +1073,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -994,7 +1096,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1015,7 +1118,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1036,7 +1140,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1069,7 +1174,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1088,10 +1194,7 @@ mod tests {
 
     #[test]
     fn test_diff_creation() {
-        let diff = Diff::new(
-            "original content".to_string(),
-            "new content".to_string(),
-        );
+        let diff = Diff::new("original content".to_string(), "new content".to_string());
         assert_eq!(diff.original, "original content");
         assert_eq!(diff.new, "new content");
     }
@@ -1113,7 +1216,10 @@ mod tests {
         assert!(matches!(ApplyResult::Applied, ApplyResult::Applied));
         assert!(matches!(ApplyResult::AlwaysError, ApplyResult::AlwaysError));
         assert!(matches!(ApplyResult::Pending, ApplyResult::Pending));
-        assert!(matches!(ApplyResult::Failed("x".to_string()), ApplyResult::Failed(_)));
+        assert!(matches!(
+            ApplyResult::Failed("x".to_string()),
+            ApplyResult::Failed(_)
+        ));
     }
 
     // End-to-end integration tests
@@ -1123,7 +1229,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1152,7 +1259,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1179,7 +1287,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1198,7 +1307,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1221,7 +1331,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1253,7 +1364,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1273,7 +1385,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await.unwrap()
+                .await
+                .unwrap(),
         );
         let graph = GraphModule::new(store.clone());
         let search = SearchModule::new(store.clone());
@@ -1293,8 +1406,10 @@ mod tests {
         assert!(benchmarks.total_ms >= 0.0);
 
         // Total should be sum of components (approximately)
-        let sum = benchmarks.impact_analysis_ms + benchmarks.dead_code_ms
-            + benchmarks.reference_chain_ms + benchmarks.call_chain_ms;
+        let sum = benchmarks.impact_analysis_ms
+            + benchmarks.dead_code_ms
+            + benchmarks.reference_chain_ms
+            + benchmarks.call_chain_ms;
         assert!(benchmarks.total_ms >= sum * 0.9); // Allow for timing overhead
     }
 }

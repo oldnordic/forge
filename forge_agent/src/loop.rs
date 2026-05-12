@@ -469,7 +469,10 @@ mod tests {
             }
             Err(e) => {
                 // Verification failure is expected for empty temp directory
-                assert!(e.to_string().contains("Verification") || e.to_string().contains("verification"));
+                assert!(
+                    e.to_string().contains("Verification")
+                        || e.to_string().contains("verification")
+                );
             }
         }
     }
@@ -530,8 +533,15 @@ mod tests {
 
         // The 5th event could be Verify or Rollback (if verification failed)
         // Both are valid for v0.3
-        let is_valid_fifth = matches!(events[4], AuditEvent::Verify { .. } | AuditEvent::Rollback { .. });
-        assert!(is_valid_fifth, "Expected Verify or Rollback at index 4, got: {:?}", events[4]);
+        let is_valid_fifth = matches!(
+            events[4],
+            AuditEvent::Verify { .. } | AuditEvent::Rollback { .. }
+        );
+        assert!(
+            is_valid_fifth,
+            "Expected Verify or Rollback at index 4, got: {:?}",
+            events[4]
+        );
     }
 
     #[tokio::test]
@@ -551,7 +561,10 @@ mod tests {
             }
             Err(e) => {
                 // Verification error is expected for empty temp directory
-                assert!(e.to_string().contains("Verification") || e.to_string().contains("verification"));
+                assert!(
+                    e.to_string().contains("Verification")
+                        || e.to_string().contains("verification")
+                );
             }
         }
     }

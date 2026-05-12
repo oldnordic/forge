@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 /// Compute SHA-256 checksum of checkpoint data
 pub fn compute_checksum(data: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(data);
     format!("{:x}", hasher.finalize())
@@ -89,7 +89,7 @@ impl TemporalCheckpoint {
         let id = CheckpointId::new();
         let timestamp = Utc::now();
         let message = message.into();
-        
+
         // Create checkpoint without checksum first
         let mut checkpoint = Self {
             id,
@@ -102,13 +102,13 @@ impl TemporalCheckpoint {
             session_id,
             checksum: String::new(), // Temporary, will compute
         };
-        
+
         // Compute checksum from serialized data (excluding checksum itself)
         checkpoint.checksum = checkpoint.compute_checksum();
-        
+
         checkpoint
     }
-    
+
     /// Compute checksum of this checkpoint's data
     fn compute_checksum(&self) -> String {
         // Create a copy without checksum for serialization
@@ -122,19 +122,19 @@ impl TemporalCheckpoint {
             trigger: &self.trigger,
             session_id: self.session_id,
         };
-        
-        let json = serde_json::to_vec(&data_for_hash)
-            .unwrap_or_default();
+
+        let json = serde_json::to_vec(&data_for_hash).unwrap_or_default();
         compute_checksum(&json)
     }
-    
+
     /// Validate the checkpoint's checksum
     pub fn validate(&self) -> crate::errors::Result<()> {
         let expected = self.compute_checksum();
         if self.checksum != expected {
-            return Err(crate::errors::ReasoningError::ValidationFailed(
-                format!("Checksum mismatch: expected {}, got {}", expected, self.checksum)
-            ));
+            return Err(crate::errors::ReasoningError::ValidationFailed(format!(
+                "Checksum mismatch: expected {}, got {}",
+                expected, self.checksum
+            )));
         }
         Ok(())
     }
@@ -205,7 +205,10 @@ pub enum CompactionPolicy {
     /// Keep all checkpoints with specific tags
     PreserveTagged(Vec<String>),
     /// Keep recent + preserve tagged
-    Hybrid { keep_recent: usize, preserve_tags: Vec<String> },
+    Hybrid {
+        keep_recent: usize,
+        preserve_tags: Vec<String>,
+    },
 }
 
 impl Default for CompactionPolicy {
@@ -377,7 +380,7 @@ impl TemporalCheckpointManager {
         // Validate checkpoint has valid state
         if checkpoint.state.working_dir.is_none() {
             return Err(crate::errors::ReasoningError::InvalidState(
-                "Checkpoint has no working directory".to_string()
+                "Checkpoint has no working directory".to_string(),
             ));
         }
         Ok(checkpoint.state.clone())
@@ -412,7 +415,7 @@ impl TemporalCheckpointManager {
     /// Compact checkpoints using a specific policy
     pub fn compact_with_policy(&self, policy: CompactionPolicy) -> Result<usize> {
         let all_checkpoints = self.storage.list_by_session(self.session_id)?;
-        
+
         // Determine which checkpoints to keep
         let ids_to_keep: std::collections::HashSet<CheckpointId> = match &policy {
             CompactionPolicy::KeepRecent(n) => {
@@ -423,33 +426,37 @@ impl TemporalCheckpointManager {
             }
             CompactionPolicy::PreserveTagged(tags) => {
                 // Keep all checkpoints with any of the specified tags
-                all_checkpoints.iter()
+                all_checkpoints
+                    .iter()
                     .filter(|cp| cp.tags.iter().any(|t| tags.contains(t)))
                     .map(|cp| cp.id)
                     .collect()
             }
-            CompactionPolicy::Hybrid { keep_recent, preserve_tags } => {
+            CompactionPolicy::Hybrid {
+                keep_recent,
+                preserve_tags,
+            } => {
                 // Keep recent + preserve tagged
                 let mut to_keep = std::collections::HashSet::new();
-                
+
                 // Add recent
                 let mut sorted = all_checkpoints.clone();
                 sorted.sort_by_key(|cp| cp.sequence_number);
                 for cp in sorted.iter().rev().take(*keep_recent) {
                     to_keep.insert(cp.id);
                 }
-                
+
                 // Add tagged
                 for cp in &all_checkpoints {
                     if cp.tags.iter().any(|t| preserve_tags.contains(t)) {
                         to_keep.insert(cp.id);
                     }
                 }
-                
+
                 to_keep
             }
         };
-        
+
         // Delete checkpoints not in keep list
         let mut deleted = 0;
         for cp in &all_checkpoints {
@@ -458,7 +465,7 @@ impl TemporalCheckpointManager {
                 deleted += 1;
             }
         }
-        
+
         Ok(deleted)
     }
 

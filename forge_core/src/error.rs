@@ -1,7 +1,7 @@
 //! Error types for ForgeKit.
 
-use std::path::PathBuf;
 use crate::types::Span;
+use std::path::PathBuf;
 
 /// Main error type for ForgeKit.
 ///

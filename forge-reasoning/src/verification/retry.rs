@@ -3,8 +3,8 @@
 //! This module provides retry logic for verification checks that fail due to
 //! transient issues like timeouts or network errors.
 
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Configuration for retry behavior
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,10 +51,7 @@ impl Default for RetryConfig {
 ///   * Caps at max_delay
 ///   * Sleeps and retries
 /// - On final error: returns error
-pub async fn execute_with_retry<F, Fut, T, E>(
-    mut operation: F,
-    config: RetryConfig,
-) -> Result<T, E>
+pub async fn execute_with_retry<F, Fut, T, E>(mut operation: F, config: RetryConfig) -> Result<T, E>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
@@ -75,7 +72,8 @@ where
                 // Add jitter if enabled
                 if config.jitter {
                     let jitter_factor = 0.5 + rand::random::<f64>(); // 0.5 to 1.5
-                    delay = Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
+                    delay =
+                        Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
                 }
 
                 // Cap at max_delay
@@ -238,7 +236,7 @@ mod tests {
             max_retries: 5,
             initial_delay: Duration::from_millis(10),
             max_delay: Duration::from_millis(50), // Low cap
-            backoff_factor: 10.0, // High growth factor
+            backoff_factor: 10.0,                 // High growth factor
             jitter: false,
         };
 

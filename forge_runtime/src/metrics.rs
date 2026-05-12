@@ -47,12 +47,12 @@ impl RuntimeMetrics {
         Self {
             inner: Arc::new(MetricsInner {
                 counts: [
-                    AtomicU64::new(0),  // GraphQuery
-                    AtomicU64::new(0),  // Search
-                    AtomicU64::new(0),  // CfgAnalysis
-                    AtomicU64::new(0),  // CacheHit
-                    AtomicU64::new(0),  // CacheMiss
-                    AtomicU64::new(0),  // Reindex
+                    AtomicU64::new(0), // GraphQuery
+                    AtomicU64::new(0), // Search
+                    AtomicU64::new(0), // CfgAnalysis
+                    AtomicU64::new(0), // CacheHit
+                    AtomicU64::new(0), // CacheMiss
+                    AtomicU64::new(0), // Reindex
                 ],
                 total_time_ns: AtomicU64::new(0),
                 cache_hits: AtomicU64::new(0),
@@ -70,7 +70,9 @@ impl RuntimeMetrics {
     /// Records a timed operation.
     pub fn record_timing(&self, kind: MetricKind, duration: Duration) {
         self.record(kind);
-        self.inner.total_time_ns.fetch_add(duration.as_nanos() as u64, Ordering::Relaxed);
+        self.inner
+            .total_time_ns
+            .fetch_add(duration.as_nanos() as u64, Ordering::Relaxed);
     }
 
     /// Records a cache access.

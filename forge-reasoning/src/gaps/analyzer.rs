@@ -9,9 +9,9 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::hypothesis::HypothesisBoard;
-use crate::hypothesis::types::HypothesisId;
 use crate::belief::BeliefGraph;
+use crate::hypothesis::types::HypothesisId;
+use crate::hypothesis::HypothesisBoard;
 
 /// Unique identifier for a knowledge gap
 ///
@@ -168,9 +168,15 @@ pub enum SuggestedAction {
     /// Gather evidence for a hypothesis
     GatherEvidence { hypothesis_id: HypothesisId },
     /// Resolve a dependency between hypotheses
-    ResolveDependency { dependent_id: HypothesisId, dependee_id: HypothesisId },
+    ResolveDependency {
+        dependent_id: HypothesisId,
+        dependee_id: HypothesisId,
+    },
     /// Create a verification check for a hypothesis
-    CreateVerificationCheck { command: String, hypothesis_id: HypothesisId },
+    CreateVerificationCheck {
+        command: String,
+        hypothesis_id: HypothesisId,
+    },
     /// Research a specific topic
     Research { topic: String },
     /// Other action (flexible catch-all)
@@ -267,10 +273,9 @@ impl KnowledgeGapAnalyzer {
         gap_id: GapId,
         resolution_notes: String,
     ) -> crate::errors::Result<()> {
-        let gap = self.gaps.get_mut(&gap_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Gap {} not found", gap_id)
-            ))?;
+        let gap = self.gaps.get_mut(&gap_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!("Gap {} not found", gap_id))
+        })?;
 
         gap.filled_at = Some(Utc::now());
         gap.resolution_notes = Some(resolution_notes);
@@ -281,14 +286,18 @@ impl KnowledgeGapAnalyzer {
     ///
     /// Returns gaps sorted by score descending (highest priority first).
     pub async fn list_gaps(&self, unfilled_only: bool) -> Vec<KnowledgeGap> {
-        let mut gaps: Vec<_> = self.gaps.values()
+        let mut gaps: Vec<_> = self
+            .gaps
+            .values()
             .filter(|g| !unfilled_only || g.filled_at.is_none())
             .cloned()
             .collect();
 
         // Sort by score descending (highest priority first)
         gaps.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         gaps
@@ -325,9 +334,8 @@ impl KnowledgeGapAnalyzer {
             // Check if confidence exceeds threshold
             if hypothesis.current_confidence().get() > self.scoring_config.auto_close_threshold {
                 gap.filled_at = Some(Utc::now());
-                gap.resolution_notes = Some(
-                    "Auto-closed: hypothesis reached high confidence".to_string()
-                );
+                gap.resolution_notes =
+                    Some("Auto-closed: hypothesis reached high confidence".to_string());
                 closed.push(gap.id);
             }
         }
@@ -366,9 +374,7 @@ impl KnowledgeGapAnalyzer {
                 if evidence_list.is_empty() {
                     0.0
                 } else {
-                    let total: f64 = evidence_list.iter()
-                        .map(|e| e.strength().abs())
-                        .sum();
+                    let total: f64 = evidence_list.iter().map(|e| e.strength().abs()).sum();
                     total / evidence_list.len() as f64
                 }
             }
@@ -405,12 +411,15 @@ mod tests {
         let graph = Arc::new(BeliefGraph::new());
         let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
 
-        let gap_id = analyzer.register_gap(
-            "Test gap".to_string(),
-            GapCriticality::Medium,
-            GapType::MissingInformation,
-            None,
-        ).await.unwrap();
+        let gap_id = analyzer
+            .register_gap(
+                "Test gap".to_string(),
+                GapCriticality::Medium,
+                GapType::MissingInformation,
+                None,
+            )
+            .await
+            .unwrap();
 
         let gap = analyzer.get_gap(gap_id);
         assert!(gap.is_some());
@@ -423,14 +432,20 @@ mod tests {
         let graph = Arc::new(BeliefGraph::new());
         let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
 
-        let gap_id = analyzer.register_gap(
-            "Test gap".to_string(),
-            GapCriticality::Low,
-            GapType::UntestedAssumption,
-            None,
-        ).await.unwrap();
+        let gap_id = analyzer
+            .register_gap(
+                "Test gap".to_string(),
+                GapCriticality::Low,
+                GapType::UntestedAssumption,
+                None,
+            )
+            .await
+            .unwrap();
 
-        analyzer.fill_gap(gap_id, "Resolved".to_string()).await.unwrap();
+        analyzer
+            .fill_gap(gap_id, "Resolved".to_string())
+            .await
+            .unwrap();
 
         let gap = analyzer.get_gap(gap_id).unwrap();
         assert!(gap.filled_at.is_some());
@@ -444,19 +459,25 @@ mod tests {
         let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
 
         // Register gaps with different criticality
-        analyzer.register_gap(
-            "Low priority".to_string(),
-            GapCriticality::Low,
-            GapType::MissingInformation,
-            None,
-        ).await.unwrap();
+        analyzer
+            .register_gap(
+                "Low priority".to_string(),
+                GapCriticality::Low,
+                GapType::MissingInformation,
+                None,
+            )
+            .await
+            .unwrap();
 
-        analyzer.register_gap(
-            "High priority".to_string(),
-            GapCriticality::High,
-            GapType::MissingInformation,
-            None,
-        ).await.unwrap();
+        analyzer
+            .register_gap(
+                "High priority".to_string(),
+                GapCriticality::High,
+                GapType::MissingInformation,
+                None,
+            )
+            .await
+            .unwrap();
 
         let gaps = analyzer.list_gaps(false).await;
         // High priority should come first
@@ -470,12 +491,15 @@ mod tests {
         let graph = Arc::new(BeliefGraph::new());
         let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
 
-        let gap_id = analyzer.register_gap(
-            "Test gap".to_string(),
-            GapCriticality::High,
-            GapType::MissingInformation,
-            None,
-        ).await.unwrap();
+        let gap_id = analyzer
+            .register_gap(
+                "Test gap".to_string(),
+                GapCriticality::High,
+                GapType::MissingInformation,
+                None,
+            )
+            .await
+            .unwrap();
 
         let gap = analyzer.get_gap(gap_id).unwrap();
         // Score should be > 0 since High criticality
@@ -491,15 +515,21 @@ mod tests {
 
         // Create hypothesis with high confidence
         let prior = Confidence::new(0.95).unwrap();
-        let h_id = board.propose("High confidence hypothesis", prior).await.unwrap();
+        let h_id = board
+            .propose("High confidence hypothesis", prior)
+            .await
+            .unwrap();
 
         // Register gap linked to this hypothesis
-        let gap_id = analyzer.register_gap(
-            "Test gap".to_string(),
-            GapCriticality::Medium,
-            GapType::UntestedAssumption,
-            Some(h_id),
-        ).await.unwrap();
+        let gap_id = analyzer
+            .register_gap(
+                "Test gap".to_string(),
+                GapCriticality::Medium,
+                GapType::UntestedAssumption,
+                Some(h_id),
+            )
+            .await
+            .unwrap();
 
         // Auto-close should close this gap
         let closed = analyzer.auto_close_gaps().await;
@@ -519,19 +549,25 @@ mod tests {
         let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
 
         // Register gaps
-        analyzer.register_gap(
-            "Low priority".to_string(),
-            GapCriticality::Low,
-            GapType::MissingInformation,
-            None,
-        ).await.unwrap();
+        analyzer
+            .register_gap(
+                "Low priority".to_string(),
+                GapCriticality::Low,
+                GapType::MissingInformation,
+                None,
+            )
+            .await
+            .unwrap();
 
-        analyzer.register_gap(
-            "High priority".to_string(),
-            GapCriticality::High,
-            GapType::UntestedAssumption,
-            None,
-        ).await.unwrap();
+        analyzer
+            .register_gap(
+                "High priority".to_string(),
+                GapCriticality::High,
+                GapType::UntestedAssumption,
+                None,
+            )
+            .await
+            .unwrap();
 
         // Get suggestions
         let suggestions = analyzer.get_suggestions(true).await;
@@ -550,12 +586,15 @@ mod tests {
         let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), graph);
 
         // Register gap
-        let gap_id = analyzer.register_gap(
-            "Test gap".to_string(),
-            GapCriticality::Medium,
-            GapType::MissingInformation,
-            None,
-        ).await.unwrap();
+        let gap_id = analyzer
+            .register_gap(
+                "Test gap".to_string(),
+                GapCriticality::Medium,
+                GapType::MissingInformation,
+                None,
+            )
+            .await
+            .unwrap();
 
         // Manually set score to wrong value
         {
@@ -590,12 +629,15 @@ mod tests {
         let mut analyzer = KnowledgeGapAnalyzer::new(board.clone(), Arc::new(graph));
 
         // Register gap for H1
-        let gap_id = analyzer.register_gap(
-            "Test gap".to_string(),
-            GapCriticality::Medium,
-            GapType::UntestedAssumption,
-            Some(h1),
-        ).await.unwrap();
+        let gap_id = analyzer
+            .register_gap(
+                "Test gap".to_string(),
+                GapCriticality::Medium,
+                GapType::UntestedAssumption,
+                Some(h1),
+            )
+            .await
+            .unwrap();
 
         // Depth should be 2 (H1 -> H2 -> H3)
         let gap = analyzer.get_gap(gap_id).unwrap();

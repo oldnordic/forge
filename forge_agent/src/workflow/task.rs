@@ -361,10 +361,7 @@ pub enum TaskError {
 
     /// Task dependency failed
     #[error("Dependency {dependency} failed: {reason}")]
-    DependencyFailed {
-        dependency: String,
-        reason: String,
-    },
+    DependencyFailed { dependency: String, reason: String },
 
     /// Task was skipped due to workflow state
     #[error("Task skipped: {0}")]
@@ -520,8 +517,8 @@ mod tests {
         let source = CancellationTokenSource::new();
         let token = source.token();
 
-        let context = TaskContext::new("workflow-1", task_id)
-            .with_cancellation_token(token.clone());
+        let context =
+            TaskContext::new("workflow-1", task_id).with_cancellation_token(token.clone());
 
         // Cancellation token should be accessible
         assert!(context.cancellation_token().is_some());
@@ -543,8 +540,8 @@ mod tests {
         let source = CancellationTokenSource::new();
 
         // Test builder pattern chaining
-        let context = TaskContext::new("workflow-1", task_id)
-            .with_cancellation_token(source.token());
+        let context =
+            TaskContext::new("workflow-1", task_id).with_cancellation_token(source.token());
 
         assert!(context.cancellation_token().is_some());
         assert_eq!(context.workflow_id, "workflow-1");
@@ -566,8 +563,7 @@ mod tests {
         let task_id = TaskId::new("task-1");
         let timeout = Duration::from_secs(30);
 
-        let context = TaskContext::new("workflow-1", task_id)
-            .with_task_timeout(timeout);
+        let context = TaskContext::new("workflow-1", task_id).with_task_timeout(timeout);
 
         // Task timeout should be accessible
         assert!(context.task_timeout().is_some());
@@ -581,8 +577,7 @@ mod tests {
         let task_id = TaskId::new("task-1");
         let timeout = Duration::from_millis(5000);
 
-        let context = TaskContext::new("workflow-1", task_id)
-            .with_task_timeout(timeout);
+        let context = TaskContext::new("workflow-1", task_id).with_task_timeout(timeout);
 
         // Verify accessor returns correct value
         assert_eq!(context.task_timeout, Some(timeout));
@@ -680,7 +675,10 @@ mod tests {
 
         #[async_trait]
         impl WorkflowTask for TaskWithCompensation {
-            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+            async fn execute(
+                &self,
+                _context: &TaskContext,
+            ) -> Result<TaskResult, crate::workflow::TaskError> {
                 Ok(TaskResult::Success)
             }
 

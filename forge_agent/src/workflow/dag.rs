@@ -311,7 +311,10 @@ impl Workflow {
             distances.insert(idx, std::cmp::max(current_distance, max_incoming + 1));
 
             // Propagate distance to outgoing neighbors
-            for neighbor in self.graph.neighbors_directed(idx, petgraph::Direction::Outgoing) {
+            for neighbor in self
+                .graph
+                .neighbors_directed(idx, petgraph::Direction::Outgoing)
+            {
                 let neighbor_dist = distances.get(&neighbor).copied().unwrap_or(0);
                 if distances[&idx] + 1 > neighbor_dist {
                     distances.insert(neighbor, distances[&idx] + 1);
@@ -324,10 +327,7 @@ impl Workflow {
         for (idx, distance) in &distances {
             if let Some(node) = self.graph.node_weight(*idx) {
                 let layer = if *distance == 0 { 0 } else { distance - 1 };
-                layer_map
-                    .entry(layer)
-                    .or_default()
-                    .push(node.id.clone());
+                layer_map.entry(layer).or_default().push(node.id.clone());
             }
         }
 
@@ -382,7 +382,12 @@ impl Workflow {
     pub(in crate::workflow) fn _ready_tasks(&self) -> Vec<&TaskNode> {
         self.graph
             .node_indices()
-            .filter(|&idx| self.graph.neighbors_directed(idx, petgraph::Direction::Incoming).count() == 0)
+            .filter(|&idx| {
+                self.graph
+                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .count()
+                    == 0
+            })
             .filter_map(|idx| self.graph.node_weight(idx))
             .collect()
     }
@@ -405,13 +410,12 @@ impl Workflow {
         &mut self,
         suggestions: Vec<crate::workflow::auto_detect::DependencySuggestion>,
     ) -> Result<usize, WorkflowError> {
-        
-
         let mut applied = 0;
 
         for suggestion in suggestions {
             // Check if dependency already exists
-            if self.task_dependencies(&suggestion.to_task)
+            if self
+                .task_dependencies(&suggestion.to_task)
                 .as_ref()
                 .map(|deps| deps.contains(&suggestion.from_task))
                 .unwrap_or(false)
@@ -478,9 +482,7 @@ impl Workflow {
                 // Convert path to TaskIds
                 return path
                     .iter()
-                    .filter_map(|&idx| {
-                        self.graph.node_weight(idx).map(|node| node.id.clone())
-                    })
+                    .filter_map(|&idx| self.graph.node_weight(idx).map(|node| node.id.clone()))
                     .collect();
             }
 
@@ -503,10 +505,7 @@ impl Workflow {
         }
 
         // Fallback: return nodes involved in the edge
-        vec![
-            self.graph[start].id.clone(),
-            self.graph[end].id.clone(),
-        ]
+        vec![self.graph[start].id.clone(), self.graph[end].id.clone()]
     }
 
     /// Detects all nodes involved in cycles (fallback error reporting).
@@ -515,8 +514,7 @@ impl Workflow {
         let sccs = petgraph::algo::tarjan_scc(&self.graph);
 
         // Return nodes from SCCs with more than one node
-        sccs
-            .into_iter()
+        sccs.into_iter()
             .filter(|scc| scc.len() > 1)
             .flat_map(|scc| {
                 scc.into_iter()
@@ -729,7 +727,7 @@ mod tests {
 
     #[test]
     fn test_apply_suggestions() {
-        use crate::workflow::auto_detect::{DependencySuggestion, DependencyReason};
+        use crate::workflow::auto_detect::{DependencyReason, DependencySuggestion};
 
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
@@ -769,7 +767,7 @@ mod tests {
 
     #[test]
     fn test_apply_suggestions_skips_existing() {
-        use crate::workflow::auto_detect::{DependencySuggestion, DependencyReason};
+        use crate::workflow::auto_detect::{DependencyReason, DependencySuggestion};
 
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
@@ -778,17 +776,15 @@ mod tests {
         // Add existing dependency
         workflow.add_dependency("a", "b").unwrap();
 
-        let suggestions = vec![
-            DependencySuggestion {
-                from_task: TaskId::new("a"),
-                to_task: TaskId::new("b"),
-                reason: DependencyReason::SymbolImpact {
-                    symbol: "test".to_string(),
-                    hops: 1,
-                },
-                confidence: 0.9,
+        let suggestions = vec![DependencySuggestion {
+            from_task: TaskId::new("a"),
+            to_task: TaskId::new("b"),
+            reason: DependencyReason::SymbolImpact {
+                symbol: "test".to_string(),
+                hops: 1,
             },
-        ];
+            confidence: 0.9,
+        }];
 
         let applied = workflow.apply_suggestions(suggestions).unwrap();
         assert_eq!(applied, 0); // Should skip existing dependency
@@ -796,7 +792,7 @@ mod tests {
 
     #[test]
     fn test_preview_suggestions() {
-        use crate::workflow::auto_detect::{DependencySuggestion, DependencyReason};
+        use crate::workflow::auto_detect::{DependencyReason, DependencySuggestion};
 
         let workflow = Workflow::new();
 

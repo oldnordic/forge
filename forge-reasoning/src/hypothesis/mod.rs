@@ -5,18 +5,18 @@
 //! Bayesian updates as evidence accumulates.
 
 pub mod confidence;
-pub mod types;
 pub mod evidence;
 pub mod storage;
+pub mod types;
 
 // Public exports
 pub use confidence::{Confidence, ConfidenceError};
-pub use types::{Hypothesis, HypothesisId, HypothesisStatus, HypothesisState};
+pub use evidence::{strength_to_likelihood, Evidence, EvidenceId, EvidenceMetadata, EvidenceType};
 pub use storage::{HypothesisStorage, InMemoryHypothesisStorage};
-pub use evidence::{Evidence, EvidenceId, EvidenceType, EvidenceMetadata, strength_to_likelihood};
+pub use types::{Hypothesis, HypothesisId, HypothesisState, HypothesisStatus};
 
-use std::sync::Arc;
 use crate::errors::Result;
+use std::sync::Arc;
 
 /// Main API for hypothesis management
 pub struct HypothesisBoard {
@@ -57,13 +57,13 @@ impl HypothesisBoard {
         likelihood_h: f64,
         likelihood_not_h: f64,
     ) -> Result<Confidence> {
-        let hypothesis = self.storage.get_hypothesis(id).await?
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found", id)
-            ))?;
+        let hypothesis = self.storage.get_hypothesis(id).await?.ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!("Hypothesis {} not found", id))
+        })?;
 
         let current = hypothesis.current_confidence();
-        let posterior = current.update_with_evidence(likelihood_h, likelihood_not_h)
+        let posterior = current
+            .update_with_evidence(likelihood_h, likelihood_not_h)
             .map_err(|e| crate::errors::ReasoningError::InvalidState(e.to_string()))?;
 
         self.storage.update_confidence(id, posterior).await?;
@@ -71,11 +71,7 @@ impl HypothesisBoard {
     }
 
     /// Update hypothesis status
-    pub async fn set_status(
-        &self,
-        id: HypothesisId,
-        status: HypothesisStatus,
-    ) -> Result<()> {
+    pub async fn set_status(&self, id: HypothesisId, status: HypothesisStatus) -> Result<()> {
         self.storage.set_status(id, status).await
     }
 
@@ -116,11 +112,9 @@ impl HypothesisBoard {
             strength_to_likelihood(evidence.strength(), evidence_type);
 
         // Update hypothesis confidence
-        let posterior = self.update_with_evidence(
-            hypothesis_id,
-            likelihood_h,
-            likelihood_not_h,
-        ).await?;
+        let posterior = self
+            .update_with_evidence(hypothesis_id, likelihood_h, likelihood_not_h)
+            .await?;
 
         Ok((evidence_id, posterior))
     }
@@ -132,17 +126,25 @@ impl HypothesisBoard {
 
     /// List all evidence for a hypothesis
     pub async fn list_evidence(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
-        self.storage.list_evidence_for_hypothesis(hypothesis_id).await
+        self.storage
+            .list_evidence_for_hypothesis(hypothesis_id)
+            .await
     }
 
     /// Trace supporting evidence for a hypothesis
-    pub async fn list_supporting_evidence(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
+    pub async fn list_supporting_evidence(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<Vec<Evidence>> {
         let all = self.list_evidence(hypothesis_id).await?;
         Ok(all.into_iter().filter(|e| e.is_supporting()).collect())
     }
 
     /// Trace refuting evidence for a hypothesis
-    pub async fn list_refuting_evidence(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
+    pub async fn list_refuting_evidence(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<Vec<Evidence>> {
         let all = self.list_evidence(hypothesis_id).await?;
         Ok(all.into_iter().filter(|e| e.is_refuting()).collect())
     }
@@ -224,13 +226,22 @@ mod tests {
         let id = board.propose("Test", prior).await.unwrap();
 
         // Valid: Proposed -> UnderTest
-        board.set_status(id, HypothesisStatus::UnderTest).await.unwrap();
+        board
+            .set_status(id, HypothesisStatus::UnderTest)
+            .await
+            .unwrap();
 
         // Valid: UnderTest -> Confirmed
-        board.set_status(id, HypothesisStatus::Confirmed).await.unwrap();
+        board
+            .set_status(id, HypothesisStatus::Confirmed)
+            .await
+            .unwrap();
 
         // Invalid: Confirmed -> Proposed (should fail)
-        assert!(board.set_status(id, HypothesisStatus::Proposed).await.is_err());
+        assert!(board
+            .set_status(id, HypothesisStatus::Proposed)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -245,12 +256,15 @@ mod tests {
             source_path: None,
         };
 
-        let (evidence_id, posterior) = board.attach_evidence(
-            id,
-            EvidenceType::Observation,
-            0.5,  // Max supporting strength for Observation
-            metadata,
-        ).await.unwrap();
+        let (evidence_id, posterior) = board
+            .attach_evidence(
+                id,
+                EvidenceType::Observation,
+                0.5, // Max supporting strength for Observation
+                metadata,
+            )
+            .await
+            .unwrap();
 
         // Posterior should be higher than prior
         assert!(posterior.get() > 0.5);
@@ -272,7 +286,10 @@ mod tests {
                 description: format!("Observation {}", i),
                 source_path: None,
             };
-            board.attach_evidence(id, EvidenceType::Observation, 0.3, metadata).await.unwrap();
+            board
+                .attach_evidence(id, EvidenceType::Observation, 0.3, metadata)
+                .await
+                .unwrap();
         }
 
         let evidence_list = board.list_evidence(id).await.unwrap();
@@ -290,14 +307,20 @@ mod tests {
             description: "Supporting".to_string(),
             source_path: None,
         };
-        board.attach_evidence(id, EvidenceType::Observation, 0.4, metadata_support).await.unwrap();
+        board
+            .attach_evidence(id, EvidenceType::Observation, 0.4, metadata_support)
+            .await
+            .unwrap();
 
         // Refuting evidence
         let metadata_refute = EvidenceMetadata::Observation {
             description: "Refuting".to_string(),
             source_path: None,
         };
-        board.attach_evidence(id, EvidenceType::Observation, -0.4, metadata_refute).await.unwrap();
+        board
+            .attach_evidence(id, EvidenceType::Observation, -0.4, metadata_refute)
+            .await
+            .unwrap();
 
         let supporting = board.list_supporting_evidence(id).await.unwrap();
         let refuting = board.list_refuting_evidence(id).await.unwrap();
@@ -318,12 +341,15 @@ mod tests {
         };
 
         // Try to attach evidence with strength 1.0 (beyond Observation's max of 0.5)
-        let (evidence_id, _) = board.attach_evidence(
-            id,
-            EvidenceType::Observation,
-            1.0,  // Will be clamped to 0.5
-            metadata,
-        ).await.unwrap();
+        let (evidence_id, _) = board
+            .attach_evidence(
+                id,
+                EvidenceType::Observation,
+                1.0, // Will be clamped to 0.5
+                metadata,
+            )
+            .await
+            .unwrap();
 
         let evidence = board.get_evidence(evidence_id).await.unwrap().unwrap();
         assert_eq!(evidence.strength(), 0.5); // Clamped

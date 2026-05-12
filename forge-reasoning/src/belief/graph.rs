@@ -1,13 +1,13 @@
 //! Dependency graph for beliefs (hypotheses)
 
-use petgraph::graph::{DiGraph, NodeIndex};
+use indexmap::IndexSet;
 use petgraph::algo::tarjan_scc;
+use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::Dfs;
-use std::collections::{HashMap, HashSet};
-use indexmap::IndexSet;  // For deterministic ordering
+use std::collections::{HashMap, HashSet}; // For deterministic ordering
 
-use crate::hypothesis::types::HypothesisId;
 use crate::errors::Result;
+use crate::hypothesis::types::HypothesisId;
 
 /// Dependency graph for beliefs (hypotheses)
 ///
@@ -37,10 +37,10 @@ impl BeliefGraph {
         // Check if adding this edge would create a cycle
         // would_create_cycle returns TRUE if a cycle WOULD be created
         if self.would_create_cycle(hypothesis_id, depends_on) {
-            return Err(crate::errors::ReasoningError::InvalidState(
-                format!("Adding dependency {} -> {} would create a cycle",
-                    hypothesis_id, depends_on)
-            ));
+            return Err(crate::errors::ReasoningError::InvalidState(format!(
+                "Adding dependency {} -> {} would create a cycle",
+                hypothesis_id, depends_on
+            )));
         }
 
         let from_idx = self.get_or_create_node(hypothesis_id);
@@ -61,14 +61,18 @@ impl BeliefGraph {
         hypothesis_id: HypothesisId,
         depends_on: HypothesisId,
     ) -> Result<bool> {
-        let from_idx = *self.node_indices.get(&hypothesis_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found in graph", hypothesis_id)
-            ))?;
-        let to_idx = *self.node_indices.get(&depends_on)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found in graph", depends_on)
-            ))?;
+        let from_idx = *self.node_indices.get(&hypothesis_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found in graph",
+                hypothesis_id
+            ))
+        })?;
+        let to_idx = *self.node_indices.get(&depends_on).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found in graph",
+                depends_on
+            ))
+        })?;
 
         if let Some(edge) = self.graph.find_edge(from_idx, to_idx) {
             self.graph.remove_edge(edge);
@@ -82,13 +86,18 @@ impl BeliefGraph {
     ///
     /// If A depends on B, then A is in B's dependents list
     pub fn dependents(&self, hypothesis_id: HypothesisId) -> Result<IndexSet<HypothesisId>> {
-        let node_idx = *self.node_indices.get(&hypothesis_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found in graph", hypothesis_id)
-            ))?;
+        let node_idx = *self.node_indices.get(&hypothesis_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found in graph",
+                hypothesis_id
+            ))
+        })?;
 
         let mut result = IndexSet::new();
-        for neighbor in self.graph.neighbors_directed(node_idx, petgraph::Direction::Incoming) {
+        for neighbor in self
+            .graph
+            .neighbors_directed(node_idx, petgraph::Direction::Incoming)
+        {
             result.insert(self.graph[neighbor]);
         }
         Ok(result)
@@ -98,13 +107,18 @@ impl BeliefGraph {
     ///
     /// If A depends on B, then B is in A's dependees list
     pub fn dependees(&self, hypothesis_id: HypothesisId) -> Result<IndexSet<HypothesisId>> {
-        let node_idx = *self.node_indices.get(&hypothesis_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found in graph", hypothesis_id)
-            ))?;
+        let node_idx = *self.node_indices.get(&hypothesis_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found in graph",
+                hypothesis_id
+            ))
+        })?;
 
         let mut result = IndexSet::new();
-        for neighbor in self.graph.neighbors_directed(node_idx, petgraph::Direction::Outgoing) {
+        for neighbor in self
+            .graph
+            .neighbors_directed(node_idx, petgraph::Direction::Outgoing)
+        {
             result.insert(self.graph[neighbor]);
         }
         Ok(result)
@@ -114,15 +128,18 @@ impl BeliefGraph {
     ///
     /// Returns all hypotheses that this hypothesis transitively depends on
     pub fn dependency_chain(&self, hypothesis_id: HypothesisId) -> Result<IndexSet<HypothesisId>> {
-        let node_idx = *self.node_indices.get(&hypothesis_id)
-            .ok_or_else(|| crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found in graph", hypothesis_id)
-            ))?;
+        let node_idx = *self.node_indices.get(&hypothesis_id).ok_or_else(|| {
+            crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found in graph",
+                hypothesis_id
+            ))
+        })?;
 
         let mut result = IndexSet::new();
         let mut dfs = Dfs::new(&self.graph, node_idx);
         while let Some(reached) = dfs.next(&self.graph) {
-            if reached != node_idx {  // Exclude self
+            if reached != node_idx {
+                // Exclude self
                 result.insert(self.graph[reached]);
             }
         }
@@ -130,7 +147,10 @@ impl BeliefGraph {
     }
 
     /// Get all hypotheses that transitively depend on this hypothesis (reverse chain)
-    pub fn reverse_dependency_chain(&self, hypothesis_id: HypothesisId) -> Result<IndexSet<HypothesisId>> {
+    pub fn reverse_dependency_chain(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<IndexSet<HypothesisId>> {
         // Use reversed graph for reverse reachability
         let _reversed = self.graph.clone();
         // Note: We need to manually collect reverse dependencies
@@ -166,11 +186,7 @@ impl BeliefGraph {
 
         sccs.into_iter()
             .filter(|scc| scc.len() > 1)
-            .map(|scc| {
-                scc.into_iter()
-                    .map(|idx| self.graph[idx])
-                    .collect()
-            })
+            .map(|scc| scc.into_iter().map(|idx| self.graph[idx]).collect())
             .collect()
     }
 
@@ -231,7 +247,8 @@ impl BeliefGraph {
     ///
     /// If A depends on B, returns (A, B)
     pub fn all_edges(&self) -> Vec<(HypothesisId, HypothesisId)> {
-        self.graph.raw_edges()
+        self.graph
+            .raw_edges()
             .iter()
             .map(|e| {
                 let dependent = self.graph[e.source()];

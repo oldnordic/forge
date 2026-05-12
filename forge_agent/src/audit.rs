@@ -620,7 +620,10 @@ mod tests {
         assert!(matches!(events[0], AuditEvent::WorkflowStarted { .. }));
 
         // Verify workflow completed is last
-        assert!(matches!(events[events.len() - 1], AuditEvent::WorkflowCompleted { .. }));
+        assert!(matches!(
+            events[events.len() - 1],
+            AuditEvent::WorkflowCompleted { .. }
+        ));
 
         // Count workflow task events
         let task_events: Vec<_> = events
@@ -628,7 +631,8 @@ mod tests {
             .filter(|e| {
                 matches!(
                     e,
-                    AuditEvent::WorkflowTaskStarted { .. } | AuditEvent::WorkflowTaskCompleted { .. }
+                    AuditEvent::WorkflowTaskStarted { .. }
+                        | AuditEvent::WorkflowTaskCompleted { .. }
                 )
             })
             .collect();

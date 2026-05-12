@@ -98,10 +98,11 @@ impl Planner {
         // Track regions in each file
         for (idx, step) in steps.iter().enumerate() {
             if let Some(region) = self.get_step_region(step) {
-                file_regions
-                    .entry(region.file.clone())
-                    .or_default()
-                    .push((idx, region.start, region.end));
+                file_regions.entry(region.file.clone()).or_default().push((
+                    idx,
+                    region.start,
+                    region.end,
+                ));
             }
         }
 
@@ -219,7 +220,9 @@ impl Planner {
                 end: usize::MAX,
             }),
             PlanOperation::Inspect { .. } => None,
-            PlanOperation::Modify { file, start, end, .. } => Some(FileRegion {
+            PlanOperation::Modify {
+                file, start, end, ..
+            } => Some(FileRegion {
                 file: file.clone(),
                 start: *start,
                 end: *end,

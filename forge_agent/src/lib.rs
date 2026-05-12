@@ -291,7 +291,9 @@ impl Agent {
     /// Executes the mutation phase of the plan.
     pub async fn mutate(&self, plan: ExecutionPlan) -> Result<MutationResult> {
         // Verify forge is available
-        self.forge.as_ref().ok_or_else(|| AgentError::MutationFailed("Forge SDK not available".to_string()))?;
+        self.forge
+            .as_ref()
+            .ok_or_else(|| AgentError::MutationFailed("Forge SDK not available".to_string()))?;
 
         let mut mutator = mutate::Mutator::new();
         mutator.begin_transaction().await?;

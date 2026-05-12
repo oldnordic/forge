@@ -6,10 +6,10 @@
 //! - Hypothesis: Main data structure with confidence tracking
 //! - HypothesisState: Checkpoint snapshot of all hypotheses
 
+use crate::hypothesis::confidence::Confidence;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::hypothesis::confidence::Confidence;
 
 /// Unique identifier for a hypothesis
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

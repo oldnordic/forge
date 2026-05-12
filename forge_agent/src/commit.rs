@@ -73,8 +73,8 @@ pub struct CommitReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use forge_core::Forge;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_committer_creation() {

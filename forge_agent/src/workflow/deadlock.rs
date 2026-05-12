@@ -79,7 +79,10 @@ impl DeadlockWarning {
     pub fn description(&self) -> String {
         match &self.warning_type {
             DeadlockWarningType::SharedResource(resource) => {
-                format!("Task '{}' shares resource '{}': {}", self.task_id, resource, self.suggestion)
+                format!(
+                    "Task '{}' shares resource '{}': {}",
+                    self.task_id, resource, self.suggestion
+                )
             }
             DeadlockWarningType::LongDependencyChain { length } => {
                 format!(
@@ -88,7 +91,10 @@ impl DeadlockWarning {
                 )
             }
             DeadlockWarningType::NoTimeout => {
-                format!("Task '{}' has no timeout: {}", self.task_id, self.suggestion)
+                format!(
+                    "Task '{}' has no timeout: {}",
+                    self.task_id, self.suggestion
+                )
             }
         }
     }
@@ -156,11 +162,7 @@ impl DeadlockDetector {
             if scc.len() == 1 {
                 let idx = scc[0];
                 // Check if this node has an edge to itself
-                if workflow
-                    .graph
-                    .find_edge(idx, idx)
-                    .is_some()
-                {
+                if workflow.graph.find_edge(idx, idx).is_some() {
                     if let Some(node) = workflow.graph.node_weight(idx) {
                         return Err(DeadlockError::DependencyCycle(vec![node.id().clone()]));
                     }
@@ -456,7 +458,10 @@ mod tests {
 
         // Create a chain of 7 tasks: 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6
         for i in 0..7 {
-            workflow.add_task(Box::new(MockTask::new(format!("task-{}", i), &format!("Task {}", i))));
+            workflow.add_task(Box::new(MockTask::new(
+                format!("task-{}", i),
+                &format!("Task {}", i),
+            )));
         }
 
         for i in 0..6 {
@@ -534,7 +539,10 @@ mod tests {
 
         // Create a chain of 3 tasks (short enough, no warning)
         for i in 0..3 {
-            workflow.add_task(Box::new(MockTask::new(format!("task-{}", i), &format!("Task {}", i))));
+            workflow.add_task(Box::new(MockTask::new(
+                format!("task-{}", i),
+                &format!("Task {}", i),
+            )));
         }
 
         for i in 0..2 {
@@ -555,7 +563,10 @@ mod tests {
 
         // Create a chain of exactly 6 tasks (boundary case)
         for i in 0..6 {
-            workflow.add_task(Box::new(MockTask::new(format!("task-{}", i), &format!("Task {}", i))));
+            workflow.add_task(Box::new(MockTask::new(
+                format!("task-{}", i),
+                &format!("Task {}", i),
+            )));
         }
 
         for i in 0..5 {

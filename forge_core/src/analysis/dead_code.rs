@@ -19,35 +19,37 @@ impl<'a> DeadCodeAnalyzer<'a> {
 
     /// Find all dead code (symbols with no references)
     pub fn find_dead_code(&self) -> Result<Vec<DeadSymbol>> {
-        use sqlitegraph::{open_graph, GraphConfig, snapshot::SnapshotId};
-        
+        use sqlitegraph::{open_graph, snapshot::SnapshotId, GraphConfig};
+
         let config = GraphConfig::sqlite();
         let backend = open_graph(self.db_path, &config)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
-        
+
         let snapshot = SnapshotId::current();
         let mut dead_symbols = Vec::new();
-        
-        let entity_ids = backend.entity_ids()
+
+        let entity_ids = backend
+            .entity_ids()
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to list entities: {}", e)))?;
-        
+
         for id in entity_ids {
             if let Ok(node) = backend.get_node(snapshot, id) {
                 if !is_function_kind(&node.kind) {
                     continue;
                 }
-                
+
                 if is_test_or_entry_point(&node.name) {
                     continue;
                 }
-                
-                let incoming = backend.fetch_incoming(id)
+
+                let incoming = backend
+                    .fetch_incoming(id)
                     .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?;
-                
+
                 if incoming.is_empty() {
-                    let is_public = node.data.to_string().contains("\"public\":true") 
+                    let is_public = node.data.to_string().contains("\"public\":true")
                         || node.data.to_string().contains("\"visibility\":\"public\"");
-                    
+
                     if !is_public {
                         dead_symbols.push(DeadSymbol {
                             id,
@@ -61,7 +63,7 @@ impl<'a> DeadCodeAnalyzer<'a> {
                 }
             }
         }
-        
+
         Ok(dead_symbols)
     }
 }
@@ -71,7 +73,7 @@ fn is_function_kind(kind: &str) -> bool {
 }
 
 fn is_test_or_entry_point(name: &str) -> bool {
-    name.starts_with("test_") 
+    name.starts_with("test_")
         || name.ends_with("_test")
         || matches!(name, "main" | "lib" | "init" | "setup" | "teardown")
 }
@@ -89,8 +91,8 @@ pub struct DeadSymbol {
 
 impl From<DeadSymbol> for Symbol {
     fn from(dead: DeadSymbol) -> Self {
-        use crate::types::{SymbolId, Language, Location};
-        
+        use crate::types::{Language, Location, SymbolId};
+
         Symbol {
             id: SymbolId(dead.id),
             name: dead.name.clone(),
@@ -137,7 +139,7 @@ mod tests {
     fn test_analyzer_creation() {
         let temp = tempdir().unwrap();
         let db_path = temp.path().join("test.db");
-        
+
         let analyzer = DeadCodeAnalyzer::new(&db_path);
         // Just verify it creates without error
         assert!(analyzer.db_path.exists() == false); // DB doesn't exist yet

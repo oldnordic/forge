@@ -3,14 +3,14 @@
 //! Provides trait-based storage with in-memory implementation for testing.
 //! Future implementations can use SQLiteGraph or other backends.
 
+use crate::errors::{ReasoningError, Result};
+use crate::hypothesis::confidence::Confidence;
+use crate::hypothesis::evidence::{Evidence, EvidenceId};
+use crate::hypothesis::types::{Hypothesis, HypothesisId, HypothesisStatus};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::hypothesis::types::{Hypothesis, HypothesisId, HypothesisStatus};
-use crate::hypothesis::confidence::Confidence;
-use crate::hypothesis::evidence::{Evidence, EvidenceId};
-use crate::errors::{ReasoningError, Result};
 
 /// Storage trait for hypotheses (allows test mocks)
 #[async_trait]
@@ -22,11 +22,7 @@ pub trait HypothesisStorage: Send + Sync {
     async fn get_hypothesis(&self, id: HypothesisId) -> Result<Option<Hypothesis>>;
 
     /// Update hypothesis confidence
-    async fn update_confidence(
-        &self,
-        id: HypothesisId,
-        posterior: Confidence,
-    ) -> Result<()>;
+    async fn update_confidence(&self, id: HypothesisId, posterior: Confidence) -> Result<()>;
 
     /// Set hypothesis status
     async fn set_status(&self, id: HypothesisId, status: HypothesisStatus) -> Result<()>;
@@ -44,7 +40,10 @@ pub trait HypothesisStorage: Send + Sync {
     async fn get_evidence(&self, id: EvidenceId) -> Result<Option<Evidence>>;
 
     /// List all evidence for a hypothesis
-    async fn list_evidence_for_hypothesis(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>>;
+    async fn list_evidence_for_hypothesis(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<Vec<Evidence>>;
 
     /// List all evidence
     async fn list_all_evidence(&self) -> Result<Vec<Evidence>>;
@@ -93,10 +92,14 @@ impl HypothesisStorage for InMemoryHypothesisStorage {
     async fn update_confidence(&self, id: HypothesisId, posterior: Confidence) -> Result<()> {
         let mut store = self.hypotheses.write().await;
         if let Some(h) = store.get_mut(&id) {
-            h.update_posterior(posterior).map_err(ReasoningError::InvalidState)?;
+            h.update_posterior(posterior)
+                .map_err(ReasoningError::InvalidState)?;
             Ok(())
         } else {
-            Err(ReasoningError::NotFound(format!("Hypothesis {} not found", id)))
+            Err(ReasoningError::NotFound(format!(
+                "Hypothesis {} not found",
+                id
+            )))
         }
     }
 
@@ -106,7 +109,10 @@ impl HypothesisStorage for InMemoryHypothesisStorage {
             h.set_status(status).map_err(ReasoningError::InvalidState)?;
             Ok(())
         } else {
-            Err(ReasoningError::NotFound(format!("Hypothesis {} not found", id)))
+            Err(ReasoningError::NotFound(format!(
+                "Hypothesis {} not found",
+                id
+            )))
         }
     }
 
@@ -151,7 +157,10 @@ impl HypothesisStorage for InMemoryHypothesisStorage {
         Ok(store.get(&id).cloned())
     }
 
-    async fn list_evidence_for_hypothesis(&self, hypothesis_id: HypothesisId) -> Result<Vec<Evidence>> {
+    async fn list_evidence_for_hypothesis(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<Vec<Evidence>> {
         let index = self.hypothesis_evidence_index.read().await;
         let evidence_store = self.evidence.read().await;
 
@@ -206,8 +215,8 @@ impl HypothesisStorage for InMemoryHypothesisStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hypothesis::evidence::{EvidenceMetadata, EvidenceType};
     use crate::hypothesis::types::Hypothesis;
-    use crate::hypothesis::evidence::{EvidenceType, EvidenceMetadata};
 
     #[tokio::test]
     async fn test_in_memory_create_and_get() {
@@ -267,7 +276,10 @@ mod tests {
         let id = h.id();
 
         storage.create_hypothesis(&h).await.unwrap();
-        storage.set_status(id, HypothesisStatus::UnderTest).await.unwrap();
+        storage
+            .set_status(id, HypothesisStatus::UnderTest)
+            .await
+            .unwrap();
 
         let retrieved = storage.get_hypothesis(id).await.unwrap().unwrap();
         assert_eq!(retrieved.status(), HypothesisStatus::UnderTest);
@@ -336,12 +348,7 @@ mod tests {
             source_path: None,
         };
 
-        let evidence = Evidence::new(
-            id,
-            EvidenceType::Observation,
-            0.3,
-            metadata,
-        );
+        let evidence = Evidence::new(id, EvidenceType::Observation, 0.3, metadata);
 
         let evidence_id: EvidenceId = storage.attach_evidence(&evidence).await.unwrap();
         assert_eq!(evidence_id, evidence.id());

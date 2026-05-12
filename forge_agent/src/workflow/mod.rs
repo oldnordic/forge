@@ -110,32 +110,39 @@ pub mod yaml;
 
 // Re-export core types for public API
 pub use auto_detect::{
-    AutoDetectConfig, DependencyAnalyzer, DependencyReason, DependencySuggestion, SuggestedTaskType,
-    TaskSuggestion,
+    AutoDetectConfig, DependencyAnalyzer, DependencyReason, DependencySuggestion,
+    SuggestedTaskType, TaskSuggestion,
 };
 pub use builder::WorkflowBuilder;
 pub use cancellation::{CancellationToken, CancellationTokenSource, ChildToken};
 pub use checkpoint::{
     can_proceed, extract_confidence, requires_rollback, validate_checkpoint, CheckpointId,
-    CheckpointSummary, RollbackRecommendation, ValidationCheckpoint, ValidationResult, ValidationStatus,
-    WorkflowCheckpoint, WorkflowCheckpointService,
+    CheckpointSummary, RollbackRecommendation, ValidationCheckpoint, ValidationResult,
+    ValidationStatus, WorkflowCheckpoint, WorkflowCheckpointService,
 };
 pub use combinators::{ConditionalTask, ParallelTasks, TryCatchTask};
 pub use dag::{Workflow, WorkflowError};
 pub use deadlock::{DeadlockDetector, DeadlockError, DeadlockWarning, DeadlockWarningType};
-pub use executor::{WorkflowExecutor, WorkflowResult};
 pub use examples::{
-    CancellationAwareTask, PollingTask, TimeoutAndCancellationTask,
-    cooperative_cancellation_example, timeout_cancellation_example,
+    cooperative_cancellation_example, timeout_cancellation_example, CancellationAwareTask,
+    PollingTask, TimeoutAndCancellationTask,
 };
+pub use executor::{WorkflowExecutor, WorkflowResult};
 pub use rollback::{
     CompensationReport, ExecutableCompensation, RollbackEngine, RollbackError, RollbackReport,
     RollbackStrategy,
 };
 pub use state::{TaskStatus, TaskSummary, WorkflowState, WorkflowStatus};
-pub use task::{CompensationAction, CompensationType, Dependency, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
-pub use tasks::{AgentLoopTask, FileEditTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask};
+pub use task::{
+    CompensationAction, CompensationType, Dependency, TaskContext, TaskError, TaskId, TaskResult,
+    WorkflowTask,
+};
+pub use tasks::{
+    AgentLoopTask, FileEditTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask,
+};
 pub use timeout::{TaskTimeout, TimeoutConfig, TimeoutError, WorkflowTimeout};
-pub use tools::{ProcessGuard, Tool, ToolError, ToolInvocation, ToolInvocationResult, ToolRegistry, ToolResult};
+pub use tools::{
+    ProcessGuard, Tool, ToolError, ToolInvocation, ToolInvocationResult, ToolRegistry, ToolResult,
+};
 pub use validate::{ValidationReport, WorkflowValidator};
-pub use yaml::{YamlWorkflow, YamlTask, YamlTaskParams, YamlTaskType, YamlWorkflowError};
+pub use yaml::{YamlTask, YamlTaskParams, YamlTaskType, YamlWorkflow, YamlWorkflowError};

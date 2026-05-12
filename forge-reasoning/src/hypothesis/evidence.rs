@@ -216,12 +216,7 @@ mod tests {
         };
 
         // Try to create evidence with strength 1.0 for Observation (max is 0.5)
-        let evidence = Evidence::new(
-            hypothesis_id,
-            EvidenceType::Observation,
-            1.0,
-            metadata,
-        );
+        let evidence = Evidence::new(hypothesis_id, EvidenceType::Observation, 1.0, metadata);
 
         assert_eq!(evidence.strength, 0.5); // Clamped to max
     }

@@ -3,10 +3,10 @@
 //! This module provides semantic code search by integrating with llmgrep,
 //! which queries magellan databases for symbols, references, and calls.
 
-use std::sync::Arc;
-use crate::storage::UnifiedGraphStore;
 use crate::error::{ForgeError, Result as ForgeResult};
-use crate::types::{Symbol, SymbolKind, Language, Location};
+use crate::storage::UnifiedGraphStore;
+use crate::types::{Language, Location, Symbol, SymbolKind};
+use std::sync::Arc;
 
 /// Search module for semantic code queries.
 pub struct SearchModule {
@@ -33,25 +33,25 @@ impl SearchModule {
     /// Scans source files for patterns like "fn \w+\(" and returns matching symbols.
     pub async fn pattern_search(&self, pattern: &str) -> ForgeResult<Vec<Symbol>> {
         use regex::Regex;
-        
-        
+
         // Compile the regex pattern
         let regex = Regex::new(pattern)
             .map_err(|e| ForgeError::DatabaseError(format!("Invalid regex pattern: {}", e)))?;
-        
+
         let mut results = Vec::new();
-        
+
         // Scan source files recursively
         Self::search_files_recursive(
             &self.store.codebase_path,
             &self.store.codebase_path,
             &regex,
             &mut results,
-        ).await?;
-        
+        )
+        .await?;
+
         Ok(results)
     }
-    
+
     /// Recursively search files for pattern matches
     async fn search_files_recursive(
         root: &std::path::Path,
@@ -60,12 +60,15 @@ impl SearchModule {
         results: &mut Vec<Symbol>,
     ) -> ForgeResult<()> {
         use tokio::fs;
-        
-        let mut entries = fs::read_dir(dir).await
+
+        let mut entries = fs::read_dir(dir)
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
         {
             let path = entry.path();
             if path.is_dir() {
@@ -79,7 +82,7 @@ impl SearchModule {
                             // Extract symbol name from the matched line
                             let symbol_name = extract_symbol_from_line(line);
                             let relative_path = path.strip_prefix(root).unwrap_or(&path);
-                            
+
                             results.push(Symbol {
                                 id: crate::types::SymbolId(0),
                                 name: symbol_name.clone(),
@@ -100,7 +103,7 @@ impl SearchModule {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -122,29 +125,30 @@ impl SearchModule {
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .filter(|w| !w.is_empty())
             .collect();
-        
+
         if keywords.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // First try exact pattern search
         let mut all_results = Vec::new();
         for keyword in &keywords {
             let matches = self.pattern_search(keyword).await?;
             all_results.extend(matches);
         }
-        
+
         // Also scan files for keywords that might match as substrings
         // This handles cases like "addition" matching "add"
-        self.scan_for_substring_matches(&keywords, &mut all_results).await?;
-        
+        self.scan_for_substring_matches(&keywords, &mut all_results)
+            .await?;
+
         // Remove duplicates (by name)
         let mut seen = std::collections::HashSet::new();
         all_results.retain(|s| seen.insert(s.name.clone()));
-        
+
         Ok(all_results)
     }
-    
+
     /// Scan files for symbols that contain keyword substrings
     async fn scan_for_substring_matches(
         &self,
@@ -152,13 +156,16 @@ impl SearchModule {
         results: &mut Vec<Symbol>,
     ) -> ForgeResult<()> {
         use tokio::fs;
-        
+
         let codebase_path = &self.store.codebase_path;
-        let mut entries = fs::read_dir(codebase_path).await
+        let mut entries = fs::read_dir(codebase_path)
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
         {
             let path = entry.path();
             if path.is_dir() {
@@ -167,8 +174,16 @@ impl SearchModule {
                     let mut sub_entries = sub_entries;
                     while let Ok(Some(sub_entry)) = sub_entries.next_entry().await {
                         let sub_path = sub_entry.path();
-                        if sub_path.is_file() && sub_path.extension().map(|e| e == "rs").unwrap_or(false) {
-                            Self::check_file_for_submatches(&sub_path, keywords, results, codebase_path).await?;
+                        if sub_path.is_file()
+                            && sub_path.extension().map(|e| e == "rs").unwrap_or(false)
+                        {
+                            Self::check_file_for_submatches(
+                                &sub_path,
+                                keywords,
+                                results,
+                                codebase_path,
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -176,10 +191,10 @@ impl SearchModule {
                 Self::check_file_for_submatches(&path, keywords, results, codebase_path).await?;
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn check_file_for_submatches(
         path: &std::path::Path,
         keywords: &[&str],
@@ -187,7 +202,7 @@ impl SearchModule {
         root: &std::path::Path,
     ) -> ForgeResult<()> {
         use tokio::fs;
-        
+
         if let Ok(content) = fs::read_to_string(path).await {
             for (line_num, line) in content.lines().enumerate() {
                 // Look for function definitions
@@ -219,14 +234,16 @@ impl SearchModule {
                         }
                     }
                 }
-                
+
                 // Also look for struct definitions (for "calculator" -> "Calculator")
                 if line.contains("struct ") {
                     let struct_name = extract_struct_from_line(line);
                     for keyword in keywords {
                         let keyword_lower = keyword.to_lowercase();
                         let struct_lower = struct_name.to_lowercase();
-                        if struct_lower.contains(&keyword_lower) || keyword_lower.contains(&struct_lower) {
+                        if struct_lower.contains(&keyword_lower)
+                            || keyword_lower.contains(&struct_lower)
+                        {
                             if !struct_name.is_empty() {
                                 let relative_path = path.strip_prefix(root).unwrap_or(path);
                                 results.push(Symbol {
@@ -251,7 +268,7 @@ impl SearchModule {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -270,13 +287,13 @@ impl SearchModule {
     /// Find all symbols of a specific kind (async).
     pub async fn symbols_by_kind(&self, kind: SymbolKind) -> ForgeResult<Vec<Symbol>> {
         // Query all symbols and filter by kind
-        let all_symbols = self.store.get_all_symbols().await
+        let all_symbols = self
+            .store
+            .get_all_symbols()
+            .await
             .map_err(|e| ForgeError::DatabaseError(format!("Kind search failed: {}", e)))?;
 
-        let filtered: Vec<Symbol> = all_symbols
-            .into_iter()
-            .filter(|s| s.kind == kind)
-            .collect();
+        let filtered: Vec<Symbol> = all_symbols.into_iter().filter(|s| s.kind == kind).collect();
 
         Ok(filtered)
     }
@@ -287,7 +304,7 @@ impl SearchModule {
 #[expect(dead_code)] // Helper for magellan integration
 fn map_magellan_kind(kind: &magellan::SymbolKind) -> SymbolKind {
     use magellan::SymbolKind as MagellanKind;
-    
+
     match kind {
         MagellanKind::Function => SymbolKind::Function,
         MagellanKind::Method => SymbolKind::Method,
@@ -306,7 +323,7 @@ fn map_magellan_kind(kind: &magellan::SymbolKind) -> SymbolKind {
 /// e.g., "pub fn add(a: i32) -> i32 {" -> "add"
 fn extract_symbol_from_line(line: &str) -> String {
     let line = line.trim();
-    
+
     // Try to extract function name
     if let Some(fn_pos) = line.find("fn ") {
         let after_fn = &line[fn_pos + 3..];
@@ -315,7 +332,7 @@ fn extract_symbol_from_line(line: &str) -> String {
             return after_fn[..end_pos].trim().to_string();
         }
     }
-    
+
     // Default: return first word
     line.split_whitespace().next().unwrap_or("").to_string()
 }
@@ -324,14 +341,16 @@ fn extract_symbol_from_line(line: &str) -> String {
 /// e.g., "pub struct Calculator {" -> "Calculator"
 fn extract_struct_from_line(line: &str) -> String {
     let line = line.trim();
-    
+
     if let Some(struct_pos) = line.find("struct ") {
         let after_struct = &line[struct_pos + 7..];
-        if let Some(end_pos) = after_struct.find(|c: char| c.is_whitespace() || c == '{' || c == ';' || c == '(') {
+        if let Some(end_pos) =
+            after_struct.find(|c: char| c.is_whitespace() || c == '{' || c == ';' || c == '(')
+        {
             return after_struct[..end_pos].trim().to_string();
         }
     }
-    
+
     // Default: return first word
     line.split_whitespace().next().unwrap_or("").to_string()
 }
@@ -342,18 +361,18 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     if !pattern.contains('*') {
         return pattern == text;
     }
-    
+
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.is_empty() {
         return true;
     }
-    
+
     let mut text_remaining = text;
     for (i, part) in parts.iter().enumerate() {
         if part.is_empty() {
             continue;
         }
-        
+
         if i == 0 && !pattern.starts_with('*') {
             // First part must match at start
             if !text_remaining.starts_with(part) {
@@ -374,7 +393,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
             }
         }
     }
-    
+
     true
 }
 
@@ -386,14 +405,22 @@ mod tests {
     #[tokio::test]
     async fn test_search_module_creation() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let _search = SearchModule::new(store.clone());
     }
 
     #[tokio::test]
     async fn test_pattern_search_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let search = SearchModule::new(store);
 
         let results = search.pattern_search("nonexistent").await.unwrap();
@@ -403,7 +430,11 @@ mod tests {
     #[tokio::test]
     async fn test_symbol_by_name_not_found() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let search = SearchModule::new(store);
 
         let result = search.symbol_by_name("nonexistent").await.unwrap();
@@ -413,7 +444,11 @@ mod tests {
     #[tokio::test]
     async fn test_symbols_by_kind() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let search = SearchModule::new(store);
 
         let functions = search.symbols_by_kind(SymbolKind::Function).await.unwrap();

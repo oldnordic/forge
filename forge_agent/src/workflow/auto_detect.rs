@@ -159,7 +159,11 @@ impl DependencyAnalyzer {
         for (task_id, maybe_target) in &task_targets {
             if let Some(target) = maybe_target {
                 // Run impact analysis
-                if let Ok(impacted) = self.graph.impact_analysis(target, Some(self.config.max_hops)).await {
+                if let Ok(impacted) = self
+                    .graph
+                    .impact_analysis(target, Some(self.config.max_hops))
+                    .await
+                {
                     for impacted_symbol in impacted {
                         // Find tasks that operate on impacted symbols
                         for (other_task_id, other_target) in &task_targets {
@@ -171,7 +175,8 @@ impl DependencyAnalyzer {
                                 // Check if other task operates on impacted symbol
                                 if self.symbol_matches(other_target, &impacted_symbol.name) {
                                     // Calculate confidence based on hop distance
-                                    let confidence = self.calculate_impact_confidence(impacted_symbol.hop_distance);
+                                    let confidence = self
+                                        .calculate_impact_confidence(impacted_symbol.hop_distance);
 
                                     if confidence >= self.config.confidence_threshold {
                                         // Suggest dependency: task_id -> other_task_id
@@ -208,9 +213,7 @@ impl DependencyAnalyzer {
 
         // Remove existing dependencies
         let existing_deps = self.get_existing_dependencies(workflow);
-        suggestions.retain(|s| {
-            !existing_deps.contains(&(s.from_task.clone(), s.to_task.clone()))
-        });
+        suggestions.retain(|s| !existing_deps.contains(&(s.from_task.clone(), s.to_task.clone())));
 
         Ok(suggestions)
     }

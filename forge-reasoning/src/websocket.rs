@@ -128,18 +128,23 @@ impl WebSocketEvent {
     /// Convert from CheckpointEvent to WebSocketEvent
     pub fn from_checkpoint_event(event: &CheckpointEvent) -> Self {
         match event {
-            CheckpointEvent::Created { checkpoint_id, session_id, .. } => {
-                Self::checkpoint_created(checkpoint_id.to_string(), session_id.to_string())
-            }
-            CheckpointEvent::Restored { checkpoint_id, session_id } => {
-                Self::checkpoint_restored(checkpoint_id.to_string(), session_id.to_string())
-            }
-            CheckpointEvent::Deleted { checkpoint_id, session_id } => {
-                Self::checkpoint_deleted(checkpoint_id.to_string(), session_id.to_string())
-            }
-            CheckpointEvent::Compacted { session_id, remaining } => {
-                Self::checkpoints_compacted(session_id.to_string(), *remaining)
-            }
+            CheckpointEvent::Created {
+                checkpoint_id,
+                session_id,
+                ..
+            } => Self::checkpoint_created(checkpoint_id.to_string(), session_id.to_string()),
+            CheckpointEvent::Restored {
+                checkpoint_id,
+                session_id,
+            } => Self::checkpoint_restored(checkpoint_id.to_string(), session_id.to_string()),
+            CheckpointEvent::Deleted {
+                checkpoint_id,
+                session_id,
+            } => Self::checkpoint_deleted(checkpoint_id.to_string(), session_id.to_string()),
+            CheckpointEvent::Compacted {
+                session_id,
+                remaining,
+            } => Self::checkpoints_compacted(session_id.to_string(), *remaining),
         }
     }
 }
@@ -184,14 +189,14 @@ impl CheckpointWebSocketServer {
 
     /// Start the server and return the bound address
     pub async fn start(&mut self) -> Result<SocketAddr> {
-        let listener = TcpListener::bind(&self.bind_addr).await
-            .map_err(|e| ReasoningError::Io(std::io::Error::new(
+        let listener = TcpListener::bind(&self.bind_addr).await.map_err(|e| {
+            ReasoningError::Io(std::io::Error::new(
                 std::io::ErrorKind::AddrNotAvailable,
-                format!("Failed to bind: {}", e)
-            )))?;
+                format!("Failed to bind: {}", e),
+            ))
+        })?;
 
-        let addr = listener.local_addr()
-            .map_err(ReasoningError::Io)?;
+        let addr = listener.local_addr().map_err(ReasoningError::Io)?;
 
         let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
         self.shutdown_tx = Some(shutdown_tx.clone());
@@ -237,11 +242,11 @@ impl CheckpointWebSocketServer {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
-        
+
         // Clear all clients
         let mut clients = self.clients.write().await;
         clients.clear();
-        
+
         Ok(())
     }
 
@@ -252,7 +257,10 @@ impl CheckpointWebSocketServer {
 }
 
 /// Commands sent from message handler to event forwarding task
-type SubscribeCommand = (SessionId, tokio::sync::mpsc::UnboundedSender<WebSocketEvent>);
+type SubscribeCommand = (
+    SessionId,
+    tokio::sync::mpsc::UnboundedSender<WebSocketEvent>,
+);
 
 async fn handle_connection(
     stream: TcpStream,
@@ -261,11 +269,12 @@ async fn handle_connection(
     clients: Arc<RwLock<HashMap<String, mpsc::UnboundedSender<Message>>>>,
     config: WebSocketConfig,
 ) -> Result<()> {
-    let ws_stream = accept_async(stream).await
-        .map_err(|e| ReasoningError::Io(std::io::Error::new(
+    let ws_stream = accept_async(stream).await.map_err(|e| {
+        ReasoningError::Io(std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
-            format!("WebSocket handshake failed: {}", e)
-        )))?;
+            format!("WebSocket handshake failed: {}", e),
+        ))
+    })?;
 
     let client_id = uuid::Uuid::new_v4().to_string();
     tracing::info!("New WebSocket connection: {} from {}", client_id, peer_addr);
@@ -277,12 +286,15 @@ async fn handle_connection(
     {
         let mut clients_guard = clients.write().await;
         if clients_guard.len() >= config.max_connections {
-            let _ = ws_tx.send(Message::Text(
-                serde_json::to_string(&WebSocketResponse::error(
-                    "init".to_string(),
-                    "Server at capacity"
-                )).unwrap()
-            )).await;
+            let _ = ws_tx
+                .send(Message::Text(
+                    serde_json::to_string(&WebSocketResponse::error(
+                        "init".to_string(),
+                        "Server at capacity",
+                    ))
+                    .unwrap(),
+                ))
+                .await;
             return Ok(());
         }
         clients_guard.insert(client_id.clone(), tx);
@@ -315,8 +327,9 @@ async fn handle_connection(
     let clients_for_events = Arc::clone(&clients);
     let client_id_for_events = client_id.clone();
     let event_forward_task = tokio::spawn(async move {
-        let mut event_receivers: HashMap<SessionId, mpsc::Receiver<CheckpointEvent>> = HashMap::new();
-        
+        let mut event_receivers: HashMap<SessionId, mpsc::Receiver<CheckpointEvent>> =
+            HashMap::new();
+
         loop {
             tokio::select! {
                 // Handle new subscription requests
@@ -344,7 +357,7 @@ async fn handle_connection(
                         }
                     }
                 }
-                
+
                 // Listen for events from all subscribed sessions
                 Some((_session_id, event)) = async {
                     // Poll all receivers
@@ -357,13 +370,13 @@ async fn handle_connection(
                 } => {
                     let ws_event = WebSocketEvent::from_checkpoint_event(&event);
                     let msg = Message::Text(serde_json::to_string(&ws_event).unwrap_or_default());
-                    
+
                     // Send to the client's message channel
                     if let Some(client_tx) = clients_for_events.read().await.get(&client_id_for_events) {
                         let _ = client_tx.send(msg);
                     }
                 }
-                
+
                 // Small sleep to prevent busy-waiting when no events
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {}
             }
@@ -374,13 +387,7 @@ async fn handle_connection(
     while let Some(msg) = ws_rx.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                let response = handle_message(
-                    &text,
-                    &mut state,
-                    &service,
-                    &config,
-                    &sub_tx,
-                ).await;
+                let response = handle_message(&text, &mut state, &service, &config, &sub_tx).await;
 
                 let response_text = serde_json::to_string(&response)?;
                 let tx = clients.read().await.get(&client_id).cloned();
@@ -426,19 +433,13 @@ async fn handle_message(
     let cmd: WebSocketCommand = match serde_json::from_str(text) {
         Ok(cmd) => cmd,
         Err(e) => {
-            return WebSocketResponse::error(
-                "unknown".to_string(),
-                format!("Invalid JSON: {}", e)
-            );
+            return WebSocketResponse::error("unknown".to_string(), format!("Invalid JSON: {}", e));
         }
     };
 
     // Check authentication
     if config.require_auth && !state.authenticated && cmd.method != "authenticate" {
-        return WebSocketResponse::error(
-            cmd.id,
-            "Authentication required"
-        );
+        return WebSocketResponse::error(cmd.id, "Authentication required");
     }
 
     // Handle command
@@ -449,10 +450,7 @@ async fn handle_message(
         "checkpoint" => handle_checkpoint(&cmd, service).await,
         "subscribe" => handle_subscribe(&cmd, state, sub_tx).await,
         "metrics" => handle_metrics(&cmd, service).await,
-        _ => WebSocketResponse::error(
-            cmd.id,
-            format!("Unknown method: {}", cmd.method)
-        ),
+        _ => WebSocketResponse::error(cmd.id, format!("Unknown method: {}", cmd.method)),
     }
 }
 
@@ -462,15 +460,13 @@ async fn handle_authenticate(
     config: &WebSocketConfig,
 ) -> WebSocketResponse {
     let token = cmd.params.get("token").and_then(|v| v.as_str());
-    
+
     match (&config.auth_token, token) {
         (Some(expected), Some(provided)) if expected == provided => {
             state.authenticated = true;
             WebSocketResponse::success(cmd.id.clone(), serde_json::json!({ "authenticated": true }))
         }
-        _ => {
-            WebSocketResponse::error(cmd.id.clone(), "Invalid authentication token")
-        }
+        _ => WebSocketResponse::error(cmd.id.clone(), "Invalid authentication token"),
     }
 }
 
@@ -478,17 +474,15 @@ async fn handle_create_session(
     cmd: &WebSocketCommand,
     service: &Arc<CheckpointService>,
 ) -> WebSocketResponse {
-    let name = cmd.params.get("name")
+    let name = cmd
+        .params
+        .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("unnamed");
 
     match service.create_session(name) {
-        Ok(session_id) => {
-            WebSocketResponse::success(cmd.id.clone(), session_id.to_string())
-        }
-        Err(e) => {
-            WebSocketResponse::error(cmd.id.clone(), e.to_string())
-        }
+        Ok(session_id) => WebSocketResponse::success(cmd.id.clone(), session_id.to_string()),
+        Err(e) => WebSocketResponse::error(cmd.id.clone(), e.to_string()),
     }
 }
 
@@ -511,12 +505,8 @@ async fn handle_list_checkpoints(
     };
 
     match service.list_checkpoints(&session_id) {
-        Ok(checkpoints) => {
-            WebSocketResponse::success(cmd.id.clone(), checkpoints)
-        }
-        Err(e) => {
-            WebSocketResponse::error(cmd.id.clone(), e.to_string())
-        }
+        Ok(checkpoints) => WebSocketResponse::success(cmd.id.clone(), checkpoints),
+        Err(e) => WebSocketResponse::error(cmd.id.clone(), e.to_string()),
     }
 }
 
@@ -538,17 +528,15 @@ async fn handle_checkpoint(
         }
     };
 
-    let message = cmd.params.get("message")
+    let message = cmd
+        .params
+        .get("message")
         .and_then(|v| v.as_str())
         .unwrap_or("Checkpoint");
 
     match service.checkpoint(&session_id, message) {
-        Ok(checkpoint_id) => {
-            WebSocketResponse::success(cmd.id.clone(), checkpoint_id.to_string())
-        }
-        Err(e) => {
-            WebSocketResponse::error(cmd.id.clone(), e.to_string())
-        }
+        Ok(checkpoint_id) => WebSocketResponse::success(cmd.id.clone(), checkpoint_id.to_string()),
+        Err(e) => WebSocketResponse::error(cmd.id.clone(), e.to_string()),
     }
 }
 
@@ -572,38 +560,36 @@ async fn handle_subscribe(
     };
 
     state.subscriptions.push(session_id);
-    
+
     // Channel to receive subscription confirmation from event task
     let (notify_tx, mut notify_rx) = mpsc::unbounded_channel();
-    
+
     // Send subscription request to event forwarding task
     if let Err(e) = sub_tx.send((session_id, notify_tx)) {
         return WebSocketResponse::error(
             cmd.id.clone(),
-            format!("Failed to setup subscription: {}", e)
+            format!("Failed to setup subscription: {}", e),
         );
     }
-    
+
     // Wait for subscription confirmation (with timeout)
-    match tokio::time::timeout(
-        tokio::time::Duration::from_secs(5),
-        notify_rx.recv()
-    ).await {
-        Ok(Some(event)) if event.event_type == "subscribed" => {
-            WebSocketResponse::success(cmd.id.clone(), serde_json::json!({
+    match tokio::time::timeout(tokio::time::Duration::from_secs(5), notify_rx.recv()).await {
+        Ok(Some(event)) if event.event_type == "subscribed" => WebSocketResponse::success(
+            cmd.id.clone(),
+            serde_json::json!({
                 "subscribed": true,
                 "session_id": session_id.to_string()
-            }))
-        }
-        Ok(Some(event)) if event.event_type == "subscribe_error" => {
-            WebSocketResponse::error(cmd.id.clone(), 
-                event.data.get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Subscription failed"))
-        }
-        _ => {
-            WebSocketResponse::error(cmd.id.clone(), "Subscription timeout")
-        }
+            }),
+        ),
+        Ok(Some(event)) if event.event_type == "subscribe_error" => WebSocketResponse::error(
+            cmd.id.clone(),
+            event
+                .data
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Subscription failed"),
+        ),
+        _ => WebSocketResponse::error(cmd.id.clone(), "Subscription timeout"),
     }
 }
 
@@ -612,12 +598,8 @@ async fn handle_metrics(
     service: &Arc<CheckpointService>,
 ) -> WebSocketResponse {
     match service.metrics() {
-        Ok(metrics) => {
-            WebSocketResponse::success(cmd.id.clone(), metrics)
-        }
-        Err(e) => {
-            WebSocketResponse::error(cmd.id.clone(), e.to_string())
-        }
+        Ok(metrics) => WebSocketResponse::success(cmd.id.clone(), metrics),
+        Err(e) => WebSocketResponse::error(cmd.id.clone(), e.to_string()),
     }
 }
 

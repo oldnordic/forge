@@ -2,11 +2,11 @@
 //!
 //! This module provides CFG operations via Mirage integration.
 
-use std::sync::Arc;
-use std::collections::{HashMap, HashSet, VecDeque};
-use crate::storage::UnifiedGraphStore;
 use crate::error::Result;
-use crate::types::{SymbolId, BlockId, PathId, PathKind};
+use crate::storage::UnifiedGraphStore;
+use crate::types::{BlockId, PathId, PathKind, SymbolId};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 /// CFG module for control flow analysis.
 ///
@@ -55,39 +55,27 @@ impl CfgModule {
         // Scan for C and Java files and extract CFG
         self.index_source_files().await
     }
-    
+
     /// Extract CFG from C and Java source files
     async fn index_source_files(&self) -> Result<()> {
         {
-            
-            
-            
-            Self::index_directory(
-                &self.store.codebase_path,
-                &self.store.codebase_path,
-            ).await?;
+            Self::index_directory(&self.store.codebase_path, &self.store.codebase_path).await?;
         }
-        
+
         Ok(())
     }
-    
-    async fn index_directory(
-        root: &std::path::Path,
-        dir: &std::path::Path,
-    ) -> Result<()> {
+
+    async fn index_directory(root: &std::path::Path, dir: &std::path::Path) -> Result<()> {
         use crate::treesitter::CfgExtractor;
         use tokio::fs;
-        
-        let mut entries = fs::read_dir(dir).await
-            .map_err(|e| crate::error::ForgeError::DatabaseError(
-                format!("Failed to read dir: {}", e)
-            ))?;
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| crate::error::ForgeError::DatabaseError(
-                format!("Failed to read entry: {}", e)
-            ))? 
-        {
+
+        let mut entries = fs::read_dir(dir).await.map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Failed to read dir: {}", e))
+        })?;
+
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Failed to read entry: {}", e))
+        })? {
             let path = entry.path();
             if path.is_dir() {
                 Box::pin(Self::index_directory(root, &path)).await?;
@@ -99,10 +87,10 @@ impl CfgModule {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Extract CFG for a specific function from source
     pub async fn extract_function_cfg(
         &self,
@@ -111,22 +99,21 @@ impl CfgModule {
     ) -> Result<Option<TestCfg>> {
         use crate::treesitter::CfgExtractor;
         use tokio::fs;
-        
+
         if let Some(lang) = CfgExtractor::detect_language(file_path) {
-            let content = fs::read_to_string(file_path).await
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to read file: {}", e)
-                ))?;
-            
+            let content = fs::read_to_string(file_path).await.map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!("Failed to read file: {}", e))
+            })?;
+
             let functions = CfgExtractor::extract(&content, lang)?;
-            
+
             for func in functions {
                 if func.name == function_name {
                     return Ok(Some(func.cfg));
                 }
             }
         }
-        
+
         Ok(None)
     }
 
@@ -178,7 +165,7 @@ impl CfgModule {
         // Fallback: sample loop CFG
         let cfg = TestCfg::simple_loop();
         let loops = cfg.detect_loops();
-        
+
         Ok(loops)
     }
 
@@ -194,15 +181,16 @@ impl CfgModule {
                 return Ok(None);
             }
 
-            let backend = mirage::Backend::detect_and_open(&db_path)
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to open mirage backend: {}", e)
-                ))?;
+            let backend = mirage::Backend::detect_and_open(&db_path).map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!(
+                    "Failed to open mirage backend: {}",
+                    e
+                ))
+            })?;
 
-            let blocks = backend.get_cfg_blocks(function_id)
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to get CFG blocks: {}", e)
-                ))?;
+            let blocks = backend.get_cfg_blocks(function_id).map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!("Failed to get CFG blocks: {}", e))
+            })?;
 
             if blocks.is_empty() {
                 return Ok(None);
@@ -618,7 +606,13 @@ impl TestCfg {
         paths
     }
 
-    fn dfs(&self, paths: &mut Vec<Path>, current: &mut Vec<BlockId>, visited: &mut HashSet<BlockId>, block: BlockId) {
+    fn dfs(
+        &self,
+        paths: &mut Vec<Path>,
+        current: &mut Vec<BlockId>,
+        visited: &mut HashSet<BlockId>,
+        block: BlockId,
+    ) {
         if self.exits.contains(&block) {
             paths.push(Path::new(current.clone()));
             return;
@@ -674,7 +668,8 @@ impl TestCfg {
                 if preds.is_none() || preds.unwrap().is_empty() {
                     continue;
                 }
-                let mut new_dom: HashSet<BlockId> = dom.get(&preds.unwrap()[0]).cloned().unwrap_or_default();
+                let mut new_dom: HashSet<BlockId> =
+                    dom.get(&preds.unwrap()[0]).cloned().unwrap_or_default();
                 for pred in &preds.unwrap()[1..] {
                     if let Some(pred_dom) = dom.get(pred) {
                         new_dom = new_dom.intersection(pred_dom).copied().collect();
@@ -754,7 +749,8 @@ impl TestCfg {
                         }
                     }
 
-                    let mut blocks: Vec<BlockId> = loop_blocks.into_iter().filter(|&b| b != header).collect();
+                    let mut blocks: Vec<BlockId> =
+                        loop_blocks.into_iter().filter(|&b| b != header).collect();
                     blocks.sort();
                     loops.push(Loop::with_depth(header, blocks, 0));
                 }
@@ -772,9 +768,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_cfg_module_creation() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(tempfile::tempdir().unwrap().path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let module = CfgModule::new(store.clone());
 
         assert_eq!(module.store.db_path(), store.db_path());
@@ -782,18 +780,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_builder_filters() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            std::env::current_dir().unwrap(),
-            BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(std::env::current_dir().unwrap(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
 
         let dummy_module = CfgModule {
             store: store.clone(),
         };
 
-        let builder = dummy_module.paths(SymbolId(1))
-            .normal_only()
-            .max_length(10);
+        let builder = dummy_module.paths(SymbolId(1)).normal_only().max_length(10);
 
         assert!(builder.normal_only);
         assert_eq!(builder.max_length, Some(10));
@@ -801,9 +798,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_dominators_basic() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(tempfile::tempdir().unwrap().path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let module = CfgModule::new(store);
 
         let doms = module.dominators(SymbolId(1)).await.unwrap();
@@ -814,9 +813,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_loops_detection() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(tempfile::tempdir().unwrap().path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let module = CfgModule::new(store);
 
         let loops = module.loops(SymbolId(1)).await.unwrap();
@@ -826,9 +827,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_paths_execute_no_db_returns_synthetic() {
-        let store = Arc::new(UnifiedGraphStore::open(
-            tempfile::tempdir().unwrap().path(), BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(tempfile::tempdir().unwrap().path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
         let module = CfgModule::new(store);
 
         let paths = module.paths(SymbolId(1)).execute().await.unwrap();
@@ -994,7 +997,10 @@ mod tests {
         let paths = cfg.enumerate_paths();
 
         assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].blocks, vec![BlockId(0), BlockId(1), BlockId(2), BlockId(3)]);
+        assert_eq!(
+            paths[0].blocks,
+            vec![BlockId(0), BlockId(1), BlockId(2), BlockId(3)]
+        );
         assert!(paths[0].is_normal());
     }
 

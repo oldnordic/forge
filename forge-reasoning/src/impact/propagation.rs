@@ -1,8 +1,8 @@
 //! Confidence propagation through dependency graphs
 
-use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
 use crate::belief::BeliefGraph;
 use crate::errors::Result;
+use crate::hypothesis::{Confidence, HypothesisBoard, HypothesisId};
 
 /// Configuration for confidence propagation
 #[derive(Clone, Debug)]
@@ -73,7 +73,9 @@ pub async fn compute_cascade(
     use std::collections::{HashSet, VecDeque};
 
     // Verify start hypothesis exists
-    board.get(start).await
+    board
+        .get(start)
+        .await
         .map_err(|e| CascadeError::GraphError(e.to_string()))?
         .ok_or(CascadeError::HypothesisNotFound(start))?;
 
@@ -96,7 +98,9 @@ pub async fn compute_cascade(
         }
 
         // Get current hypothesis
-        let hypothesis = board.get(current_id).await
+        let hypothesis = board
+            .get(current_id)
+            .await
             .map_err(|e| CascadeError::GraphError(e.to_string()))?
             .ok_or(CascadeError::HypothesisNotFound(current_id))?;
 
@@ -138,10 +142,7 @@ pub async fn compute_cascade(
     let cycles_detected = graph.detect_cycles();
     let has_cycles = !cycles_detected.is_empty();
 
-    let max_depth = changes.iter()
-        .map(|c| c.depth)
-        .max()
-        .unwrap_or(0);
+    let max_depth = changes.iter().map(|c| c.depth).max().unwrap_or(0);
 
     Ok(PropagationResult {
         changes,
@@ -171,7 +172,8 @@ pub fn normalize_cycles(
         let cycle_ids: HashSet<_> = cycle.iter().cloned().collect();
 
         // Compute average confidence for this cycle
-        let cycle_changes: Vec<_> = changes.iter()
+        let cycle_changes: Vec<_> = changes
+            .iter()
             .filter(|c| cycle_ids.contains(&c.hypothesis_id))
             .collect();
 
@@ -179,9 +181,11 @@ pub fn normalize_cycles(
             continue;
         }
 
-        let avg_confidence: f64 = cycle_changes.iter()
+        let avg_confidence: f64 = cycle_changes
+            .iter()
             .map(|c| c.new_confidence.get())
-            .sum::<f64>() / cycle_changes.len() as f64;
+            .sum::<f64>()
+            / cycle_changes.len() as f64;
 
         // Update all cycle members to average confidence
         for change in changes.iter_mut() {
@@ -208,16 +212,15 @@ pub async fn propagate_confidence(
         if board.get(change.hypothesis_id).await?.is_none() {
             continue;
         }
-        board.update_confidence_direct(change.hypothesis_id, change.new_confidence).await?;
+        board
+            .update_confidence_direct(change.hypothesis_id, change.new_confidence)
+            .await?;
     }
     Ok(())
 }
 
 /// Query impact radius without applying changes
-pub async fn impact_radius(
-    start: HypothesisId,
-    graph: &BeliefGraph,
-) -> Result<usize> {
+pub async fn impact_radius(start: HypothesisId, graph: &BeliefGraph) -> Result<usize> {
     use std::collections::{HashSet, VecDeque};
 
     let mut visited = HashSet::new();
@@ -254,7 +257,10 @@ mod tests {
 
     #[test]
     fn test_cascade_error_display() {
-        let err = CascadeError::CascadeTooLarge { size: 100, limit: 50 };
+        let err = CascadeError::CascadeTooLarge {
+            size: 100,
+            limit: 50,
+        };
         assert!(err.to_string().contains("100"));
         assert!(err.to_string().contains("50"));
     }
@@ -265,9 +271,18 @@ mod tests {
         let mut graph = BeliefGraph::new();
 
         // Create hypotheses: A -> B -> C (A depends on B, B depends on C)
-        let h_c = board.propose("C", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_b = board.propose("B", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_a = board.propose("A", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_c = board
+            .propose("C", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_b = board
+            .propose("B", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_a = board
+            .propose("A", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         // Create dependencies
         graph.add_dependency(h_b, h_c).unwrap();
@@ -276,7 +291,9 @@ mod tests {
         // Compute cascade from C with new confidence 0.9
         let new_conf = Confidence::new(0.9).unwrap();
         let config = PropagationConfig::default();
-        let result = compute_cascade(h_c, new_conf, &board, &graph, &config).await.unwrap();
+        let result = compute_cascade(h_c, new_conf, &board, &graph, &config)
+            .await
+            .unwrap();
 
         // Should affect all 3 hypotheses
         assert_eq!(result.total_affected, 3);
@@ -284,8 +301,16 @@ mod tests {
 
         // Check depth assignments
         let change_c = &result.changes[0];
-        let change_b = result.changes.iter().find(|c| c.hypothesis_id == h_b).unwrap();
-        let change_a = result.changes.iter().find(|c| c.hypothesis_id == h_a).unwrap();
+        let change_b = result
+            .changes
+            .iter()
+            .find(|c| c.hypothesis_id == h_b)
+            .unwrap();
+        let change_a = result
+            .changes
+            .iter()
+            .find(|c| c.hypothesis_id == h_a)
+            .unwrap();
 
         assert_eq!(change_c.depth, 0);
         assert_eq!(change_b.depth, 1);
@@ -302,9 +327,18 @@ mod tests {
         let mut graph = BeliefGraph::new();
 
         // Create hypotheses with deep chain
-        let h_c = board.propose("C", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_b = board.propose("B", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_a = board.propose("A", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_c = board
+            .propose("C", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_b = board
+            .propose("B", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_a = board
+            .propose("A", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         graph.add_dependency(h_b, h_c).unwrap();
         graph.add_dependency(h_a, h_b).unwrap();
@@ -317,10 +351,16 @@ mod tests {
             max_cascade_size: 1000,
         };
 
-        let result = compute_cascade(h_c, new_conf, &board, &graph, &config).await.unwrap();
+        let result = compute_cascade(h_c, new_conf, &board, &graph, &config)
+            .await
+            .unwrap();
 
         // A at depth 2: 0.2 * 0.5^2 = 0.05, but should be floored to 0.15
-        let change_a = result.changes.iter().find(|c| c.hypothesis_id == h_a).unwrap();
+        let change_a = result
+            .changes
+            .iter()
+            .find(|c| c.hypothesis_id == h_a)
+            .unwrap();
         assert!(change_a.new_confidence.get() >= 0.15);
     }
 
@@ -330,8 +370,14 @@ mod tests {
         let mut graph = BeliefGraph::new();
 
         // Create a small chain
-        let h_a = board.propose("A", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_b = board.propose("B", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_a = board
+            .propose("A", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_b = board
+            .propose("B", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
         graph.add_dependency(h_b, h_a).unwrap();
 
         // Set very small cascade limit
@@ -404,8 +450,14 @@ mod tests {
         let mut graph = BeliefGraph::new();
 
         // Create hypotheses
-        let h_a = board.propose("A", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_b = board.propose("B", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_a = board
+            .propose("A", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_b = board
+            .propose("B", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         graph.add_dependency(h_b, h_a).unwrap();
 
@@ -454,9 +506,18 @@ mod tests {
         let mut graph = BeliefGraph::new();
 
         // Create chain: A depends on B, B depends on C
-        let h_c = board.propose("C", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_b = board.propose("B", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h_a = board.propose("A", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h_c = board
+            .propose("C", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_b = board
+            .propose("B", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h_a = board
+            .propose("A", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         graph.add_dependency(h_b, h_c).unwrap();
         graph.add_dependency(h_a, h_b).unwrap();

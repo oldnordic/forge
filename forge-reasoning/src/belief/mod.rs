@@ -8,9 +8,9 @@ mod graph;
 
 pub use graph::BeliefGraph;
 
-use crate::hypothesis::HypothesisBoard;
-use crate::hypothesis::types::HypothesisId;
 use crate::errors::Result;
+use crate::hypothesis::types::HypothesisId;
+use crate::hypothesis::HypothesisBoard;
 
 /// Combined reasoning system with hypotheses and belief dependencies
 pub struct ReasoningSystem {
@@ -38,14 +38,16 @@ impl ReasoningSystem {
     ) -> Result<()> {
         // Verify both hypotheses exist
         if self.board.get(hypothesis_id).await?.is_none() {
-            return Err(crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found", hypothesis_id)
-            ));
+            return Err(crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found",
+                hypothesis_id
+            )));
         }
         if self.board.get(depends_on).await?.is_none() {
-            return Err(crate::errors::ReasoningError::NotFound(
-                format!("Hypothesis {} not found", depends_on)
-            ));
+            return Err(crate::errors::ReasoningError::NotFound(format!(
+                "Hypothesis {} not found",
+                depends_on
+            )));
         }
 
         self.graph.add_dependency(hypothesis_id, depends_on)
@@ -61,17 +63,26 @@ impl ReasoningSystem {
     }
 
     /// Get dependents (what depends on this hypothesis)
-    pub fn dependents(&self, hypothesis_id: HypothesisId) -> Result<indexmap::IndexSet<HypothesisId>> {
+    pub fn dependents(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<indexmap::IndexSet<HypothesisId>> {
         self.graph.dependents(hypothesis_id)
     }
 
     /// Get dependees (what this hypothesis depends on)
-    pub fn dependees(&self, hypothesis_id: HypothesisId) -> Result<indexmap::IndexSet<HypothesisId>> {
+    pub fn dependees(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<indexmap::IndexSet<HypothesisId>> {
         self.graph.dependees(hypothesis_id)
     }
 
     /// Get full dependency chain
-    pub fn dependency_chain(&self, hypothesis_id: HypothesisId) -> Result<indexmap::IndexSet<HypothesisId>> {
+    pub fn dependency_chain(
+        &self,
+        hypothesis_id: HypothesisId,
+    ) -> Result<indexmap::IndexSet<HypothesisId>> {
         self.graph.dependency_chain(hypothesis_id)
     }
 
@@ -98,9 +109,21 @@ mod tests {
         let mut system = ReasoningSystem::in_memory();
 
         // Create hypotheses
-        let h1 = system.board.propose("H1", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h2 = system.board.propose("H2", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h3 = system.board.propose("H3", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h1 = system
+            .board
+            .propose("H1", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h2 = system
+            .board
+            .propose("H2", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h3 = system
+            .board
+            .propose("H3", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         // Create dependencies: H1 depends on H2, H2 depends on H3
         system.add_dependency(h1, h2).await.unwrap();
@@ -120,8 +143,16 @@ mod tests {
     async fn test_cycle_prevention() {
         let mut system = ReasoningSystem::in_memory();
 
-        let h1 = system.board.propose("H1", Confidence::new(0.5).unwrap()).await.unwrap();
-        let h2 = system.board.propose("H2", Confidence::new(0.5).unwrap()).await.unwrap();
+        let h1 = system
+            .board
+            .propose("H1", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
+        let h2 = system
+            .board
+            .propose("H2", Confidence::new(0.5).unwrap())
+            .await
+            .unwrap();
 
         system.add_dependency(h1, h2).await.unwrap();
 

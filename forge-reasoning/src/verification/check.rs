@@ -73,20 +73,10 @@ pub enum CheckStatus {
 /// Result of a verification check execution
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CheckResult {
-    Passed {
-        output: String,
-        duration: Duration,
-    },
-    Failed {
-        output: String,
-        error: String,
-    },
-    Timeout {
-        output: String,
-    },
-    Panic {
-        message: String,
-    },
+    Passed { output: String, duration: Duration },
+    Failed { output: String, error: String },
+    Timeout { output: String },
+    Panic { message: String },
 }
 
 impl CheckResult {

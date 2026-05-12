@@ -198,7 +198,12 @@ impl ConcurrentState {
     /// # Panics
     ///
     /// Panics if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, WorkflowState>, std::sync::PoisonError<std::sync::RwLockReadGuard<'_, WorkflowState>>> {
+    pub fn read(
+        &self,
+    ) -> Result<
+        std::sync::RwLockReadGuard<'_, WorkflowState>,
+        std::sync::PoisonError<std::sync::RwLockReadGuard<'_, WorkflowState>>,
+    > {
         self.inner.read()
     }
 
@@ -211,7 +216,12 @@ impl ConcurrentState {
     /// # Panics
     ///
     /// Panics if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn write(&self) -> Result<std::sync::RwLockWriteGuard<'_, WorkflowState>, std::sync::PoisonError<std::sync::RwLockWriteGuard<'_, WorkflowState>>> {
+    pub fn write(
+        &self,
+    ) -> Result<
+        std::sync::RwLockWriteGuard<'_, WorkflowState>,
+        std::sync::PoisonError<std::sync::RwLockWriteGuard<'_, WorkflowState>>,
+    > {
         self.inner.write()
     }
 
@@ -440,13 +450,10 @@ impl WorkflowExecutor {
             .completed_tasks
             .iter()
             .map(|id| {
-                let name = self.get_task_name(id)
+                let name = self
+                    .get_task_name(id)
                     .unwrap_or_else(|| "Unknown".to_string());
-                TaskSummary::new(
-                    id.as_str(),
-                    &name,
-                    TaskStatus::Completed,
-                )
+                TaskSummary::new(id.as_str(), &name, TaskStatus::Completed)
             })
             .collect();
 
@@ -459,13 +466,10 @@ impl WorkflowExecutor {
             .difference(&completed_ids)
             .filter(|id| !failed_ids.contains(id))
             .map(|id| {
-                let name = self.get_task_name(id)
+                let name = self
+                    .get_task_name(id)
                     .unwrap_or_else(|| "Unknown".to_string());
-                TaskSummary::new(
-                    id.as_str(),
-                    &name,
-                    TaskStatus::Pending,
-                )
+                TaskSummary::new(id.as_str(), &name, TaskStatus::Pending)
             })
             .collect();
 
@@ -474,13 +478,10 @@ impl WorkflowExecutor {
             .failed_tasks
             .iter()
             .map(|id| {
-                let name = self.get_task_name(id)
+                let name = self
+                    .get_task_name(id)
                     .unwrap_or_else(|| "Unknown".to_string());
-                TaskSummary::new(
-                    id.as_str(),
-                    &name,
-                    TaskStatus::Failed,
-                )
+                TaskSummary::new(id.as_str(), &name, TaskStatus::Failed)
             })
             .collect();
 

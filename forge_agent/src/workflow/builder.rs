@@ -473,12 +473,9 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let forge = rt.block_on(async {
-            Forge::open_with_backend(
-                temp_dir.path(),
-                forge_core::storage::BackendKind::SQLite,
-            )
-            .await
-            .unwrap()
+            Forge::open_with_backend(temp_dir.path(), forge_core::storage::BackendKind::SQLite)
+                .await
+                .unwrap()
         });
 
         let builder = WorkflowBuilder::new().with_auto_detect(&forge);

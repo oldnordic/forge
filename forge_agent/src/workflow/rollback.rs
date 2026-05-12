@@ -20,7 +20,9 @@
 
 use crate::audit::AuditLog;
 use crate::workflow::dag::Workflow;
-use crate::workflow::task::{CompensationAction, CompensationType, TaskContext, TaskId, TaskError, TaskResult};
+use crate::workflow::task::{
+    CompensationAction, CompensationType, TaskContext, TaskError, TaskId, TaskResult,
+};
 use chrono::Utc;
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -183,13 +185,18 @@ impl ToolCompensation {
 
                 match result {
                     Ok(_) => Ok(TaskResult::Success),
-                    Err(e) => Ok(TaskResult::Failed(format!("Failed to terminate process {}: {}", pid, e))),
+                    Err(e) => Ok(TaskResult::Failed(format!(
+                        "Failed to terminate process {}: {}",
+                        pid, e
+                    ))),
                 }
             }
 
             #[cfg(not(unix))]
             {
-                Ok(TaskResult::Failed(format!("Process termination not supported on this platform")))
+                Ok(TaskResult::Failed(format!(
+                    "Process termination not supported on this platform"
+                )))
             }
         })
     }
@@ -706,7 +713,9 @@ impl RollbackEngine {
                             })
                             .await;
 
-                        report.failed_compensations.push((task_id.clone(), error_msg));
+                        report
+                            .failed_compensations
+                            .push((task_id.clone(), error_msg));
                     }
                 }
             } else {
@@ -749,10 +758,7 @@ impl RollbackEngine {
     /// # Returns
     ///
     /// Compensation coverage report
-    pub fn validate_compensation_coverage(
-        &self,
-        workflow: &Workflow,
-    ) -> CompensationReport {
+    pub fn validate_compensation_coverage(&self, workflow: &Workflow) -> CompensationReport {
         let total_tasks = workflow.task_count();
         let with_compensation = Vec::new();
         let mut without_compensation = Vec::new();
@@ -1057,9 +1063,8 @@ mod tests {
         let retry = ExecutableCompensation::retry("Retry later");
         assert_eq!(retry.action.action_type, CompensationType::Retry);
 
-        let undo = ExecutableCompensation::with_undo("Execute undo", |_ctx| {
-            Ok(TaskResult::Success)
-        });
+        let undo =
+            ExecutableCompensation::with_undo("Execute undo", |_ctx| Ok(TaskResult::Success));
         assert_eq!(undo.action.action_type, CompensationType::UndoFunction);
     }
 
@@ -1074,9 +1079,8 @@ mod tests {
         let result = retry.execute(&context).unwrap();
         assert_eq!(result, TaskResult::Skipped);
 
-        let undo = ExecutableCompensation::with_undo("Execute undo", |_ctx| {
-            Ok(TaskResult::Success)
-        });
+        let undo =
+            ExecutableCompensation::with_undo("Execute undo", |_ctx| Ok(TaskResult::Success));
         let result = undo.execute(&context).unwrap();
         assert_eq!(result, TaskResult::Success);
     }
@@ -1178,7 +1182,9 @@ mod tests {
         let failed_idx = *workflow.task_map.get(&TaskId::new("c")).unwrap();
 
         let dependents = engine.find_dependent_tasks(&workflow, failed_idx).unwrap();
-        let rollback_order = engine.reverse_execution_order(&workflow, dependents).unwrap();
+        let rollback_order = engine
+            .reverse_execution_order(&workflow, dependents)
+            .unwrap();
 
         // Execution order: a, b, c
         // Rollback order should be reverse: c
@@ -1219,8 +1225,12 @@ mod tests {
 
         // Verify audit events
         let events = audit_log.replay();
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
     }
 
     #[tokio::test]
@@ -1237,7 +1247,10 @@ mod tests {
         let mut registry = CompensationRegistry::new();
 
         // Register compensation for task b
-        registry.register(TaskId::new("b"), ToolCompensation::skip("Test compensation"));
+        registry.register(
+            TaskId::new("b"),
+            ToolCompensation::skip("Test compensation"),
+        );
 
         // Roll back task b
         let report = engine
@@ -1259,8 +1272,12 @@ mod tests {
 
         // Verify audit events
         let events = audit_log.replay();
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowTaskRolledBack { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowRolledBack { .. })));
     }
 
     #[tokio::test]
@@ -1279,7 +1296,10 @@ mod tests {
         let mut registry = CompensationRegistry::new();
 
         // Register compensation only for task a
-        registry.register(TaskId::new("a"), ToolCompensation::skip("Test compensation"));
+        registry.register(
+            TaskId::new("a"),
+            ToolCompensation::skip("Test compensation"),
+        );
 
         // Roll back all three tasks
         let report = engine

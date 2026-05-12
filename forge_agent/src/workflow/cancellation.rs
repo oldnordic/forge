@@ -412,7 +412,10 @@ impl std::fmt::Debug for ChildToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChildToken")
             .field("parent_cancelled", &self.parent.is_cancelled())
-            .field("local_cancelled", &self.local_cancelled.load(Ordering::SeqCst))
+            .field(
+                "local_cancelled",
+                &self.local_cancelled.load(Ordering::SeqCst),
+            )
             .field("is_cancelled", &self.is_cancelled())
             .finish()
     }
@@ -511,14 +514,14 @@ mod tests {
         });
 
         // Give thread time to start
-    thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(10));
 
-    // Cancel from main thread
-    source.cancel();
+        // Cancel from main thread
+        source.cancel();
 
-    // Thread should exit
-    handle.join().unwrap();
-}
+        // Thread should exit
+        handle.join().unwrap();
+    }
 
     #[test]
     fn test_token_debug_display() {
@@ -728,7 +731,10 @@ mod tests {
 
         #[async_trait]
         impl WorkflowTask for SimpleTask {
-            async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, crate::workflow::TaskError> {
+            async fn execute(
+                &self,
+                _context: &TaskContext,
+            ) -> Result<TaskResult, crate::workflow::TaskError> {
                 // Simulate some work
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 Ok(TaskResult::Success)
@@ -754,8 +760,7 @@ mod tests {
 
         // Create cancellation source and cancel before execution
         let source = CancellationTokenSource::new();
-        let mut executor = WorkflowExecutor::new(workflow)
-            .with_cancellation_source(source);
+        let mut executor = WorkflowExecutor::new(workflow).with_cancellation_source(source);
 
         // Cancel immediately
         executor.cancel();
@@ -769,6 +774,8 @@ mod tests {
 
         // Verify cancellation was recorded in audit log
         let events = executor.audit_log().replay();
-        assert!(events.iter().any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCancelled { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, crate::audit::AuditEvent::WorkflowCancelled { .. })));
     }
 }

@@ -960,9 +960,9 @@ impl ToolRegistry {
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to spawn: {}", e)))?;
 
         // Get the process ID
-        let pid = child.id().ok_or_else(|| {
-            ToolError::ExecutionFailed("Failed to get process ID".to_string())
-        })?;
+        let pid = child
+            .id()
+            .ok_or_else(|| ToolError::ExecutionFailed("Failed to get process ID".to_string()))?;
 
         // Create a process guard immediately
         let guard = ProcessGuard::new(pid, &tool.name);
@@ -990,7 +990,9 @@ impl ToolRegistry {
         };
 
         // Mark the process as terminated (it completed normally)
-        guard.terminated.store(true, std::sync::atomic::Ordering::SeqCst);
+        guard
+            .terminated
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         // Parse the result
         let exit_code = output.status.code();
@@ -1123,8 +1125,7 @@ impl ToolRegistry {
 
         // Register magellan if found
         if let Some(path) = find_tool("magellan") {
-            let tool = Tool::new("magellan", path)
-                .description("Graph-based code indexer");
+            let tool = Tool::new("magellan", path).description("Graph-based code indexer");
             if registry.register(tool).is_ok() {
                 eprintln!("Registered standard tool: magellan");
             }
@@ -1134,8 +1135,7 @@ impl ToolRegistry {
 
         // Register cargo if found
         if let Some(path) = find_tool("cargo") {
-            let tool = Tool::new("cargo", path)
-                .description("Rust package manager");
+            let tool = Tool::new("cargo", path).description("Rust package manager");
             if registry.register(tool).is_ok() {
                 eprintln!("Registered standard tool: cargo");
             }
@@ -1145,8 +1145,7 @@ impl ToolRegistry {
 
         // Register splice if found
         if let Some(path) = find_tool("splice") {
-            let tool = Tool::new("splice", path)
-                .description("Precision code editor");
+            let tool = Tool::new("splice", path).description("Precision code editor");
             if registry.register(tool).is_ok() {
                 eprintln!("Registered standard tool: splice");
             }
@@ -1224,7 +1223,10 @@ mod tests {
 
         let result = fallback.handle(&error, &invocation).await;
 
-        assert!(matches!(result, FallbackResult::Skip(TaskResult::Failed(_))));
+        assert!(matches!(
+            result,
+            FallbackResult::Skip(TaskResult::Failed(_))
+        ));
         if let FallbackResult::Skip(TaskResult::Failed(msg)) = result {
             assert_eq!(msg, "Custom failure");
         }
@@ -1256,7 +1258,11 @@ mod tests {
         struct AlwaysFail;
         #[async_trait]
         impl FallbackHandler for AlwaysFail {
-            async fn handle(&self, error: &ToolError, _invocation: &ToolInvocation) -> FallbackResult {
+            async fn handle(
+                &self,
+                error: &ToolError,
+                _invocation: &ToolInvocation,
+            ) -> FallbackResult {
                 FallbackResult::Fail(error.clone())
             }
         }
@@ -1296,10 +1302,8 @@ mod tests {
 
     #[test]
     fn test_tool_with_default_args() {
-        let tool = Tool::new("magellan", "/usr/bin/magellan").default_args(vec![
-            "--db".to_string(),
-            ".forge/graph.db".to_string(),
-        ]);
+        let tool = Tool::new("magellan", "/usr/bin/magellan")
+            .default_args(vec!["--db".to_string(), ".forge/graph.db".to_string()]);
 
         assert_eq!(tool.default_args.len(), 2);
         assert_eq!(tool.default_args[0], "--db");
@@ -1308,8 +1312,8 @@ mod tests {
 
     #[test]
     fn test_tool_with_description() {
-        let tool = Tool::new("magellan", "/usr/bin/magellan")
-            .description("Graph-based code indexer");
+        let tool =
+            Tool::new("magellan", "/usr/bin/magellan").description("Graph-based code indexer");
 
         assert_eq!(tool.description, "Graph-based code indexer");
     }
@@ -1351,8 +1355,7 @@ mod tests {
 
     #[test]
     fn test_tool_invocation_with_working_dir() {
-        let invocation = ToolInvocation::new("magellan")
-            .working_dir("/home/user/project");
+        let invocation = ToolInvocation::new("magellan").working_dir("/home/user/project");
 
         assert_eq!(
             invocation.working_dir,
@@ -1362,8 +1365,7 @@ mod tests {
 
     #[test]
     fn test_tool_invocation_with_env() {
-        let invocation = ToolInvocation::new("magellan")
-            .env("RUST_LOG", "debug");
+        let invocation = ToolInvocation::new("magellan").env("RUST_LOG", "debug");
 
         assert_eq!(invocation.env.len(), 1);
         assert_eq!(invocation.env.get("RUST_LOG"), Some(&"debug".to_string()));
@@ -1371,8 +1373,8 @@ mod tests {
 
     #[test]
     fn test_tool_invocation_display() {
-        let invocation = ToolInvocation::new("magellan")
-            .args(vec!["find".to_string(), "--name".to_string()]);
+        let invocation =
+            ToolInvocation::new("magellan").args(vec!["find".to_string(), "--name".to_string()]);
 
         let display = format!("{}", invocation);
         assert!(display.contains("magellan"));
@@ -1451,7 +1453,10 @@ mod tests {
         let result = registry.register(Tool::new("magellan", "/usr/bin/magellan"));
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ToolError::AlreadyRegistered("magellan".to_string()));
+        assert_eq!(
+            result.unwrap_err(),
+            ToolError::AlreadyRegistered("magellan".to_string())
+        );
     }
 
     #[test]
@@ -1519,9 +1524,7 @@ mod tests {
         let mut registry = ToolRegistry::new();
 
         // Register echo as a test tool
-        registry
-            .register(Tool::new("echo", "echo"))
-            .unwrap();
+        registry.register(Tool::new("echo", "echo")).unwrap();
 
         // Invoke echo
         let invocation = ToolInvocation::new("echo").args(vec!["hello".to_string()]);
@@ -1540,9 +1543,7 @@ mod tests {
 
         // Register echo with default argument
         registry
-            .register(
-                Tool::new("echo", "/bin/echo").default_args(vec!["-n".to_string()]),
-            )
+            .register(Tool::new("echo", "/bin/echo").default_args(vec!["-n".to_string()]))
             .unwrap();
 
         // Invoke echo

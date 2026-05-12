@@ -6,12 +6,12 @@
 //! - Evidence strength (less evidence = higher priority)
 //! - Age (older = higher priority, capped at 30 days)
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use chrono::Utc;
 
-use super::{KnowledgeGap, GapCriticality, ScoringConfig, GapId};
+use super::{GapCriticality, GapId, KnowledgeGap, ScoringConfig};
 
 /// Compute multi-factor priority score for a knowledge gap
 ///
@@ -155,7 +155,12 @@ mod tests {
     use super::*;
     use crate::hypothesis::types::HypothesisId;
 
-    fn make_test_gap(criticality: GapCriticality, depth: usize, evidence_strength: f64, days_old: i64) -> KnowledgeGap {
+    fn make_test_gap(
+        criticality: GapCriticality,
+        depth: usize,
+        evidence_strength: f64,
+        days_old: i64,
+    ) -> KnowledgeGap {
         let id = GapId::new();
         let created_at = Utc::now() - chrono::Duration::days(days_old);
 

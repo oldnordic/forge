@@ -5,15 +5,12 @@
 
 use crate::belief::BeliefGraph;
 
-use super::analyzer::{KnowledgeGap, GapType, GapSuggestion, SuggestedAction};
+use super::analyzer::{GapSuggestion, GapType, KnowledgeGap, SuggestedAction};
 
 /// Generate context-aware action suggestion for a single gap
 ///
 /// Analyzes gap type and linked hypothesis context to recommend the best action.
-pub fn generate_suggestion(
-    gap: &KnowledgeGap,
-    graph: &BeliefGraph,
-) -> GapSuggestion {
+pub fn generate_suggestion(gap: &KnowledgeGap, graph: &BeliefGraph) -> GapSuggestion {
     let priority = gap.score;
 
     // Determine action based on gap type and context
@@ -27,8 +24,9 @@ pub fn generate_suggestion(
         }
         GapType::MissingInformation => {
             // Suggest research or investigate based on description
-            if gap.description.to_lowercase().contains("unknown") ||
-               gap.description.to_lowercase().contains("unclear") {
+            if gap.description.to_lowercase().contains("unknown")
+                || gap.description.to_lowercase().contains("unclear")
+            {
                 SuggestedAction::Research {
                     topic: gap.description.clone(),
                 }
@@ -75,11 +73,9 @@ pub fn generate_suggestion(
                 }
             }
         }
-        GapType::Other(desc) => {
-            SuggestedAction::Other {
-                description: desc.clone(),
-            }
-        }
+        GapType::Other(desc) => SuggestedAction::Other {
+            description: desc.clone(),
+        },
     };
 
     // Refine action based on linked hypothesis context
@@ -106,7 +102,10 @@ pub fn generate_suggestion(
 fn generate_rationale(action: &SuggestedAction, gap: &KnowledgeGap) -> String {
     match action {
         SuggestedAction::RunTest { test_name } => {
-            format!("Run test '{}' to verify assumption and gather evidence", test_name)
+            format!(
+                "Run test '{}' to verify assumption and gather evidence",
+                test_name
+            )
         }
         SuggestedAction::Investigate { area, details } => {
             format!("Investigate '{}' - {}", area, details)
@@ -114,9 +113,14 @@ fn generate_rationale(action: &SuggestedAction, gap: &KnowledgeGap) -> String {
         SuggestedAction::GatherEvidence { .. } => {
             "Gather more evidence to increase confidence in linked hypothesis".to_string()
         }
-        SuggestedAction::ResolveDependency { dependent_id, dependee_id } => {
-            format!("Resolve dependency between {} and {} to unblock progress",
-                dependent_id, dependee_id)
+        SuggestedAction::ResolveDependency {
+            dependent_id,
+            dependee_id,
+        } => {
+            format!(
+                "Resolve dependency between {} and {} to unblock progress",
+                dependent_id, dependee_id
+            )
         }
         SuggestedAction::CreateVerificationCheck { .. } => {
             format!("Create verification check for: {}", gap.description)
@@ -133,23 +137,21 @@ fn generate_rationale(action: &SuggestedAction, gap: &KnowledgeGap) -> String {
 /// Generate suggestions for all gaps
 ///
 /// Returns sorted suggestions (highest priority first) for unfilled gaps.
-pub fn generate_all_suggestions(
-    gaps: &[KnowledgeGap],
-    graph: &BeliefGraph,
-) -> Vec<GapSuggestion> {
+pub fn generate_all_suggestions(gaps: &[KnowledgeGap], graph: &BeliefGraph) -> Vec<GapSuggestion> {
     // Filter unfilled gaps
-    let unfilled: Vec<_> = gaps.iter()
-        .filter(|g| g.filled_at.is_none())
-        .collect();
+    let unfilled: Vec<_> = gaps.iter().filter(|g| g.filled_at.is_none()).collect();
 
     // Generate suggestions
-    let mut suggestions: Vec<_> = unfilled.iter()
+    let mut suggestions: Vec<_> = unfilled
+        .iter()
         .map(|gap| generate_suggestion(gap, graph))
         .collect();
 
     // Sort by priority (highest first)
     suggestions.sort_by(|a, b| {
-        b.priority.partial_cmp(&a.priority).unwrap_or(std::cmp::Ordering::Equal)
+        b.priority
+            .partial_cmp(&a.priority)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     suggestions
@@ -158,7 +160,7 @@ pub fn generate_all_suggestions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gaps::analyzer::{GapCriticality, KnowledgeGap, GapId};
+    use crate::gaps::analyzer::{GapCriticality, GapId, KnowledgeGap};
     use crate::hypothesis::HypothesisBoard;
     use chrono::Utc;
 
@@ -198,7 +200,10 @@ mod tests {
             SuggestedAction::CreateVerificationCheck { .. } => {
                 // Success
             }
-            _ => panic!("Expected CreateVerificationCheck, got {:?}", suggestion.action),
+            _ => panic!(
+                "Expected CreateVerificationCheck, got {:?}",
+                suggestion.action
+            ),
         }
     }
 
@@ -223,7 +228,10 @@ mod tests {
             SuggestedAction::Investigate { .. } => {
                 // Also acceptable
             }
-            _ => panic!("Expected Research or Investigate, got {:?}", suggestion1.action),
+            _ => panic!(
+                "Expected Research or Investigate, got {:?}",
+                suggestion1.action
+            ),
         }
 
         // Test without "unknown" keyword
@@ -263,8 +271,10 @@ mod tests {
             _ => panic!("Expected Investigate, got {:?}", suggestion.action),
         }
 
-        assert!(suggestion.rationale.contains("Conflicting evidence") ||
-                suggestion.rationale.contains("conflict"));
+        assert!(
+            suggestion.rationale.contains("Conflicting evidence")
+                || suggestion.rationale.contains("conflict")
+        );
     }
 
     #[test]
@@ -272,10 +282,18 @@ mod tests {
         let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
-        let mut gap1 = make_test_gap("Low priority", GapType::MissingInformation, GapCriticality::Low);
+        let mut gap1 = make_test_gap(
+            "Low priority",
+            GapType::MissingInformation,
+            GapCriticality::Low,
+        );
         gap1.score = 0.3;
 
-        let mut gap2 = make_test_gap("High priority", GapType::MissingInformation, GapCriticality::High);
+        let mut gap2 = make_test_gap(
+            "High priority",
+            GapType::MissingInformation,
+            GapCriticality::High,
+        );
         gap2.score = 0.9;
 
         let suggestions = generate_all_suggestions(&[gap1, gap2], &graph);
@@ -290,10 +308,12 @@ mod tests {
         let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
-        let mut filled_gap = make_test_gap("Filled", GapType::MissingInformation, GapCriticality::Low);
+        let mut filled_gap =
+            make_test_gap("Filled", GapType::MissingInformation, GapCriticality::Low);
         filled_gap.filled_at = Some(Utc::now());
 
-        let unfilled_gap = make_test_gap("Unfilled", GapType::MissingInformation, GapCriticality::Low);
+        let unfilled_gap =
+            make_test_gap("Unfilled", GapType::MissingInformation, GapCriticality::Low);
         let unfilled_gap_id = unfilled_gap.id; // Save id before moving
 
         let suggestions = generate_all_suggestions(&[filled_gap, unfilled_gap], &graph);

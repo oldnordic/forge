@@ -5,12 +5,12 @@
 
 pub mod queries;
 
-use std::sync::Arc;
-use std::collections::{HashMap, HashSet, VecDeque};
-use crate::storage::UnifiedGraphStore;
 use crate::error::Result;
-use crate::types::{Symbol, SymbolId, Reference, Cycle, ReferenceKind};
+use crate::storage::UnifiedGraphStore;
+use crate::types::{Cycle, Reference, ReferenceKind, Symbol, SymbolId};
 use queries::GraphQueryEngine;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 /// Graph module for symbol and reference queries.
 ///
@@ -26,7 +26,7 @@ impl GraphModule {
     pub(crate) fn new(store: Arc<UnifiedGraphStore>) -> Self {
         Self { store }
     }
-    
+
     /// Get the underlying store for advanced operations
     pub fn store(&self) -> &UnifiedGraphStore {
         &self.store
@@ -45,30 +45,30 @@ impl GraphModule {
         #[cfg(feature = "magellan")]
         {
             use magellan::CodeGraph;
-            
+
             let codebase_path = &self.store.codebase_path;
             let db_path = codebase_path.join(".forge").join("graph.db");
-            
+
             // Open the magellan graph
-            let mut graph = CodeGraph::open(&db_path)
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to open magellan graph: {}", e)
-                ))?;
-            
+            let mut graph = CodeGraph::open(&db_path).map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!(
+                    "Failed to open magellan graph: {}",
+                    e
+                ))
+            })?;
+
             // Query all symbols and filter by name
             // For now, we scan all files and their symbols
             let mut results = Vec::new();
-            let file_nodes = graph.all_file_nodes()
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to get file nodes: {}", e)
-                ))?;
-            
+            let file_nodes = graph.all_file_nodes().map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e))
+            })?;
+
             for (file_path, _file_node) in file_nodes {
-                let symbols = graph.symbols_in_file(&file_path)
-                    .map_err(|e| crate::error::ForgeError::DatabaseError(
-                        format!("Failed to get symbols: {}", e)
-                    ))?;
-                
+                let symbols = graph.symbols_in_file(&file_path).map_err(|e| {
+                    crate::error::ForgeError::DatabaseError(format!("Failed to get symbols: {}", e))
+                })?;
+
                 for sym in symbols {
                     if let Some(ref sym_name) = sym.name {
                         if sym_name.contains(name) {
@@ -89,7 +89,10 @@ impl GraphModule {
                             results.push(Symbol {
                                 id: SymbolId(0), // magellan uses different ID system
                                 name: sym_name.clone(),
-                                fully_qualified_name: sym.fqn.clone().unwrap_or_else(|| sym_name.clone()),
+                                fully_qualified_name: sym
+                                    .fqn
+                                    .clone()
+                                    .unwrap_or_else(|| sym_name.clone()),
                                 kind,
                                 language: map_magellan_language(&sym.file_path),
                                 location: crate::types::Location {
@@ -105,10 +108,10 @@ impl GraphModule {
                     }
                 }
             }
-            
+
             Ok(results)
         }
-        
+
         #[cfg(not(feature = "magellan"))]
         {
             self.store.query_symbols(name).await
@@ -142,16 +145,20 @@ impl GraphModule {
         {
             let db_path = self.store.db_path.join("graph.db");
             if db_path.exists() {
-                let mut graph = magellan::CodeGraph::open(&db_path)
-                    .map_err(|e| crate::error::ForgeError::DatabaseError(
-                        format!("Failed to open magellan graph: {}", e)
-                    ))?;
+                let mut graph = magellan::CodeGraph::open(&db_path).map_err(|e| {
+                    crate::error::ForgeError::DatabaseError(format!(
+                        "Failed to open magellan graph: {}",
+                        e
+                    ))
+                })?;
 
                 let mut callers = Vec::new();
-                let file_nodes = graph.all_file_nodes()
-                    .map_err(|e| crate::error::ForgeError::DatabaseError(
-                        format!("Failed to get file nodes: {}", e)
-                    ))?;
+                let file_nodes = graph.all_file_nodes().map_err(|e| {
+                    crate::error::ForgeError::DatabaseError(format!(
+                        "Failed to get file nodes: {}",
+                        e
+                    ))
+                })?;
 
                 for (file_path, _file_node) in file_nodes {
                     if let Ok(call_facts) = graph.callers_of_symbol(&file_path, name) {
@@ -200,16 +207,20 @@ impl GraphModule {
         {
             let db_path = self.store.db_path.join("graph.db");
             if db_path.exists() {
-                let mut graph = magellan::CodeGraph::open(&db_path)
-                    .map_err(|e| crate::error::ForgeError::DatabaseError(
-                        format!("Failed to open magellan graph: {}", e)
-                    ))?;
+                let mut graph = magellan::CodeGraph::open(&db_path).map_err(|e| {
+                    crate::error::ForgeError::DatabaseError(format!(
+                        "Failed to open magellan graph: {}",
+                        e
+                    ))
+                })?;
 
                 let mut refs = Vec::new();
-                let file_nodes = graph.all_file_nodes()
-                    .map_err(|e| crate::error::ForgeError::DatabaseError(
-                        format!("Failed to get file nodes: {}", e)
-                    ))?;
+                let file_nodes = graph.all_file_nodes().map_err(|e| {
+                    crate::error::ForgeError::DatabaseError(format!(
+                        "Failed to get file nodes: {}",
+                        e
+                    ))
+                })?;
 
                 for (file_path, _file_node) in file_nodes {
                     if let Ok(Some(id)) = graph.symbol_id_by_name(&file_path, name) {
@@ -218,16 +229,16 @@ impl GraphModule {
                                 refs.push(Reference {
                                     from: SymbolId(0),
                                     to: SymbolId(id),
-                                        kind: ReferenceKind::TypeReference,
-                                        location: crate::types::Location {
-                                            file_path: fact.file_path.clone(),
-                                            byte_start: fact.byte_start as u32,
-                                            byte_end: fact.byte_end as u32,
-                                            line_number: fact.start_line,
-                                        },
-                                    });
-                                }
+                                    kind: ReferenceKind::TypeReference,
+                                    location: crate::types::Location {
+                                        file_path: fact.file_path.clone(),
+                                        byte_start: fact.byte_start as u32,
+                                        byte_end: fact.byte_end as u32,
+                                        line_number: fact.start_line,
+                                    },
+                                });
                             }
+                        }
                     }
                 }
 
@@ -272,7 +283,8 @@ impl GraphModule {
         // Query references to build the graph
         let refs = self.store.query_references(id).await?;
         for reference in &refs {
-            adjacency.entry(reference.from)
+            adjacency
+                .entry(reference.from)
                 .or_default()
                 .push(reference.to);
         }
@@ -318,7 +330,7 @@ impl GraphModule {
     pub async fn symbol_count(&self) -> Result<usize> {
         self.store.symbol_count().await
     }
-    
+
     /// Analyze the impact of changing a symbol.
     ///
     /// Performs k-hop traversal to find all symbols that would be affected
@@ -332,18 +344,22 @@ impl GraphModule {
     /// # Returns
     ///
     /// A vector of impacted symbols with their hop distance from the target
-    pub async fn impact_analysis(&self, symbol_name: &str, max_hops: Option<u32>) -> Result<Vec<queries::ImpactedSymbol>> {
+    pub async fn impact_analysis(
+        &self,
+        symbol_name: &str,
+        max_hops: Option<u32>,
+    ) -> Result<Vec<queries::ImpactedSymbol>> {
         let db_path = self.store.db_path.join("graph.db");
-        
+
         if !db_path.exists() {
             return Ok(Vec::new());
         }
-        
+
         let engine = GraphQueryEngine::new(&db_path);
         let hops = max_hops.unwrap_or(2);
         engine.find_impacted_symbols(symbol_name, hops)
     }
-    
+
     /// Indexes the codebase using magellan.
     ///
     /// This runs the magellan indexer to extract symbols and references
@@ -360,24 +376,29 @@ impl GraphModule {
         {
             use magellan::CodeGraph;
             use std::path::Path;
-            
-            
+
             let codebase_path = &self.store.codebase_path;
             // Magellan only supports SQLite, so we always use the SQLite db path
             let db_path = codebase_path.join(".forge").join("graph.db");
-            
+
             // Open or create the magellan code graph
-            let mut graph = CodeGraph::open(&db_path)
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to open magellan graph: {}", e)
-                ))?;
-            
+            let mut graph = CodeGraph::open(&db_path).map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!(
+                    "Failed to open magellan graph: {}",
+                    e
+                ))
+            })?;
+
             // Scan the directory and index all files
-            let count = graph.scan_directory(Path::new(codebase_path), None)
-                .map_err(|e| crate::error::ForgeError::DatabaseError(
-                    format!("Failed to scan directory: {}", e)
-                ))?;
-            
+            let count = graph
+                .scan_directory(Path::new(codebase_path), None)
+                .map_err(|e| {
+                    crate::error::ForgeError::DatabaseError(format!(
+                        "Failed to scan directory: {}",
+                        e
+                    ))
+                })?;
+
             tracing::info!("Indexed {} symbols from {}", count, codebase_path.display());
 
             // Also index references and calls for each Rust file recursively
@@ -385,14 +406,14 @@ impl GraphModule {
 
             Ok(())
         }
-        
+
         #[cfg(not(feature = "magellan"))]
         {
             tracing::warn!("magellan feature not enabled, skipping indexing");
             Ok(())
         }
     }
-    
+
     #[cfg(feature = "magellan")]
     async fn index_references_recursive(
         graph: &mut magellan::CodeGraph,
@@ -400,23 +421,30 @@ impl GraphModule {
         current_dir: &std::path::Path,
     ) -> Result<()> {
         use tokio::fs;
-        
-        let mut entries = fs::read_dir(current_dir).await
-            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
-        {
+
+        let mut entries = fs::read_dir(current_dir).await.map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Failed to read dir: {}", e))
+        })?;
+
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Failed to read entry: {}", e))
+        })? {
             let path = entry.path();
             if path.is_dir() {
                 // Recurse into subdirectories
-                Box::pin(Self::index_references_recursive(graph, codebase_path, &path)).await?;
+                Box::pin(Self::index_references_recursive(
+                    graph,
+                    codebase_path,
+                    &path,
+                ))
+                .await?;
             } else if path.is_file() && path.extension().map(|e| e == "rs").unwrap_or(false) {
                 // Get relative path from codebase root
-                let relative_path = path.strip_prefix(codebase_path)
+                let relative_path = path
+                    .strip_prefix(codebase_path)
                     .unwrap_or(&path)
                     .to_string_lossy();
-                
+
                 if let Ok(source) = fs::read_to_string(&path).await {
                     // Index references using relative path
                     let _ = graph.index_references(&relative_path, source.as_bytes());
@@ -425,7 +453,7 @@ impl GraphModule {
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -434,7 +462,7 @@ impl GraphModule {
 #[cfg(feature = "magellan")]
 fn map_magellan_language(file_path: &std::path::Path) -> crate::types::Language {
     use crate::types::Language;
-    
+
     match file_path.extension().and_then(|e| e.to_str()) {
         Some("rs") => Language::Rust,
         Some("py") => Language::Python,
@@ -456,10 +484,11 @@ mod tests {
     #[tokio::test]
     async fn test_graph_module_creation() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(
-            temp_dir.path(),
-            BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
 
         let module = GraphModule::new(store.clone());
         assert_eq!(module.store.db_path(), store.db_path());
@@ -468,10 +497,11 @@ mod tests {
     #[tokio::test]
     async fn test_find_symbol_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(
-            temp_dir.path(),
-            BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
 
         let module = GraphModule::new(store);
         let symbols = module.find_symbol("nonexistent").await.unwrap();
@@ -481,10 +511,11 @@ mod tests {
     #[tokio::test]
     async fn test_find_symbol_by_id_not_found() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(
-            temp_dir.path(),
-            BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
 
         let module = GraphModule::new(store);
         let result = module.find_symbol_by_id(SymbolId(999)).await;
@@ -494,10 +525,11 @@ mod tests {
     #[tokio::test]
     async fn test_callers_of_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(UnifiedGraphStore::open(
-            temp_dir.path(),
-            BackendKind::SQLite
-        ).await.unwrap());
+        let store = Arc::new(
+            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
+                .await
+                .unwrap(),
+        );
 
         let module = GraphModule::new(store);
         let callers = module.callers_of("nonexistent").await.unwrap();

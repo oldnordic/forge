@@ -33,35 +33,35 @@ pub mod error;
 pub mod types;
 
 // Public API modules
-pub mod storage;
-pub mod graph;
-pub mod search;
+pub mod analysis;
 pub mod cfg;
 pub mod edit;
-pub mod analysis;
+pub mod graph;
+pub mod search;
+pub mod storage;
 pub mod treesitter;
 
 // Runtime layer modules
-pub mod watcher;
-pub mod indexing;
 pub mod cache;
+pub mod indexing;
+pub mod watcher;
 // pub mod pool; // TODO: Re-enable when implemented
 // pub mod runtime; // TODO: Re-enable when implemented
 
 // Re-export sqlitegraph types for advanced usage
-pub use sqlitegraph::backend::{NodeSpec, EdgeSpec};
+pub use sqlitegraph::backend::{EdgeSpec, NodeSpec};
+pub use sqlitegraph::config::{open_graph, BackendKind as SqliteGraphBackendKind, GraphConfig};
 pub use sqlitegraph::graph::{GraphEntity, SqliteGraph};
-pub use sqlitegraph::config::{BackendKind as SqliteGraphBackendKind, GraphConfig, open_graph};
 
 // Re-export commonly used types
 pub use error::{ForgeError, Result};
-pub use types::{SymbolId, Location};
 pub use storage::{BackendKind, UnifiedGraphStore};
+pub use types::{Location, SymbolId};
 
 // Re-export runtime module types
-pub use watcher::{Watcher, WatchEvent};
-pub use indexing::{IncrementalIndexer, PathFilter, FlushStats};
 pub use cache::QueryCache;
+pub use indexing::{FlushStats, IncrementalIndexer, PathFilter};
+pub use watcher::{WatchEvent, Watcher};
 
 use anyhow::anyhow;
 
@@ -90,7 +90,7 @@ impl Forge {
     pub async fn open(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
         Self::open_with_backend(path, BackendKind::default()).await
     }
-    
+
     /// Opens a Forge instance with a specific backend.
     ///
     /// # Arguments
@@ -103,14 +103,12 @@ impl Forge {
     /// A `Forge` instance or an error if database cannot be opened.
     pub async fn open_with_backend(
         path: impl AsRef<std::path::Path>,
-        backend: BackendKind
+        backend: BackendKind,
     ) -> anyhow::Result<Self> {
-        let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(path, backend).await?
-        );
+        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(path, backend).await?);
         Ok(Forge { store })
     }
-    
+
     /// Returns the backend kind currently in use.
     pub fn backend_kind(&self) -> BackendKind {
         self.store.backend_kind()
@@ -138,12 +136,7 @@ impl Forge {
 
     /// Returns the analysis module for combined operations.
     pub fn analysis(&self) -> analysis::AnalysisModule {
-        analysis::AnalysisModule::new(
-            self.graph(),
-            self.cfg(),
-            self.edit(),
-            self.search(),
-        )
+        analysis::AnalysisModule::new(self.graph(), self.cfg(), self.edit(), self.search())
     }
 }
 
@@ -178,13 +171,11 @@ impl ForgeBuilder {
 
     /// Builds a `Forge` instance with configured options.
     pub async fn build(self) -> anyhow::Result<Forge> {
-        let path = self.path
-            .ok_or_else(|| anyhow!("path is required"))?;
+        let path = self.path.ok_or_else(|| anyhow!("path is required"))?;
 
-        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(
-                &path,
-                self.backend_kind.unwrap_or_default()
-            ).await?);
+        let store = std::sync::Arc::new(
+            storage::UnifiedGraphStore::open(&path, self.backend_kind.unwrap_or_default()).await?,
+        );
 
         Ok(Forge { store })
     }
@@ -222,7 +213,11 @@ mod tests {
     #[tokio::test]
     async fn test_forge_graph_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default()).await.unwrap());
+        let store = std::sync::Arc::new(
+            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
+                .await
+                .unwrap(),
+        );
 
         let forge = Forge { store };
 
@@ -234,7 +229,11 @@ mod tests {
     #[tokio::test]
     async fn test_forge_search_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default()).await.unwrap());
+        let store = std::sync::Arc::new(
+            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
+                .await
+                .unwrap(),
+        );
 
         let forge = Forge { store };
 
@@ -246,7 +245,11 @@ mod tests {
     #[tokio::test]
     async fn test_forge_cfg_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default()).await.unwrap());
+        let store = std::sync::Arc::new(
+            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
+                .await
+                .unwrap(),
+        );
 
         let forge = Forge { store };
 
@@ -258,7 +261,11 @@ mod tests {
     #[tokio::test]
     async fn test_forge_edit_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default()).await.unwrap());
+        let store = std::sync::Arc::new(
+            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
+                .await
+                .unwrap(),
+        );
 
         let forge = Forge { store };
 
@@ -270,7 +277,11 @@ mod tests {
     #[tokio::test]
     async fn test_forge_analysis_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default()).await.unwrap());
+        let store = std::sync::Arc::new(
+            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
+                .await
+                .unwrap(),
+        );
 
         let forge = Forge { store };
 

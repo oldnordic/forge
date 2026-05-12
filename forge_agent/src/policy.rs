@@ -409,9 +409,9 @@ fn count_tests(content: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use forge_core::Forge;
     use std::path::PathBuf;
     use tempfile::TempDir;
-    use forge_core::Forge;
 
     #[tokio::test]
     async fn test_policy_no_unsafe_in_public_api() {

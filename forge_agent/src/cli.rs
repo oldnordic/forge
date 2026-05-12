@@ -25,8 +25,8 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use forge_agent::Agent;
 use clap::{Parser, Subcommand};
+use forge_agent::Agent;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -108,7 +108,11 @@ pub async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.action {
-        Action::Run { query, with_runtime, verbose } => {
+        Action::Run {
+            query,
+            with_runtime,
+            verbose,
+        } => {
             // Determine codebase path (default: current directory)
             let codebase_path = std::env::current_dir()?;
 
@@ -124,7 +128,9 @@ pub async fn run() -> anyhow::Result<()> {
                     Ok(_) => {
                         // Display cache status
                         let cache = runtime.cache();
-                        let cache_count = cache.map(|c| futures::executor::block_on(c.len())).unwrap_or(0);
+                        let cache_count = cache
+                            .map(|c| futures::executor::block_on(c.len()))
+                            .unwrap_or(0);
                         println!("   Query cache: {} entries cached", cache_count);
 
                         println!("✅ Agent completed successfully");
@@ -138,7 +144,10 @@ pub async fn run() -> anyhow::Result<()> {
                             // Detailed verbose output
                             println!("\nRuntime Statistics (detailed):");
                             println!("  Cache size: {} entries", stats.cache_size);
-                            println!("  Watch active: {}", if stats.watch_active { "yes" } else { "no" });
+                            println!(
+                                "  Watch active: {}",
+                                if stats.watch_active { "yes" } else { "no" }
+                            );
                             println!("  Watch directory: {}", runtime.config().watch_dir);
                             println!("  Reindex operations: {}", stats.reindex_count);
                             println!("  ---");
@@ -146,17 +155,31 @@ pub async fn run() -> anyhow::Result<()> {
                             println!("    Graph queries: {}", stats.metrics.graph_queries);
                             println!("    Searches: {}", stats.metrics.searches);
                             println!("    CFG analyses: {}", stats.metrics.cfg_analyses);
-                            println!("    Cache hits: {}", runtime.metrics().count(forge_runtime::MetricKind::CacheHit));
-                            println!("    Cache misses: {}", runtime.metrics().count(forge_runtime::MetricKind::CacheMiss));
+                            println!(
+                                "    Cache hits: {}",
+                                runtime.metrics().count(forge_runtime::MetricKind::CacheHit)
+                            );
+                            println!(
+                                "    Cache misses: {}",
+                                runtime
+                                    .metrics()
+                                    .count(forge_runtime::MetricKind::CacheMiss)
+                            );
                             println!("    Hit rate: {:.1}%", stats.metrics.cache_hit_rate * 100.0);
                         } else {
                             // Summary statistics (default)
                             println!("\nRuntime Statistics:");
                             println!("  Cache size: {} entries", stats.cache_size);
-                            println!("  Watch active: {}", if stats.watch_active { "yes" } else { "no" });
+                            println!(
+                                "  Watch active: {}",
+                                if stats.watch_active { "yes" } else { "no" }
+                            );
                             println!("  Reindex operations: {}", stats.reindex_count);
                             println!("  Graph queries: {}", stats.metrics.graph_queries);
-                            println!("  Cache hit rate: {:.1}%", stats.metrics.cache_hit_rate * 100.0);
+                            println!(
+                                "  Cache hit rate: {:.1}%",
+                                stats.metrics.cache_hit_rate * 100.0
+                            );
                         }
 
                         Ok(())
@@ -206,9 +229,11 @@ pub async fn run() -> anyhow::Result<()> {
                 println!("     {}. {}", i + 1, step.description);
             }
 
-            println!("   Estimated impact: {} files, complexity {}",
+            println!(
+                "   Estimated impact: {} files, complexity {}",
                 plan.estimated_impact.affected_files.len(),
-                plan.estimated_impact.complexity);
+                plan.estimated_impact.complexity
+            );
 
             Ok(())
         }
@@ -253,7 +278,11 @@ mod tests {
 
         let cli = cli.unwrap();
         match cli.action {
-            Action::Run { with_runtime, verbose, .. } => {
+            Action::Run {
+                with_runtime,
+                verbose,
+                ..
+            } => {
                 assert!(with_runtime);
                 assert!(!verbose);
             }
@@ -269,7 +298,11 @@ mod tests {
 
         let cli = cli.unwrap();
         match cli.action {
-            Action::Run { with_runtime, verbose, .. } => {
+            Action::Run {
+                with_runtime,
+                verbose,
+                ..
+            } => {
                 assert!(!with_runtime);
                 assert!(verbose);
             }
@@ -280,12 +313,22 @@ mod tests {
     #[tokio::test]
     async fn test_cli_accepts_both_flags() {
         // Test that CLI parsing accepts both flags together
-        let cli = Cli::try_parse_from(["forge-agent", "run", "test query", "--with-runtime", "--verbose"]);
+        let cli = Cli::try_parse_from([
+            "forge-agent",
+            "run",
+            "test query",
+            "--with-runtime",
+            "--verbose",
+        ]);
         assert!(cli.is_ok());
 
         let cli = cli.unwrap();
         match cli.action {
-            Action::Run { with_runtime, verbose, .. } => {
+            Action::Run {
+                with_runtime,
+                verbose,
+                ..
+            } => {
                 assert!(with_runtime);
                 assert!(verbose);
             }
