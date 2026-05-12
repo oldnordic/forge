@@ -34,8 +34,7 @@ Thumbs.db
 # Internal planning documents (not for public repo)
 /.planning/
 
-# CI/CD (not used in this repo)
-/.github/
+# CI/CD
 /.ci/
 /.travis.yml
 /.gitlab-ci.yml
