@@ -3,7 +3,7 @@
 //! This module provides change-based incremental indexing to avoid full
 //! re-scans when files are modified.
 
-use crate::storage::{UnifiedGraphStore, BackendKind};
+use crate::storage::UnifiedGraphStore;
 use crate::watcher::WatchEvent;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -84,12 +84,13 @@ impl PathFilter {
     ///
     /// * `dirs` - Directories to include (e.g., ["src", "tests"])
     pub fn include_dirs(dirs: &[&str]) -> Self {
-        let mut filter = Self::default();
-        filter.include_patterns = dirs
-            .iter()
-            .map(|d| format!("**/{}/**", d))
-            .collect();
-        filter
+        Self {
+            include_patterns: dirs
+                .iter()
+                .map(|d| format!("**/{}/**", d))
+                .collect(),
+            ..Self::default()
+        }
     }
 
     /// Checks if a path should be indexed.
@@ -150,8 +151,8 @@ impl PathFilter {
         }
         
         // Handle **/suffix pattern (matches suffix anywhere in path)
-        if pattern.starts_with("**/") {
-            let suffix = &pattern[3..]; // Remove "**/"
+        if let Some(suffix) = pattern.strip_prefix("**/") {
+            // Remove "**/"
             return path.contains(suffix) || path.ends_with(suffix);
         }
         
@@ -434,27 +435,41 @@ impl IncrementalIndexer {
         self.deleted.lock().await.clear();
     }
 
-    /// Indexes a single file.
-    async fn index_file(&self, _path: &PathBuf) -> anyhow::Result<()> {
-        // In a full implementation, this would:
-        // 1. Read the file
-        // 2. Parse it with tree-sitter or similar
-        // 3. Extract symbols, references, etc.
-        // 4. Write to the graph store
+    /// Indexes a single file using magellan.
+    async fn index_file(&self, path: &Path) -> anyhow::Result<()> {
+        if !path.exists() || !path.is_file() {
+            return Ok(());
+        }
 
-        // For v0.2, we'll store a placeholder record
-        // The full indexing will be added in a later phase
+        let db_path = self.store.db_path().join("graph.db");
+        if !db_path.exists() {
+            return Ok(());
+        }
+
+        #[cfg(feature = "magellan")]
+        {
+            let mut graph = magellan::CodeGraph::open(&db_path)?;
+            if let Some(parent) = path.parent() {
+                graph.scan_directory(parent, None)?;
+            }
+        }
 
         Ok(())
     }
 
-    /// Deletes a file from the index.
-    async fn delete_file(&self, _path: &PathBuf) -> anyhow::Result<()> {
-        // In a full implementation, this would:
-        // 1. Query all symbols in this file
-        // 2. Delete those symbols
-        // 3. Delete incoming/outgoing references
-        // 4. Clean up any CFG blocks
+    /// Deletes a file from the index using magellan.
+    async fn delete_file(&self, path: &Path) -> anyhow::Result<()> {
+        let db_path = self.store.db_path().join("graph.db");
+        if !db_path.exists() {
+            return Ok(());
+        }
+
+        #[cfg(feature = "magellan")]
+        {
+            let mut graph = magellan::CodeGraph::open(&db_path)?;
+            let path_str = path.to_string_lossy();
+            let _ = graph.delete_file(&path_str);
+        }
 
         Ok(())
     }

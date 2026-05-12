@@ -21,7 +21,7 @@ thiserror = "1.0"
 async-trait = "0.1"
 
 # SQLiteGraph - storage backend
-sqlitegraph = { version = "2.0", path = "/home/feanor/Projects/sqlitegraph/sqlitegraph-core" }
+sqlitegraph = { version = "2.2", features = ["sqlite-backend"] }
 
 # Cryptographic hashing for data integrity
 sha2 = "0.10"
@@ -46,9 +46,8 @@ rand = "0.8"
 
 [features]
 default = ["sqlite-backend", "websocket"]
-sqlite-backend = []  # Use SQLiteGraph's SQLite backend
-native-v3 = []       # Use SQLiteGraph's Native V3 backend (future)
-websocket = ["tokio-tungstenite", "futures-util"]  # Enable WebSocket API
+sqlite-backend = []
+websocket = ["tokio-tungstenite", "futures-util"]
 
 [[bench]]
 name = "checkpoint_bench"

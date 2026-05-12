@@ -60,31 +60,26 @@ impl Observer {
 
     /// Gathers symbols by parsing the query.
     async fn gather_symbols(&self, query: &str) -> Result<Vec<ObservedSymbol>> {
-        let _graph = self.forge.as_ref();
+        let forge = self.forge.as_ref();
         let mut symbols = Vec::new();
 
-        // Parse query: if it contains "find" and "named", extract the name
         let query_lower = query.to_lowercase();
 
         if query_lower.contains("find") && query_lower.contains("named") {
-            // Extract name after "named"
             if let Some(pos) = query_lower.find("named") {
                 let remaining = &query[pos + 6..];
                 let name = remaining.trim().trim_end_matches('?').trim().to_string();
                 if !name.is_empty() {
-                    // For now, we can't find by name without knowing the file
-                    // Return a placeholder symbol
-                    symbols.push(ObservedSymbol {
-                        id: SymbolId(0),
-                        name: name.clone(),
-                        kind: forge_core::types::SymbolKind::Function,
-                        location: forge_core::types::Location {
-                            file_path: std::path::PathBuf::from("<unknown>"),
-                            byte_start: 0,
-                            byte_end: 0,
-                            line_number: 0,
-                        },
-                    });
+                    if let Ok(found) = forge.graph().find_symbol(&name).await {
+                        for sym in found {
+                            symbols.push(ObservedSymbol {
+                                id: sym.id,
+                                name: sym.name,
+                                kind: sym.kind,
+                                location: sym.location,
+                            });
+                        }
+                    }
                 }
             }
         }

@@ -51,13 +51,13 @@ impl HypothesisStatus {
     ///
     /// Returns true if transition from self to next is valid
     pub fn can_transition_to(&self, next: &HypothesisStatus) -> bool {
-        match (self, next) {
-            (HypothesisStatus::Proposed, HypothesisStatus::UnderTest) => true,
-            (HypothesisStatus::UnderTest, HypothesisStatus::Confirmed) => true,
-            (HypothesisStatus::UnderTest, HypothesisStatus::Rejected) => true,
-            (HypothesisStatus::Proposed, HypothesisStatus::Rejected) => true,
-            _ => false,
-        }
+        matches!(
+            (self, next),
+            (HypothesisStatus::Proposed, HypothesisStatus::UnderTest)
+                | (HypothesisStatus::UnderTest, HypothesisStatus::Confirmed)
+                | (HypothesisStatus::UnderTest, HypothesisStatus::Rejected)
+                | (HypothesisStatus::Proposed, HypothesisStatus::Rejected)
+        )
     }
 }
 

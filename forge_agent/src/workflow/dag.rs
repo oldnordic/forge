@@ -57,7 +57,7 @@ pub enum WorkflowError {
 pub(in crate::workflow) struct TaskNode {
     id: TaskId,
     pub(in crate::workflow) name: String,
-    dependencies: Vec<TaskId>,
+    _dependencies: Vec<TaskId>,
     task: Arc<dyn WorkflowTask>,
 }
 
@@ -127,7 +127,7 @@ impl Workflow {
     pub fn add_task(&mut self, task: Box<dyn WorkflowTask>) -> NodeIndex {
         let id = task.id();
         let name = task.name().to_string();
-        let dependencies = task.dependencies();
+        let _dependencies = task.dependencies();
 
         // Wrap the task in Arc for shared ownership
         let task_arc = Arc::from(task);
@@ -135,7 +135,7 @@ impl Workflow {
         let node = TaskNode {
             id: id.clone(),
             name,
-            dependencies,
+            _dependencies,
             task: task_arc,
         };
 
@@ -326,7 +326,7 @@ impl Workflow {
                 let layer = if *distance == 0 { 0 } else { distance - 1 };
                 layer_map
                     .entry(layer)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(node.id.clone());
             }
         }
@@ -339,18 +339,6 @@ impl Workflow {
         let result: Vec<Vec<TaskId>> = layers.into_iter().map(|(_, tasks)| tasks).collect();
 
         Ok(result)
-    }
-
-    /// Returns tasks that are ready to execute (in-degree = 0).
-    ///
-    /// Tasks with no incoming edges have no unsatisfied dependencies
-    /// and can be executed immediately.
-    pub(in crate::workflow) fn ready_tasks(&self) -> Vec<&TaskNode> {
-        self.graph
-            .node_indices()
-            .filter(|&idx| self.graph.neighbors_directed(idx, petgraph::Direction::Incoming).count() == 0)
-            .filter_map(|idx| self.graph.node_weight(idx))
-            .collect()
     }
 
     /// Returns all task IDs in the workflow.
@@ -390,6 +378,15 @@ impl Workflow {
             .map(|node| node.name.clone())
     }
 
+    /// Returns tasks with no dependencies (ready to execute).
+    pub(in crate::workflow) fn _ready_tasks(&self) -> Vec<&TaskNode> {
+        self.graph
+            .node_indices()
+            .filter(|&idx| self.graph.neighbors_directed(idx, petgraph::Direction::Incoming).count() == 0)
+            .filter_map(|idx| self.graph.node_weight(idx))
+            .collect()
+    }
+
     /// Applies dependency suggestions to the workflow.
     ///
     /// # Arguments
@@ -408,7 +405,7 @@ impl Workflow {
         &mut self,
         suggestions: Vec<crate::workflow::auto_detect::DependencySuggestion>,
     ) -> Result<usize, WorkflowError> {
-        use crate::workflow::auto_detect::DependencyReason;
+        
 
         let mut applied = 0;
 
@@ -667,7 +664,7 @@ mod tests {
 
         workflow.add_dependency("a", "b").unwrap();
 
-        let ready = workflow.ready_tasks();
+        let ready = workflow._ready_tasks();
         assert_eq!(ready.len(), 2); // 'a' and 'c' have no dependencies
 
         let ready_ids: Vec<&TaskId> = ready.iter().map(|node| &node.id).collect();

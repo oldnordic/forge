@@ -3,7 +3,6 @@
 //! Provides context-aware suggestions for resolving knowledge gaps based on
 //! gap type, hypothesis status, and dependency relationships.
 
-use crate::hypothesis::HypothesisId;
 use crate::belief::BeliefGraph;
 
 use super::analyzer::{KnowledgeGap, GapType, GapSuggestion, SuggestedAction};
@@ -23,7 +22,7 @@ pub fn generate_suggestion(
             // Suggest verification check
             SuggestedAction::CreateVerificationCheck {
                 command: format!("run verification test for {}", gap.description),
-                hypothesis_id: gap.hypothesis_id.unwrap_or_else(|| HypothesisId::new()),
+                hypothesis_id: gap.hypothesis_id.unwrap_or_default(),
             }
         }
         GapType::MissingInformation => {

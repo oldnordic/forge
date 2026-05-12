@@ -100,7 +100,7 @@ impl Planner {
             if let Some(region) = self.get_step_region(step) {
                 file_regions
                     .entry(region.file.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((idx, region.start, region.end));
             }
         }
@@ -135,7 +135,7 @@ impl Planner {
     /// # Arguments
     ///
     /// * `steps` - The planned steps
-    pub fn order_steps(&self, steps: &mut Vec<PlanStep>) -> Result<()> {
+    pub fn order_steps(&self, steps: &mut [PlanStep]) -> Result<()> {
         // Simple topological sort based on step dependencies
         // For now, keep existing order (production would use DAG)
         // In a full implementation, this would:
@@ -219,7 +219,7 @@ impl Planner {
                 end: usize::MAX,
             }),
             PlanOperation::Inspect { .. } => None,
-            PlanOperation::Modify { file, start, end } => Some(FileRegion {
+            PlanOperation::Modify { file, start, end, .. } => Some(FileRegion {
                 file: file.clone(),
                 start: *start,
                 end: *end,
@@ -256,6 +256,7 @@ pub enum PlanOperation {
         file: String,
         start: usize,
         end: usize,
+        replacement: String,
     },
 }
 

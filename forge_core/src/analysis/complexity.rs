@@ -165,9 +165,9 @@ pub fn analyze_source_complexity(source: &str) -> ComplexityMetrics {
     // Estimate nesting depth by counting indentation levels
     let max_depth = source
         .lines()
-        .filter_map(|line| {
+        .map(|line| {
             let indent = line.len() - line.trim_start().len();
-            if indent > 0 { Some(indent / 4) } else { Some(0) }
+            if indent > 0 { indent / 4 } else { 0 }
         })
         .max()
         .unwrap_or(0);

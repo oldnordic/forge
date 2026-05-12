@@ -84,7 +84,8 @@ pub struct Status {
 
 impl Status {
     /// Create a default "empty" status
-    fn default() -> Self {
+    #[allow(dead_code, reason = "Used in future CLI status reporting")]
+    fn _default() -> Self {
         Self {
             ready: false,
             current_operation: None,

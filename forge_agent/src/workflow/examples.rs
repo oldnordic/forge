@@ -74,12 +74,11 @@
 use async_trait::async_trait;
 use crate::workflow::{
     builder::WorkflowBuilder,
-    cancellation::CancellationToken,
-    dag::WorkflowError,
     task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask},
-    tasks::{AgentLoopTask, FunctionTask, GraphQueryTask},
     Workflow,
 };
+#[cfg(any(doc, test))]
+use crate::workflow::tasks::{AgentLoopTask, FunctionTask, GraphQueryTask};
 
 /// Creates a linear workflow that executes tasks sequentially.
 ///

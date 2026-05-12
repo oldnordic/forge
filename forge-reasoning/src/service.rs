@@ -81,7 +81,7 @@ pub enum CheckpointCommand {
 pub enum CommandResult {
     Created(CheckpointId),
     List(Vec<CheckpointSummary>),
-    Restored(TemporalCheckpoint),
+    Restored(Box<TemporalCheckpoint>),
     Deleted,
     Compacted(usize),
     Error(String),
@@ -162,10 +162,7 @@ impl CheckpointService {
     /// Find the maximum sequence number in storage
     fn find_max_sequence(storage: &ThreadSafeStorage) -> u64 {
         // Query storage for max sequence across all checkpoints
-        match storage.get_max_sequence() {
-            Ok(max_seq) => max_seq,
-            Err(_) => 0,
-        }
+        storage.get_max_sequence().unwrap_or_default()
     }
 
     /// Get the current global sequence number
@@ -285,7 +282,7 @@ impl CheckpointService {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // Buffer up to 100 events
         
         let mut subscribers = self.subscribers.lock().unwrap();
-        subscribers.entry(*session_id).or_insert_with(Vec::new).push(tx);
+        subscribers.entry(*session_id).or_default().push(tx);
         
         Ok(rx)
     }
@@ -340,7 +337,7 @@ impl CheckpointService {
                 let cp = manager.get(&checkpoint_id)?.ok_or_else(|| {
                     ReasoningError::NotFound(format!("Checkpoint {} not found", checkpoint_id))
                 })?;
-                Ok(CommandResult::Restored(cp))
+                Ok(CommandResult::Restored(Box::new(cp)))
             }
             CheckpointCommand::Delete { checkpoint_id } => {
                 // Delete from all sessions (simplified)
@@ -397,7 +394,7 @@ impl CheckpointService {
         
         // Store annotation
         let mut annotations = self.annotations.write().unwrap();
-        annotations.entry(*checkpoint_id).or_insert_with(Vec::new).push(annotation);
+        annotations.entry(*checkpoint_id).or_default().push(annotation);
         
         Ok(())
     }

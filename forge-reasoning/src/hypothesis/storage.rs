@@ -93,7 +93,7 @@ impl HypothesisStorage for InMemoryHypothesisStorage {
     async fn update_confidence(&self, id: HypothesisId, posterior: Confidence) -> Result<()> {
         let mut store = self.hypotheses.write().await;
         if let Some(h) = store.get_mut(&id) {
-            h.update_posterior(posterior).map_err(|e| ReasoningError::InvalidState(e))?;
+            h.update_posterior(posterior).map_err(ReasoningError::InvalidState)?;
             Ok(())
         } else {
             Err(ReasoningError::NotFound(format!("Hypothesis {} not found", id)))
@@ -103,7 +103,7 @@ impl HypothesisStorage for InMemoryHypothesisStorage {
     async fn set_status(&self, id: HypothesisId, status: HypothesisStatus) -> Result<()> {
         let mut store = self.hypotheses.write().await;
         if let Some(h) = store.get_mut(&id) {
-            h.set_status(status).map_err(|e| ReasoningError::InvalidState(e))?;
+            h.set_status(status).map_err(ReasoningError::InvalidState)?;
             Ok(())
         } else {
             Err(ReasoningError::NotFound(format!("Hypothesis {} not found", id)))

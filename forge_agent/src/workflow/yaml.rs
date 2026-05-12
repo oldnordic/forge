@@ -5,7 +5,7 @@
 
 use crate::workflow::{
     task::TaskId,
-    tasks::{GraphQueryTask, GraphQueryType, AgentLoopTask, ShellCommandTask},
+    tasks::{GraphQueryTask, GraphQueryType, AgentLoopTask, ShellCommandConfig, ShellCommandTask},
     dag::{Workflow, WorkflowError},
     builder::WorkflowBuilder,
 };
@@ -164,11 +164,14 @@ impl TryFrom<YamlWorkflow> for Workflow {
                         })
                         .unwrap_or_default();
 
-                    let task = ShellCommandTask::new(
+                    let config = ShellCommandConfig::new(command)
+                        .args(args);
+
+                    let task = ShellCommandTask::with_config(
                         task_id.clone(),
                         yaml_task.name.clone(),
-                        command,
-                    ).with_args(args);
+                        config,
+                    );
 
                     builder = builder.add_task(Box::new(task));
                 }
@@ -224,7 +227,7 @@ impl TryFrom<YamlWorkflow> for Workflow {
 /// ```
 pub async fn load_workflow_from_file(path: &Path) -> Result<Workflow, YamlWorkflowError> {
     let content = tokio::fs::read_to_string(path).await?;
-    Ok(load_workflow_from_string(&content)?)
+    load_workflow_from_string(&content)
 }
 
 /// Loads a workflow from a YAML string.

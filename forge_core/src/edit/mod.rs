@@ -1,10 +1,10 @@
 //! Edit module - Span-safe code editing
 //!
 //! This module provides span-safe refactoring operations via Splice integration.
+//! Symbol resolution is done through Magellan; actual edits through Splice.
 
 use crate::error::{ForgeError, Result};
-use crate::types::Span;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Result of an edit operation.
 #[derive(Debug, Clone)]
@@ -26,7 +26,7 @@ impl EditResult {
             error: None,
         }
     }
-    
+
     /// Creates a failed result.
     pub fn failure(error: String) -> Self {
         Self {
@@ -48,267 +48,429 @@ impl EditModule {
         Self { store }
     }
 
-    /// Apply an edit operation.
-    pub async fn apply(&mut self, _op: EditOperation) -> Result<()> {
-        Ok(())
+    /// Apply an edit operation using splice.
+    pub async fn apply(&mut self, op: EditOperation) -> Result<()> {
+        match op {
+            EditOperation::Replace { file_path, start, end, new_content } => {
+                #[cfg(feature = "splice")]
+                {
+                    splice::patch::replace_span(
+                        &file_path,
+                        start,
+                        end,
+                        &new_content,
+                    ).map_err(|e| ForgeError::DatabaseError(format!("Splice replace failed: {}", e)))?;
+                    Ok(())
+                }
+                #[cfg(not(feature = "splice"))]
+                {
+                    let _ = (file_path, start, end, new_content);
+                    Err(ForgeError::DatabaseError("splice feature not enabled".to_string()))
+                }
+            }
+        }
     }
-    
+
     /// Patches a symbol with new content.
     ///
-    /// Finds the symbol definition and replaces it with the new content.
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - Symbol name to patch
-    /// * `replacement` - New content for the symbol
-    ///
-    /// # Returns
-    ///
-    /// Result indicating success/failure and changed files.
+    /// Uses magellan to find the symbol's byte span, then splice to apply
+    /// the replacement with validation. Falls back to file-system scanning
+    /// when no database is available.
     pub async fn patch_symbol(
         &self,
         symbol: &str,
-        replacement: &str
+        replacement: &str,
     ) -> Result<EditResult> {
-        
-        
-        // Find the symbol in the codebase
-        let codebase_path = &self.store.codebase_path;
-        
-        // Search for files containing the symbol definition
+        let db_path = self.store.db_path.join("graph.db");
+
+        if db_path.exists() {
+            self.patch_symbol_via_db(symbol, replacement, &db_path).await
+        } else {
+            self.patch_symbol_via_files(symbol, replacement).await
+        }
+    }
+
+    /// Patch using magellan DB for precise symbol resolution.
+    #[cfg(feature = "magellan")]
+    async fn patch_symbol_via_db(
+        &self,
+        symbol: &str,
+        replacement: &str,
+        db_path: &Path,
+    ) -> Result<EditResult> {
+        let mut graph = magellan::CodeGraph::open(db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
+
+        let file_nodes = graph.all_file_nodes()
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e)))?;
+
         let mut changed_files = Vec::new();
-        
-        // Scan Rust files for the symbol definition
-        Self::patch_symbol_in_dir(codebase_path, codebase_path, symbol, replacement, &mut changed_files).await?;
-        
+
+        for (file_path, _file_node) in file_nodes {
+            let symbols = graph.symbols_in_file(&file_path)
+                .map_err(|e| ForgeError::DatabaseError(format!("Failed to get symbols: {}", e)))?;
+
+            for sym in symbols {
+                if sym.name.as_deref() == Some(symbol) {
+                    let full_path = self.store.codebase_path.join(&file_path);
+
+                    #[cfg(feature = "splice")]
+                    {
+                        match splice::patch::replace_span(
+                            &full_path,
+                            sym.byte_start,
+                            sym.byte_end,
+                            replacement,
+                        ) {
+                            Ok(_) => {
+                                changed_files.push(PathBuf::from(&file_path));
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to patch {} in {}: {}", symbol, file_path, e);
+                            }
+                        }
+                    }
+
+                    #[cfg(not(feature = "splice"))]
+                    {
+                        let content = tokio::fs::read_to_string(&full_path).await
+                            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read file: {}", e)))?;
+                        let mut modified = content.clone();
+                        modified.replace_range(sym.byte_start..sym.byte_end, replacement);
+                        tokio::fs::write(&full_path, modified).await
+                            .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                        changed_files.push(PathBuf::from(&file_path));
+                    }
+                }
+            }
+        }
+
         if changed_files.is_empty() {
             return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", symbol)));
         }
-        
+
         Ok(EditResult::success(changed_files))
     }
-    
-    async fn patch_symbol_in_dir(
-        root: &std::path::Path,
-        dir: &std::path::Path,
+
+    #[cfg(not(feature = "magellan"))]
+    async fn patch_symbol_via_db(
+        &self,
+        _symbol: &str,
+        _replacement: &str,
+        _db_path: &Path,
+    ) -> Result<EditResult> {
+        Err(ForgeError::DatabaseError("magellan feature not enabled".to_string()))
+    }
+
+    /// Patch by scanning files in the codebase directory.
+    async fn patch_symbol_via_files(
+        &self,
         symbol: &str,
         replacement: &str,
-        changed_files: &mut Vec<PathBuf>,
-    ) -> Result<()> {
-        use tokio::fs;
-        
-        let mut entries = fs::read_dir(dir).await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-        
+    ) -> Result<EditResult> {
+        let codebase = &self.store.codebase_path;
+        let mut changed_files = Vec::new();
+
+        let mut entries = match tokio::fs::read_dir(codebase).await {
+            Ok(entries) => entries,
+            Err(_) => return Err(ForgeError::SymbolNotFound(
+                format!("Symbol '{}' not found (no files in codebase)", symbol),
+            )),
+        };
+
         while let Some(entry) = entries.next_entry().await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read directory: {}", e)))?
         {
             let path = entry.path();
-            if path.is_dir() {
-                Box::pin(Self::patch_symbol_in_dir(root, &path, symbol, replacement, changed_files)).await?;
-            } else if path.is_file() && path.extension().map(|e| e == "rs").unwrap_or(false) {
-                // Read file and look for symbol definition
-                let content = fs::read_to_string(&path).await
-                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to read file: {}", e)))?;
-                
-                // Look for function definition pattern
-                let patterns = vec![
-                    format!("fn {}(", symbol),
-                    format!("pub fn {}(", symbol),
-                    format!("async fn {}(", symbol),
-                    format!("pub async fn {}(", symbol),
-                ];
-                
-                let mut modified = content.clone();
-                let mut found = false;
-                
-                for pattern in &patterns {
-                    if let Some(start_idx) = modified.find(pattern) {
-                        // Find the end of the function (matching braces)
-                        if let Some(end_idx) = find_function_end(&modified, start_idx) {
-                            modified.replace_range(start_idx..end_idx, replacement);
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // Also check for struct/impl definitions
-                if !found {
-                    let struct_pattern = format!("struct {} ", symbol);
-                    if let Some(start_idx) = modified.find(&struct_pattern) {
-                        // Find end of struct definition
-                        if let Some(end_idx) = find_struct_end(&modified, start_idx) {
-                            modified.replace_range(start_idx..end_idx, replacement);
-                            found = true;
-                        }
-                    }
-                }
-                
-                if found {
-                    fs::write(&path, modified).await
-                        .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
-                    let relative_path = path.strip_prefix(root).unwrap_or(&path);
-                    changed_files.push(relative_path.to_path_buf());
-                }
+            if !path.is_file() {
+                continue;
+            }
+
+            let content = match tokio::fs::read_to_string(&path).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            if let Some(span) = find_symbol_span(&content, symbol) {
+                let mut modified = content.as_bytes()[..span.0].to_vec();
+                modified.extend_from_slice(replacement.as_bytes());
+                modified.extend_from_slice(&content.as_bytes()[span.1..]);
+
+                tokio::fs::write(&path, modified).await
+                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+
+                changed_files.push(path.strip_prefix(codebase).unwrap_or(&path).to_path_buf());
             }
         }
-        
-        Ok(())
+
+        if changed_files.is_empty() {
+            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", symbol)));
+        }
+
+        Ok(EditResult::success(changed_files))
     }
-    
+
     /// Renames a symbol and updates all references.
     ///
-    /// # Arguments
-    ///
-    /// * `old_name` - Current symbol name
-    /// * `new_name` - New symbol name
-    ///
-    /// # Returns
-    ///
-    /// Result indicating success/failure.
+    /// Uses magellan to find all references to the symbol, then splice
+    /// to apply span-safe replacements. Falls back to word-boundary
+    /// replacement when no database is available.
     pub async fn rename_symbol(
         &self,
         old_name: &str,
-        new_name: &str
+        new_name: &str,
     ) -> Result<EditResult> {
-        
-        
-        let codebase_path = &self.store.codebase_path;
-        let mut changed_files = Vec::new();
-        
-        // Scan all Rust files and replace occurrences
-        Self::rename_in_dir(codebase_path, codebase_path, old_name, new_name, &mut changed_files).await?;
-        
-        if changed_files.is_empty() {
-            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", old_name)));
+        let db_path = self.store.db_path.join("graph.db");
+
+        if db_path.exists() {
+            self.rename_symbol_via_db(old_name, new_name, &db_path).await
+        } else {
+            self.rename_symbol_via_files(old_name, new_name).await
         }
-        
-        Ok(EditResult::success(changed_files))
     }
-    
-    async fn rename_in_dir(
-        root: &std::path::Path,
-        dir: &std::path::Path,
+
+    /// Rename using magellan DB for precise reference resolution.
+    #[cfg(feature = "magellan")]
+    async fn rename_symbol_via_db(
+        &self,
         old_name: &str,
         new_name: &str,
-        changed_files: &mut Vec<PathBuf>,
-    ) -> Result<()> {
-        use tokio::fs;
-        
-        let mut entries = fs::read_dir(dir).await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-        
+        db_path: &Path,
+    ) -> Result<EditResult> {
+        let mut graph = magellan::CodeGraph::open(db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
+
+        let mut all_refs: Vec<magellan::references::ReferenceFact> = Vec::new();
+        let file_nodes = graph.all_file_nodes()
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e)))?;
+
+        for (file_path, _file_node) in file_nodes {
+            if let Ok(Some(symbol_id)) = graph.symbol_id_by_name(&file_path, old_name) {
+                if let Ok(refs) = graph.references_to_symbol(symbol_id) {
+                    all_refs.extend(refs);
+                }
+            }
+            if let Ok(call_facts) = graph.callers_of_symbol(&file_path, old_name) {
+                for fact in call_facts {
+                    all_refs.push(magellan::references::ReferenceFact {
+                        file_path: fact.file_path,
+                        referenced_symbol: fact.callee,
+                        byte_start: fact.byte_start,
+                        byte_end: fact.byte_end,
+                        start_line: fact.start_line,
+                        start_col: fact.start_col,
+                        end_line: fact.end_line,
+                        end_col: fact.end_col,
+                    });
+                }
+            }
+        }
+
+        if all_refs.is_empty() {
+            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", old_name)));
+        }
+
+        let mut changed_files = Vec::new();
+
+        #[cfg(feature = "splice")]
+        {
+            let by_file = splice::graph::rename::group_references_by_file(&all_refs);
+            for (file_path, _refs) in by_file {
+                let full_path = self.store.codebase_path.join(&file_path);
+                match splice::graph::rename::apply_replacements_in_file(
+                    &full_path,
+                    old_name,
+                    new_name,
+                    &all_refs,
+                ) {
+                    Ok(count) if count > 0 => {
+                        changed_files.push(file_path);
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!("Failed to rename in {}: {}", file_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(feature = "splice"))]
+        {
+            let by_file = splice::graph::rename::group_references_by_file(&all_refs);
+            for (file_path, _refs) in by_file {
+                let full_path = self.store.codebase_path.join(&file_path);
+                let content = tokio::fs::read_to_string(&full_path).await
+                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to read file: {}", e)))?;
+                let modified = simple_word_replace(&content, old_name, new_name);
+                if modified != content {
+                    tokio::fs::write(&full_path, modified).await
+                        .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                    changed_files.push(file_path.into());
+                }
+            }
+        }
+
+        if changed_files.is_empty() {
+            return Err(ForgeError::SymbolNotFound(
+                format!("Symbol '{}' references found but no files changed", old_name),
+            ));
+        }
+
+        Ok(EditResult::success(changed_files))
+    }
+
+    #[cfg(not(feature = "magellan"))]
+    async fn rename_symbol_via_db(
+        &self,
+        _old_name: &str,
+        _new_name: &str,
+        _db_path: &Path,
+    ) -> Result<EditResult> {
+        Err(ForgeError::DatabaseError("magellan feature not enabled".to_string()))
+    }
+
+    /// Rename by scanning files and doing word-boundary replacement.
+    async fn rename_symbol_via_files(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<EditResult> {
+        let codebase = &self.store.codebase_path;
+        let mut changed_files = Vec::new();
+        let mut found_any = false;
+
+        let mut entries = match tokio::fs::read_dir(codebase).await {
+            Ok(entries) => entries,
+            Err(_) => return Err(ForgeError::SymbolNotFound(
+                format!("Symbol '{}' not found (no files in codebase)", old_name),
+            )),
+        };
+
         while let Some(entry) = entries.next_entry().await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))? 
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read directory: {}", e)))?
         {
             let path = entry.path();
-            if path.is_dir() {
-                Box::pin(Self::rename_in_dir(root, &path, old_name, new_name, changed_files)).await?;
-            } else if path.is_file() && path.extension().map(|e| e == "rs").unwrap_or(false) {
-                let content = fs::read_to_string(&path).await
-                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to read file: {}", e)))?;
-                
-                // Simple word-boundary replacement
-                let modified = replace_word_boundaries(&content, old_name, new_name);
-                
-                if modified != content {
-                    fs::write(&path, modified).await
-                        .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
-                    let relative_path = path.strip_prefix(root).unwrap_or(&path);
-                    changed_files.push(relative_path.to_path_buf());
-                }
-            }
-        }
-        
-        Ok(())
-    }
-}
-
-/// Find the end of a function definition, handling nested braces
-fn find_function_end(content: &str, start_idx: usize) -> Option<usize> {
-    let after_sig = &content[start_idx..];
-    
-    // Find opening brace
-    if let Some(brace_idx) = after_sig.find('{') {
-        let body_start = start_idx + brace_idx + 1;
-        let mut brace_count = 1;
-        let mut in_string = false;
-        let mut escape_next = false;
-        
-        for (i, c) in content[body_start..].char_indices() {
-            if escape_next {
-                escape_next = false;
+            if !path.is_file() {
                 continue;
             }
-            
-            match c {
-                '\\' if in_string => escape_next = true,
-                '"' | '\'' => in_string = !in_string,
-                '{' if !in_string => brace_count += 1,
-                '}' if !in_string => {
-                    brace_count -= 1;
-                    if brace_count == 0 {
-                        return Some(body_start + i + 1);
+
+            let content = match tokio::fs::read_to_string(&path).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            // Check if file contains the symbol at all
+            if !content.contains(old_name) {
+                continue;
+            }
+
+            // Verify at least one definition exists (fn old_name, etc.)
+            if find_symbol_span(&content, old_name).is_some() {
+                found_any = true;
+            }
+
+            let modified = simple_word_replace(&content, old_name, new_name);
+            if modified != content {
+                tokio::fs::write(&path, modified).await
+                    .map_err(|e| ForgeError::DatabaseError(format!("Failed to write file: {}", e)))?;
+                changed_files.push(path.strip_prefix(codebase).unwrap_or(&path).to_path_buf());
+            }
+        }
+
+        if !found_any {
+            return Err(ForgeError::SymbolNotFound(format!("Symbol '{}' not found", old_name)));
+        }
+
+        Ok(EditResult::success(changed_files))
+    }
+}
+
+/// Find the byte span of a symbol definition in source code.
+///
+/// Looks for patterns like `fn name`, `struct name`, `enum name`, etc.
+/// Returns (start, end) of the full definition.
+fn find_symbol_span(content: &str, symbol: &str) -> Option<(usize, usize)> {
+    // Match common definition patterns
+    let patterns = [
+        format!("fn {}", symbol),
+        format!("pub fn {}", symbol),
+        format!("pub(crate) fn {}", symbol),
+        format!("async fn {}", symbol),
+        format!("pub async fn {}", symbol),
+        format!("struct {}", symbol),
+        format!("pub struct {}", symbol),
+        format!("enum {}", symbol),
+        format!("pub enum {}", symbol),
+        format!("trait {}", symbol),
+        format!("pub trait {}", symbol),
+        format!("impl {}", symbol),
+        format!("mod {}", symbol),
+        format!("pub mod {}", symbol),
+        format!("const {}", symbol),
+        format!("static {}", symbol),
+        format!("type {}", symbol),
+    ];
+
+    for pattern in &patterns {
+        if let Some(pos) = content.find(pattern.as_str()) {
+            // Find the end of the definition (matching braces or semicolon)
+            let end = find_definition_end(content, pos);
+            return Some((pos, end));
+        }
+    }
+
+    None
+}
+
+/// Find the end byte offset of a definition starting at `start`.
+fn find_definition_end(content: &str, start: usize) -> usize {
+    let rest = &content[start..];
+
+    // For brace-delimited definitions, count braces
+    if let Some(brace_pos) = rest.find('{') {
+        let mut depth = 0u32;
+        for (i, b) in rest[brace_pos..].bytes().enumerate() {
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return start + brace_pos + i + 1;
                     }
                 }
                 _ => {}
             }
         }
     }
-    
-    None
-}
 
-/// Find the end of a struct definition
-fn find_struct_end(content: &str, start_idx: usize) -> Option<usize> {
-    let after_keyword = &content[start_idx..];
-    
-    // Find opening brace or semicolon
-    if let Some(brace_idx) = after_keyword.find('{') {
-        let body_start = start_idx + brace_idx + 1;
-        let mut brace_count = 1;
-        
-        for (i, c) in content[body_start..].char_indices() {
-            match c {
-                '{' => brace_count += 1,
-                '}' => {
-                    brace_count -= 1;
-                    if brace_count == 0 {
-                        return Some(body_start + i + 1);
-                    }
-                }
-                _ => {}
-            }
-        }
-    } else if let Some(semi_idx) = after_keyword.find(';') {
-        return Some(start_idx + semi_idx + 1);
+    // For non-brace definitions (e.g., type aliases, consts), find semicolon
+    if let Some(semi_pos) = rest.find(';') {
+        return start + semi_pos + 1;
     }
-    
-    None
+
+    content.len()
 }
 
-/// Replace occurrences with word boundaries
-fn replace_word_boundaries(content: &str, old: &str, new: &str) -> String {
+/// Word-boundary replacement preserving non-word characters around matches.
+fn simple_word_replace(content: &str, old: &str, new: &str) -> String {
     let mut result = String::new();
     let mut last_end = 0;
-    
+
     for (i, _) in content.match_indices(old) {
-        // Check word boundaries
-        let before = if i > 0 { content.chars().nth(i - 1) } else { None };
-        let after = content.chars().nth(i + old.len());
-        
-        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
-        let word_before = before.map(is_word_char).unwrap_or(false);
-        let word_after = after.map(is_word_char).unwrap_or(false);
-        
+        let before = if i > 0 { content.as_bytes().get(i - 1).copied() } else { None };
+        let after = content.as_bytes().get(i + old.len()).copied();
+
+        let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+        let word_before = before.map(is_word).unwrap_or(false);
+        let word_after = after.map(is_word).unwrap_or(false);
+
         if !word_before && !word_after {
             result.push_str(&content[last_end..i]);
             result.push_str(new);
             last_end = i + old.len();
         }
     }
-    
+
     result.push_str(&content[last_end..]);
     result
 }
@@ -317,7 +479,9 @@ fn replace_word_boundaries(content: &str, old: &str, new: &str) -> String {
 pub enum EditOperation {
     /// Replace a span with new content.
     Replace {
-        span: Span,
+        file_path: PathBuf,
+        start: usize,
+        end: usize,
         new_content: String,
     },
 }
@@ -328,19 +492,72 @@ mod tests {
 
     #[test]
     fn test_edit_module_creation() {
-        // EditModule::new requires UnifiedGraphStore
-        // For now just test that the type exists
         use crate::storage::UnifiedGraphStore;
-        // Can't easily create without async, but verify type exists
         let _store: Option<UnifiedGraphStore> = None;
     }
 
     #[test]
     fn test_edit_operation_replace() {
-        let span = Span { start: 10, end: 20 };
         let _op = EditOperation::Replace {
-            span,
+            file_path: PathBuf::from("test.rs"),
+            start: 10,
+            end: 20,
             new_content: String::from("test"),
         };
+    }
+
+    #[test]
+    fn test_edit_result_success() {
+        let result = EditResult::success(vec![PathBuf::from("foo.rs")]);
+        assert!(result.success);
+        assert_eq!(result.changed_files.len(), 1);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_edit_result_failure() {
+        let result = EditResult::failure("something went wrong".to_string());
+        assert!(!result.success);
+        assert!(result.changed_files.is_empty());
+        assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_find_symbol_span_function() {
+        let code = "fn hello() { println!(\"Hello\"); }\n";
+        let span = find_symbol_span(code, "hello").unwrap();
+        assert!(code[span.0..span.1].starts_with("fn hello"));
+        assert!(code[span.0..span.1].ends_with("}"));
+    }
+
+    #[test]
+    fn test_find_symbol_span_struct() {
+        let code = "pub struct Foo { x: i32 }\n";
+        let span = find_symbol_span(code, "Foo").unwrap();
+        assert!(code[span.0..span.1].contains("struct Foo"));
+    }
+
+    #[test]
+    fn test_find_symbol_span_not_found() {
+        let code = "fn bar() {}\n";
+        assert!(find_symbol_span(code, "baz").is_none());
+    }
+
+    #[test]
+    fn test_simple_word_replace() {
+        let code = "fn old_name() {}\nfn caller() { old_name(); }";
+        let result = simple_word_replace(code, "old_name", "new_name");
+        assert!(result.contains("fn new_name()"));
+        assert!(result.contains("new_name();"));
+        assert!(!result.contains("old_name"));
+    }
+
+    #[test]
+    fn test_simple_word_replace_respects_boundaries() {
+        let code = "fn get_name() {}\nfn name() {}";
+        let result = simple_word_replace(code, "name", "title");
+        // "get_name" should NOT be changed (word boundary before _)
+        assert!(result.contains("get_name"));
+        assert!(result.contains("fn title()"));
     }
 }

@@ -194,9 +194,27 @@ impl EditOperation for InsertOperation {
         Ok(Diff::new(original, new_content))
     }
 
-    async fn apply(&self, _module: &mut AnalysisModule) -> Result<ApplyResult> {
-        // v0.1: Placeholder - would actually modify code
-        tracing::info!("InsertOperation: inserting {} after {}", self.content.len(), self.after_symbol);
+    async fn apply(&self, module: &mut AnalysisModule) -> Result<ApplyResult> {
+        let symbols = module.graph().find_symbol(&self.after_symbol).await?;
+
+        if symbols.is_empty() {
+            return Ok(ApplyResult::Failed(format!("Symbol '{}' not found", self.after_symbol)));
+        }
+
+        let sym = &symbols[0];
+        let file_path = &sym.location.file_path;
+        let content = tokio::fs::read_to_string(file_path).await
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to read {}: {}", file_path.display(), e)))?;
+
+        let insert_pos = sym.location.byte_end as usize;
+        let content_bytes = content.as_bytes();
+        let mut modified = content_bytes[..insert_pos].to_vec();
+        modified.extend_from_slice(self.content.as_bytes());
+        modified.extend_from_slice(&content_bytes[insert_pos..]);
+
+        tokio::fs::write(file_path, modified).await
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to write {}: {}", file_path.display(), e)))?;
+
         Ok(ApplyResult::Applied)
     }
 }
@@ -448,13 +466,28 @@ impl AnalysisModule {
             ref_count,
             call_count,
             referenced_by: callers.into_iter()
-                .filter_map(|_r| {
-                    // Try to resolve the symbol ID to a Symbol
-                    None // v0.1: would need symbol lookup
+                .map(|r| Symbol {
+                    id: r.from,
+                    name: String::new(),
+                    fully_qualified_name: String::new(),
+                    kind: crate::types::SymbolKind::Function,
+                    language: crate::types::Language::Unknown("unknown".to_string()),
+                    location: r.location,
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
                 })
                 .collect(),
             references: refs.into_iter()
-                .filter_map(|_r| None)
+                .map(|r| Symbol {
+                    id: r.from,
+                    name: String::new(),
+                    fully_qualified_name: String::new(),
+                    kind: crate::types::SymbolKind::Function,
+                    language: crate::types::Language::Unknown("unknown".to_string()),
+                    location: r.location,
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
+                })
                 .collect(),
             impact_score,
         })
@@ -524,12 +557,17 @@ impl AnalysisModule {
         // Get all symbols this one references
         let refs = self.graph.references(symbol).await?;
 
-        // In a full implementation, we would recursively follow references
-        // For v0.1, return direct references only
+        // Return direct references as symbols
         let chain: Vec<Symbol> = refs.into_iter()
-            .filter_map(|_r| {
-                // Try to resolve to a Symbol
-                None // v0.1: would need symbol lookup
+            .map(|r| Symbol {
+                id: r.from,
+                name: String::new(),
+                fully_qualified_name: String::new(),
+                kind: crate::types::SymbolKind::Function,
+                language: crate::types::Language::Unknown("unknown".to_string()),
+                location: r.location,
+                parent_id: None,
+                metadata: serde_json::Value::Null,
             })
             .collect();
 
@@ -545,9 +583,18 @@ impl AnalysisModule {
 
         let callers = self.graph.callers_of(symbol).await?;
 
-        // For v0.1, return direct callers
+        // Return direct callers as symbols
         let chain: Vec<Symbol> = callers.into_iter()
-            .filter_map(|_| None)
+            .map(|r| Symbol {
+                id: r.from,
+                name: String::new(),
+                fully_qualified_name: String::new(),
+                kind: crate::types::SymbolKind::Function,
+                language: crate::types::Language::Unknown("unknown".to_string()),
+                location: r.location,
+                parent_id: None,
+                metadata: serde_json::Value::Null,
+            })
             .collect();
 
         tracing::debug!("Call chain for '{}' has {} symbols, found in {:?}", symbol, chain.len(), start.elapsed());
@@ -593,11 +640,24 @@ impl AnalysisModule {
 
     /// Calculate complexity metrics for a function.
     ///
-    /// Returns cyclomatic complexity and other metrics.
-    /// Uses source-based estimation as CFG extraction is done during indexing.
-    pub async fn complexity_metrics(&self, _symbol_name: &str) -> Result<ComplexityMetrics> {
-        // v0.1: Placeholder - real implementation would look up cached CFG
-        // from the storage and analyze it
+    /// Looks up the symbol's source code and analyzes it for complexity.
+    pub async fn complexity_metrics(&self, symbol_name: &str) -> Result<ComplexityMetrics> {
+        // Try to find the symbol's source and analyze it
+        let symbols = self.graph.find_symbol(symbol_name).await.unwrap_or_default();
+        if let Some(sym) = symbols.first() {
+            let full_path = self.graph.store().codebase_path.join(&sym.location.file_path);
+            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+                // Extract the function body from byte span
+                let start = sym.location.byte_start as usize;
+                let end = sym.location.byte_end as usize;
+                if end <= content.len() {
+                    let source = &content[start..end];
+                    return Ok(self.analyze_source_complexity(source));
+                }
+            }
+        }
+
+        // Fallback: minimal metrics
         Ok(ComplexityMetrics {
             cyclomatic_complexity: 1,
             lines_of_code: 1,
@@ -621,14 +681,34 @@ impl AnalysisModule {
     ///
     /// Returns both callers (incoming) and callees (outgoing).
     pub async fn cross_references(&self, symbol_name: &str) -> Result<CrossReferences> {
-        let _caller_refs = self.graph.callers_of(symbol_name).await?;
-        let _callee_refs = self.graph.references(symbol_name).await?;
-        
-        // v0.1: We return empty symbol lists since we can't easily
-        // resolve references to symbols without additional lookups
+        let caller_refs = self.graph.callers_of(symbol_name).await?;
+        let callee_refs = self.graph.references(symbol_name).await?;
+
+        let callers = caller_refs.iter().map(|r| Symbol {
+            id: r.from,
+            name: String::new(),
+            fully_qualified_name: String::new(),
+            kind: crate::types::SymbolKind::Function,
+            language: crate::types::Language::Unknown(String::new()),
+            location: r.location.clone(),
+            parent_id: None,
+            metadata: serde_json::Value::Null,
+        }).collect();
+
+        let callees = callee_refs.iter().map(|r| Symbol {
+            id: r.to,
+            name: String::new(),
+            fully_qualified_name: String::new(),
+            kind: crate::types::SymbolKind::Function,
+            language: crate::types::Language::Unknown(String::new()),
+            location: r.location.clone(),
+            parent_id: None,
+            metadata: serde_json::Value::Null,
+        }).collect();
+
         Ok(CrossReferences {
-            callers: Vec::new(),
-            callees: Vec::new(),
+            callers,
+            callees,
         })
     }
 

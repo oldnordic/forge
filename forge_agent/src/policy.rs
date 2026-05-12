@@ -339,7 +339,7 @@ async fn check_max_complexity(
         .lines()
         .enumerate()
         .filter(|(_, line)| line.trim().starts_with("pub fn ") || line.trim().starts_with("fn "))
-        .map(|(line_num, line)| {
+        .filter_map(|(line_num, line)| {
             // Get the rest of the line after "fn name("
             let rest = if let Some(fn_pos) = line.find("fn ") {
                 &line[fn_pos + 3..]
@@ -364,7 +364,6 @@ async fn check_max_complexity(
                 None
             }
         })
-        .flatten()
         .collect();
 
     Ok(if violations.is_empty() {

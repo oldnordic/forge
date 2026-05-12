@@ -20,10 +20,9 @@
 
 use crate::audit::AuditLog;
 use crate::workflow::dag::Workflow;
-use crate::workflow::task::{CompensationAction, CompensationType, TaskContext, TaskId, TaskError, TaskResult, WorkflowTask};
+use crate::workflow::task::{CompensationAction, CompensationType, TaskContext, TaskId, TaskError, TaskResult};
 use chrono::Utc;
 use petgraph::graph::NodeIndex;
-use petgraph::visit::IntoNeighborsDirected;
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;

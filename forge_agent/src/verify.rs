@@ -87,16 +87,10 @@ impl Verifier {
     ///
     /// Checks for orphan references and broken symbol links.
     pub async fn graph_check(&self, _working_dir: &std::path::Path) -> Result<Vec<Diagnostic>> {
-        let mut diagnostics = Vec::new();
-
-        // For v0.4, this is a simplified check
-        // In production, would query graph for orphan references
-
-        // Placeholder: graph is assumed consistent
-        diagnostics.push(Diagnostic {
+        let diagnostics = vec![Diagnostic {
             level: DiagnosticLevel::Info,
             message: "Graph consistency check: skipped (not yet implemented)".to_string(),
-        });
+        }];
 
         Ok(diagnostics)
     }

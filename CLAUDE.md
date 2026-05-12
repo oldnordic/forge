@@ -1,111 +1,217 @@
-# CLAUDE.md
+# ForgeKit Development Rules - Unified Code Intelligence SDK
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**Project:** ForgeKit - Deterministic code intelligence SDK + agent orchestration
+**Workspace Members:** forge-core (0.2.2), forge-runtime (0.1.2), forge-agent (0.4.0), forge-reasoning (0.1.2)
+**Last Updated:** 2026-05-04
 
-## Project Overview
+---
 
-ForgeKit is a deterministic code intelligence SDK for Rust - "LLVM for AI Code Agents". It combines Magellan (graph operations), LLMGrep (semantic search), Mirage (CFG analysis), and Splice (span-safe editing) into a unified API.
+## Shared Agent Workflow
 
-**Workspace Members:**
-- `forge_core` - Core SDK library (graph, search, cfg, edit modules)
-- `forge_runtime` - Indexing and caching layer (planned)
-- `forge_agent` - Deterministic AI orchestration loop (planned)
+Follow `/home/feanor/Projects/CLAUDE.md` for the shared rules: state assumptions before coding, use Magellan/llmgrep/Mirage for code-structure claims, keep edits surgical, preserve dirty worktree changes, and report fresh verification evidence before claiming completion. Repo-specific rules below add ForgeKit architecture and workspace conventions.
 
-**Database Location:** `.forge/graph.db` (SQLiteGraph backend)
-
-## Development Commands
+## Quick Start
 
 ```bash
-# Build and test
-cargo build              # Build all workspace members
-cargo check              # Fast compilation check (use before build)
-cargo test              # Run all tests
-cargo test -p forge_core # Run tests for specific crate
+# Build all workspace members
+cargo build
 
-# Development workflow
-cargo fmt               # Format code
-cargo clippy --all-targets    # Lint code
-cargo bench             # Run benchmarks
+# Build release
+cargo build --release
 
-# External tools (installed via cargo)
-magellan --db .forge/graph.db status
-magellan --db .forge/graph.db find --name "symbol"
-magellan --db .forge/graph.db refs --name "symbol" --direction in
-llmgrep --db .forge/graph.db search --query "pattern" --output human
-mirage --db .forge/graph.db cfg --function "function_name"
-splice --db .forge/graph.db patch --file src/lib.rs --symbol symbol_name
+# Run tests
+cargo test
+
+# Run tests for specific member
+cargo test -p forge-core
+cargo test -p forge-agent
+
+# Lint
+cargo clippy --all-targets
 ```
 
-## Architecture Overview
+**Note:** This is a Cargo workspace with 4 members. `cargo build` builds all of them.
 
-**Core Philosophy:** Graph-first, deterministic operations. The SQLiteGraph database is the authoritative source of truth - never assume code structure without querying it.
+---
 
-**Module Structure:**
-- `graph/` - Symbol/reference queries (Magellan integration)
-- `search/` - Semantic code search (LLMGrep integration)
-- `cfg/` - Control flow graph analysis (Mirage integration)
-- `edit/` - Span-safe refactoring operations (Splice integration)
-- `analysis/` - Combined operations (impact analysis, dead code detection)
-- `storage/` - Storage abstraction over SQLiteGraph backend
+## Database Convention
 
-**Key Types:**
-- `Forge` - Main entry point, access via `forge.graph()`, `forge.search()`, `forge.cfg()`, `forge.edit()`
-- `UnifiedGraphStore` - Internal wrapper over sqlitegraph
-- `ForgeError` - Comprehensive error enum (use `anyhow::Result` at API boundaries)
+Project database: `.magellan/forge.db`
 
-**Deterministic Loop Pattern:**
-```
-Query → Graph Reason → Validate → Safe Patch → Re-index
+Since this is a workspace, the database indexes all member `src/` directories:
+```bash
+# Index each workspace member
+magellan watch --root ./forge_core/src --db .magellan/forge.db --debounce-ms 500
+magellan watch --root ./forge_runtime/src --db .magellan/forge.db --debounce-ms 500
+magellan watch --root ./forge_agent/src --db .magellan/forge.db --debounce-ms 500
+magellan watch --root ./forge-reasoning/src --db .magellan/forge.db --debounce-ms 500
 ```
 
-All edits must be span-verified, atomic, and auditable.
+---
 
-## Mandatory Development Workflow
+## Workspace Architecture
 
-This project enforces a strict TDD workflow (see `docs/DEVELOPMENT_WORKFLOW.md`):
+```
+forge/                          # Workspace root
+├── Cargo.toml                  # Workspace definition
+├── AGENTS.md                   # Subagent rules (epistemic discipline)
+├── forge_core/                 # Core SDK - graph, search, CFG, edit
+│   └── src/
+│       ├── graph/              # Symbol graph (queries.rs)
+│       ├── analysis/           # Complexity, dead code, modules
+│       ├── cfg/                # Control flow graph
+│       ├── edit/               # Code editing operations
+│       ├── search/             # Pattern-based code search
+│       ├── storage/            # Storage backends
+│       ├── treesitter/         # Tree-sitter parsing
+│       └── types.rs            # Core types
+├── forge_runtime/              # Runtime - indexing, caching, metrics
+│   └── src/
+│       ├── lib.rs              # Runtime interface
+│       └── metrics.rs          # Performance metrics
+├── forge_agent/                # Agent - workflow orchestration, AI loop
+│   └── src/
+│       ├── cli.rs              # CLI entry point
+│       ├── loop.rs             # Agent execution loop
+│       ├── planner.rs          # Task planning
+│       ├── audit.rs            # Audit trail
+│       ├── commit.rs           # Commit management
+│       ├── mutate.rs           # Code mutation
+│       ├── observe.rs          # Code observation
+│       ├── policy.rs           # Policy enforcement
+│       ├── transaction.rs      # Transaction management
+│       ├── verify.rs           # Verification gates
+│       └── workflow/           # Workflow engine (DAG, checkpoint, rollback, timeout, etc.)
+├── forge-reasoning/            # Reasoning - debugging, hypotheses, contradictions
+│   └── src/
+│       ├── belief/             # Belief graph
+│       ├── checkpoint/         # Debug checkpointing
+│       ├── gaps/               # Knowledge gap analysis
+│       ├── hypothesis/         # Hypothesis management
+│       ├── impact/             # Impact analysis (preview, propagation, snapshot)
+│       ├── verification/       # Verification runner (check, retry)
+│       ├── service.rs          # Main service interface
+│       ├── storage.rs          # Storage backends
+│       ├── storage_sqlitegraph.rs  # sqlitegraph backend
+│       ├── websocket.rs        # WebSocket interface
+│       └── export_import.rs    # State export/import
+```
 
-1. **UNDERSTAND** - Read source code, check database schema (`sqlite3 .forge/graph.db ".schema"`), verify with tools
-2. **PLAN** - Document architectural decision with alternatives and trade-offs
-3. **PROVE** - Write failing test first, show it fails
-4. **IMPLEMENT** - Write code to pass test using proper tools (magellan/llmgrep/mirage/splice)
-5. **VERIFY** - Show test passes, run `cargo check`, update docs
+---
 
-**Golden Rule:** NEVER write code based on assumptions. ALWAYS read source and query the graph first.
+## Mandatory Protocol
 
-## File Size Limits
+**Before ANY code change:**
 
-- Core modules: 600 LOC max (standard), 1,000 LOC max (with justification)
-- Tests: 500 LOC max (standard), 1,000 LOC max (E2E/integration suites)
-- Files must be cohesive (single purpose)
-- Exceed limits only with inline comment justification
+1. **Check graph health**
+   ```bash
+   magellan status --db .magellan/forge.db
+   ```
 
-**Rationale:** 600 LOC allows for substantial modules while keeping code navigable. 1,000 LOC is reserved for cases where splitting would harm coherence (e.g., tightly coupled algorithms, multi-language support).
+2. **Discover symbols before creating or changing them**
+   ```bash
+   llmgrep --db .magellan/forge.db search --query "symbol_name" --output human
+   magellan find --db .magellan/forge.db --name "symbol_name"
+   ```
 
-## Anti-Patterns (Strictly Prohibited)
+3. **Trace relationships before signature changes**
+   ```bash
+   magellan refs --db .magellan/forge.db --name "func" --path "forge_core/src/graph/queries.rs" --direction in
+   magellan refs --db .magellan/forge.db --name "func" --path "forge_core/src/graph/queries.rs" --direction out
+   ```
 
-| Don't Do | Correct Approach |
-|------------|-------------------|
-| Use `grep`/`rg` | `magellan find --name "pattern"` |
-| Use `cat` | Read tool (or `llmgrep search`) |
-| Edit without reading | Read file first to verify structure |
-| Assume schema exists | `sqlite3 .forge/graph.db ".schema"` or `PRAGMA table_info` |
-| `#[allow(...)]` | Fix the warning |
-| TODO/FIXME in prod | Do it now or create issue |
+4. **Analyze control flow (Rust only)**
+   ```bash
+   mirage --db .magellan/forge.db cfg --function "func_name"
+   ```
 
-## Tool Selection Guide
+5. **Check impact before refactoring**
+   ```bash
+   splice reachable --symbol "func_name" --path "src/file.rs" --db .magellan/forge.db
+   ```
 
-| Task | Tool | Command Pattern |
-|------|--------|----------------|
-| Find symbol by name | Magellan | `magellan find --db .forge/graph.db --name "symbol"` |
-| Find references | Magellan | `magellan refs --db .forge/graph.db --name "symbol"` |
-| Semantic search | LLMGrep | `llmgrep --db .forge/graph.db search --query "pattern"` |
-| CFG analysis | Mirage | `mirage --db .forge/graph.db cfg --function "name"` |
-| Paths/loops | Mirage | `mirage --db .forge/graph.db paths --function "name"` |
-| Span-safe edit | Splice | `splice --db .forge/graph.db patch --file path --symbol name` |
+---
 
-## Error Handling
+## Known Issues
 
-- Internal: Use `ForgeError` enum from `error.rs`
-- API boundaries: Use `anyhow::Result` for simplicity
-- Libraries should define proper error types (thiserror pattern)
-- Applications may use anyhow/eyre throughout
+- **License mismatch**: `forge_core`, `forge_runtime`, and `forge_agent` have `GPL-3.0-or-later` but should be `GPL-3.0 only`. The pre-commit hook will block until fixed.
+- **Crate naming**: `forge-reasoning` should be `forgekit-reasoning` for consistency (requires new crate publish on crates.io, cannot rename in place).
+- **34 clippy warnings** in forgekit-agent (mostly elided lifetimes) — should be addressed.
+
+---
+
+## When In Doubt
+
+1. Read the source code
+2. Check the graph database
+3. Run tests
+4. Document the decision
+5. Ask for clarification
+
+**DO NOT GUESS.**
+
+# CLAUDE.md
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

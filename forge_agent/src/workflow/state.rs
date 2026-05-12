@@ -27,7 +27,6 @@
 //! ```
 //! Fixed by using `ConcurrentState` for all state mutations.
 
-use crate::workflow::dag::TaskNode;
 use crate::workflow::executor::WorkflowExecutor;
 use crate::workflow::task::TaskId;
 use serde::{Deserialize, Serialize};
@@ -64,16 +63,7 @@ pub enum TaskStatus {
     Skipped,
 }
 
-impl TaskStatus {
-    /// Creates TaskStatus from a parallel execution result.
-    pub(crate) fn from_parallel_result(success: bool) -> Self {
-        if success {
-            TaskStatus::Completed
-        } else {
-            TaskStatus::Failed
-        }
-    }
-}
+impl TaskStatus {}
 
 /// Summary of a task's state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -208,7 +198,7 @@ impl ConcurrentState {
     /// # Panics
     ///
     /// Panics if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn read(&self) -> Result<std::sync::RwLockReadGuard<WorkflowState>, std::sync::PoisonError<std::sync::RwLockReadGuard<WorkflowState>>> {
+    pub fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, WorkflowState>, std::sync::PoisonError<std::sync::RwLockReadGuard<'_, WorkflowState>>> {
         self.inner.read()
     }
 
@@ -221,7 +211,7 @@ impl ConcurrentState {
     /// # Panics
     ///
     /// Panics if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn write(&self) -> Result<std::sync::RwLockWriteGuard<WorkflowState>, std::sync::PoisonError<std::sync::RwLockWriteGuard<WorkflowState>>> {
+    pub fn write(&self) -> Result<std::sync::RwLockWriteGuard<'_, WorkflowState>, std::sync::PoisonError<std::sync::RwLockWriteGuard<'_, WorkflowState>>> {
         self.inner.write()
     }
 

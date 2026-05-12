@@ -1,5 +1,5 @@
 [package]
-name = "forgekit-agent"
+name = "forge-agent"
 version = "0.4.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
@@ -19,20 +19,13 @@ path = "src/cli.rs"
 default = ["sqlite"]
 
 # Storage backends (inherited from forge_core)
-sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forgekit-core/sqlite"]
-native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3", "forgekit-core/native-v3"]
-
-# Agent operation modes
-agent-sqlite = ["sqlite"]
-agent-v3 = ["native-v3"]
-full = ["sqlite", "native-v3"]
-full-sqlite = ["agent-sqlite", "sqlite"]
-full-v3 = ["agent-v3", "native-v3"]
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge-core/sqlite"]
+full = ["sqlite"]
 
 [dependencies]
-forgekit-core = { version = "0.2.2", path = "../forge_core", default-features = false }
-forgekit-runtime = { version = "0.1", path = "../forge_runtime" }
-sqlitegraph = { version = "2.0.8", default-features = false, optional = true }
+forge-core = { version = "0.2.2", path = "../forge_core", default-features = false }
+forge-runtime = { version = "0.1", path = "../forge_runtime" }
+sqlitegraph = { version = "2.2.4", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -36,7 +36,7 @@ impl Confidence {
         if value.is_nan() {
             return Err(ConfidenceError::NaN);
         }
-        if value < Self::MIN || value > Self::MAX {
+        if !(Self::MIN..=Self::MAX).contains(&value) {
             return Err(ConfidenceError::OutOfBounds {
                 value,
                 min: Self::MIN,

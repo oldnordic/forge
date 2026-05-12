@@ -154,10 +154,22 @@ impl WorkflowValidator {
     /// Checks for missing dependencies in task metadata.
     fn check_missing_dependencies(&self, workflow: &Workflow, report: &mut ValidationReport) {
         for task_id in workflow.task_ids() {
+            // Check graph edges (from add_dependency calls)
             if let Some(deps) = workflow.task_dependencies(&task_id) {
                 for dep_id in deps {
                     if !workflow.contains_task(&dep_id) {
                         report.add_missing_dependency(dep_id);
+                    }
+                }
+            }
+
+            // Also check task-declared dependencies (from task.dependencies())
+            if let Some(&idx) = workflow.task_map.get(&task_id) {
+                if let Some(node) = workflow.graph.node_weight(idx) {
+                    for dep_id in node.task().dependencies() {
+                        if !workflow.contains_task(&dep_id) {
+                            report.add_missing_dependency(dep_id);
+                        }
                     }
                 }
             }

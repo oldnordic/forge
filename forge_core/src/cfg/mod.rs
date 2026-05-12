@@ -135,42 +135,101 @@ impl CfgModule {
     /// # Arguments
     ///
     /// * `function` - The function symbol ID
-    pub fn paths(&self, _function: SymbolId) -> PathBuilder {
-        PathBuilder::default()
+    pub fn paths(&self, function: SymbolId) -> PathBuilder {
+        PathBuilder {
+            function: Some(function),
+            store: Some(self.store.clone()),
+            ..PathBuilder::default()
+        }
     }
 
     /// Computes dominators for a function.
     ///
     /// Uses iterative dataflow analysis to compute the dominator tree.
-    /// For C/Java functions, extracts real CFG using tree-sitter.
+    /// Delegates to mirage for CFG extraction when available.
     ///
     /// # Arguments
     ///
     /// * `function` - The function symbol ID
-    pub async fn dominators(&self, _function: SymbolId) -> Result<DominatorTree> {
-        // Try to get real CFG if available
-        // For now, return a computed dominator tree from a sample CFG
+    pub async fn dominators(&self, function: SymbolId) -> Result<DominatorTree> {
+        if let Some(cfg) = self.load_cfg_for_function(function.0).await? {
+            let dom_tree = cfg.compute_dominators();
+            return Ok(dom_tree);
+        }
+
+        // Fallback: sample CFG
         let cfg = TestCfg::chain(0, 5);
-        let dom_tree = cfg.compute_dominators();
-        
-        Ok(dom_tree)
+        Ok(cfg.compute_dominators())
     }
 
     /// Detects natural loops in a function.
     ///
     /// Uses back-edge detection to find natural loops.
-    /// For C/Java functions, extracts real CFG using tree-sitter.
+    /// Delegates to mirage for CFG extraction when available.
     ///
     /// # Arguments
     ///
     /// * `function` - The function symbol ID
-    pub async fn loops(&self, _function: SymbolId) -> Result<Vec<Loop>> {
-        // Try to get real CFG if available
-        // For now, use a sample loop CFG
+    pub async fn loops(&self, function: SymbolId) -> Result<Vec<Loop>> {
+        if let Some(cfg) = self.load_cfg_for_function(function.0).await? {
+            return Ok(cfg.detect_loops());
+        }
+
+        // Fallback: sample loop CFG
         let cfg = TestCfg::simple_loop();
         let loops = cfg.detect_loops();
         
         Ok(loops)
+    }
+
+    /// Load CFG blocks from mirage and build a TestCfg.
+    ///
+    /// Returns None if mirage is unavailable, the DB doesn't exist,
+    /// or no CFG data is found for the function.
+    async fn load_cfg_for_function(&self, function_id: i64) -> Result<Option<TestCfg>> {
+        #[cfg(feature = "mirage")]
+        {
+            let db_path = self.store.db_path.join("graph.db");
+            if !db_path.exists() {
+                return Ok(None);
+            }
+
+            let backend = mirage::Backend::detect_and_open(&db_path)
+                .map_err(|e| crate::error::ForgeError::DatabaseError(
+                    format!("Failed to open mirage backend: {}", e)
+                ))?;
+
+            let blocks = backend.get_cfg_blocks(function_id)
+                .map_err(|e| crate::error::ForgeError::DatabaseError(
+                    format!("Failed to get CFG blocks: {}", e)
+                ))?;
+
+            if blocks.is_empty() {
+                return Ok(None);
+            }
+
+            // Build a TestCfg from mirage blocks
+            let entry = BlockId(blocks[0].id);
+            let mut cfg = TestCfg::new(entry);
+
+            // Add edges: chain blocks linearly as basic approximation
+            for i in 0..blocks.len().saturating_sub(1) {
+                cfg.add_edge(BlockId(blocks[i].id), BlockId(blocks[i + 1].id));
+            }
+
+            // Mark last block as exit
+            if let Some(last) = blocks.last() {
+                cfg.add_exit(BlockId(last.id));
+            }
+
+            Ok(Some(cfg))
+        }
+
+        #[cfg(not(feature = "mirage"))]
+        {
+            let _ = function_id;
+            Ok(None)
+        }
     }
 }
 
@@ -181,6 +240,8 @@ impl CfgModule {
 /// See the crate-level documentation for usage examples.
 #[derive(Clone, Default)]
 pub struct PathBuilder {
+    function: Option<SymbolId>,
+    store: Option<Arc<UnifiedGraphStore>>,
     normal_only: bool,
     error_only: bool,
     max_length: Option<usize>,
@@ -231,10 +292,52 @@ impl PathBuilder {
     ///
     /// A vector of execution paths
     pub async fn execute(self) -> Result<Vec<Path>> {
-        // For v0.1, return a single placeholder path
-        // Full implementation requires CFG data from Mirage
-        let path = Path::new(vec![BlockId(0)]);
-        Ok(vec![path])
+        // Try mirage for real CFG data
+        if let (Some(symbol), Some(store)) = (&self.function, &self.store) {
+            #[cfg(feature = "mirage")]
+            {
+                let db_path = store.db_path.join("graph.db");
+                if db_path.exists() {
+                    if let Ok(backend) = mirage::Backend::detect_and_open(&db_path) {
+                        if let Ok(blocks) = backend.get_cfg_blocks(symbol.0) {
+                            if !blocks.is_empty() {
+                                let entry = BlockId(blocks[0].id);
+                                let mut cfg = TestCfg::new(entry);
+                                for i in 0..blocks.len().saturating_sub(1) {
+                                    cfg.add_edge(BlockId(blocks[i].id), BlockId(blocks[i + 1].id));
+                                }
+                                if let Some(last) = blocks.last() {
+                                    cfg.add_exit(BlockId(last.id));
+                                }
+
+                                let mut paths = cfg.enumerate_paths();
+                                if let Some(max) = self.max_length {
+                                    paths.retain(|p| p.blocks.len() <= max);
+                                }
+                                if let Some(limit) = self.limit {
+                                    paths.truncate(limit);
+                                }
+                                return Ok(paths);
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = (symbol, store);
+        }
+
+        // Fallback: return a synthetic single-block path
+        if let Some(symbol) = &self.function {
+            let entry = BlockId(symbol.0);
+            Ok(vec![Path {
+                id: PathId([0; 16]),
+                kind: PathKind::Normal,
+                blocks: vec![entry],
+                length: 1,
+            }])
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
 
@@ -722,16 +825,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_paths_execute_returns_placeholder() {
+    async fn test_paths_execute_no_db_returns_synthetic() {
         let store = Arc::new(UnifiedGraphStore::open(
             tempfile::tempdir().unwrap().path(), BackendKind::SQLite
         ).await.unwrap());
         let module = CfgModule::new(store);
 
         let paths = module.paths(SymbolId(1)).execute().await.unwrap();
-        // Currently returns a placeholder path (1 path with 1 block)
-        assert_eq!(paths.len(), 1);
+        // Without a real mirage DB, returns synthetic single-block path
+        assert!(!paths.is_empty());
         assert_eq!(paths[0].blocks.len(), 1);
+        assert_eq!(paths[0].blocks[0], BlockId(1));
     }
 
     #[test]

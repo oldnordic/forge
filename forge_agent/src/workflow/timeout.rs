@@ -557,10 +557,17 @@ mod tests {
         // Execute with timeout
         let result = executor.execute_with_timeout().await;
 
-        // In current implementation, tasks complete immediately
-        // This test verifies the structure is in place
-        // TODO: Update when actual task execution is implemented
-        assert!(result.is_ok());
+        // 5 tasks * 100ms each = 500ms total, timeout is 200ms
+        // Workflow should timeout before completing all tasks
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::workflow::WorkflowError::Timeout(
+                TimeoutError::WorkflowTimeout { .. }
+            )),
+            "Expected WorkflowTimeout, got {:?}",
+            err
+        );
     }
 
     #[tokio::test]

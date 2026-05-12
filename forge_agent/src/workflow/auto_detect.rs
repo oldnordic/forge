@@ -219,7 +219,7 @@ impl DependencyAnalyzer {
     ///
     /// This is a Phase 8 limitation - a full implementation would access
     /// the actual GraphQueryTask metadata.
-    fn extract_target_from_name(&self, name: &str) -> Option<String> {
+    fn extract_target_from_name(&self, _name: &str) -> Option<String> {
         // For GraphQueryTasks created via the builder API, the name format is:
         // "Graph Query: FindSymbol" or "Graph Query: References", etc.
         // The target is stored in the task itself, not the name
@@ -239,7 +239,7 @@ impl DependencyAnalyzer {
         // Base confidence: 0.9 for 1 hop, decreasing by 0.1 per hop
         let base = 0.9;
         let decay = 0.1 * (hops as f64 - 1.0);
-        (base - decay).max(0.5).min(1.0)
+        (base - decay).clamp(0.5, 1.0)
     }
 
     /// Gets existing dependencies from the workflow.
@@ -282,7 +282,7 @@ impl DependencyAnalyzer {
         let mut completed = Workflow::new();
 
         // Copy all tasks from the partial workflow
-        for task_id in partial_workflow.task_ids() {
+        for _task_id in partial_workflow.task_ids() {
             // Note: We can't access the actual task objects, so we can't copy them
             // This is a Phase 8 limitation - the API doesn't support workflow cloning
             // For now, we return an empty workflow and document the limitation
@@ -382,7 +382,7 @@ mod tests {
         let calculate_confidence = |hops: u32| -> f64 {
             let base = 0.9;
             let decay = 0.1 * (hops as f64 - 1.0);
-            (base - decay).max(0.5).min(1.0)
+            (base - decay).clamp(0.5, 1.0)
         };
 
         assert!((calculate_confidence(1) - 0.9).abs() < 0.01);

@@ -232,7 +232,7 @@ impl WorkflowTask for ParallelTasks {
                 TaskResult::Success => continue,
                 TaskResult::Failed(msg) => return Ok(TaskResult::Failed(msg)),
                 TaskResult::Skipped => continue,
-                TaskResult::WithCompensation { result, compensation } => {
+                TaskResult::WithCompensation { result, compensation: _ } => {
                     // Note: ParallelTasks doesn't have access to compensation registry
                     // Compensations are lost - this is a known limitation
                     // For proper compensation handling, use DAG-level parallel execution

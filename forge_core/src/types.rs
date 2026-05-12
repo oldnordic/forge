@@ -75,6 +75,11 @@ impl Location {
     pub fn len(&self) -> u32 {
         self.byte_end - self.byte_start
     }
+
+    /// Returns `true` if the location is empty (zero length).
+    pub fn is_empty(&self) -> bool {
+        self.byte_end == self.byte_start
+    }
 }
 
 /// A byte span within a file.

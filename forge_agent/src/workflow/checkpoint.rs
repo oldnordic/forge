@@ -10,7 +10,11 @@ use crate::workflow::task::TaskId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+
+type CheckpointStore = Arc<RwLock<HashMap<String, (Vec<u8>, CheckpointSummary)>>>;
+type WorkflowLatestMap = Arc<RwLock<HashMap<String, CheckpointSummary>>>;
 use uuid::Uuid;
 
 /// Validation status for checkpoint confidence scoring.
@@ -503,21 +507,10 @@ pub struct WorkflowCheckpointService {
     /// Namespace prefix for workflow checkpoints
     namespace: String,
     /// In-memory checkpoint storage (key: checkpoint ID, value: checkpoint data)
-    #[allow(dead_code)]
-    storage: std::sync::Arc<
-        std::sync::RwLock<
-            std::collections::HashMap<
-                String,
-                (Vec<u8>, CheckpointSummary),
-            >,
-        >,
-    >,
+    #[allow(dead_code, reason = "Planned for persistent storage integration in Phase 10")]
+    storage: CheckpointStore,
     /// Map from workflow ID to latest checkpoint
-    latest_by_workflow: std::sync::Arc<
-        std::sync::RwLock<
-            std::collections::HashMap<String, CheckpointSummary>
-        >,
-    >,
+    latest_by_workflow: WorkflowLatestMap,
 }
 
 impl WorkflowCheckpointService {
@@ -529,13 +522,13 @@ impl WorkflowCheckpointService {
     pub fn new(namespace: impl Into<String>) -> Self {
         Self {
             namespace: namespace.into(),
-            storage: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            latest_by_workflow: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            storage: Arc::new(RwLock::new(HashMap::new())),
+            latest_by_workflow: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Creates a service with default "workflow" namespace.
-    pub fn default() -> Self {
+    pub fn new_default() -> Self {
         Self::new("workflow")
     }
 
@@ -656,7 +649,7 @@ impl WorkflowCheckpointService {
     ///
     /// - `Ok(summaries)` - Vector of checkpoint summaries in sequence order
     /// - `Err(WorkflowError)` if listing fails
-    pub fn list_by_workflow(&self, workflow_id: &str) -> Result<Vec<CheckpointSummary>, crate::workflow::WorkflowError> {
+    pub fn list_by_workflow(&self, _workflow_id: &str) -> Result<Vec<CheckpointSummary>, crate::workflow::WorkflowError> {
         let storage = self.storage.read()
             .map_err(|e| crate::workflow::WorkflowError::CheckpointCorrupted(
                 format!("Storage lock failed: {}", e)
@@ -664,11 +657,8 @@ impl WorkflowCheckpointService {
 
         let mut summaries: Vec<CheckpointSummary> = storage
             .values()
-            .filter_map(|(_, summary)| {
-                // Check if this checkpoint belongs to the workflow
-                // We need to load the checkpoint to check workflow_id
-                // For efficiency, we'll just return all summaries for now
-                Some(summary.clone())
+            .map(|(_, summary)| {
+                summary.clone()
             })
             .collect();
 
@@ -882,13 +872,13 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_default() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         assert_eq!(service.namespace, "workflow");
     }
 
     #[test]
     fn test_checkpoint_service_save_and_load() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
 
@@ -914,7 +904,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_load_nonexistent() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         let fake_id = CheckpointId::new();
 
         let load_result = service.load(&fake_id);
@@ -924,7 +914,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_get_latest() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
 
@@ -951,7 +941,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_get_latest_empty() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
 
         let latest_result = service.get_latest("nonexistent-workflow");
         assert!(latest_result.is_ok());
@@ -960,7 +950,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_list_by_workflow() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
 
@@ -983,7 +973,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_delete() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
 
@@ -1008,7 +998,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_service_save_rejects_corrupted() {
-        let service = WorkflowCheckpointService::default();
+        let service = WorkflowCheckpointService::new_default();
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("task-1", "Task 1")));
 

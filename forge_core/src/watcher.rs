@@ -30,7 +30,7 @@ pub enum WatchEvent {
 #[derive(Clone, Debug)]
 pub struct Watcher {
     /// The graph store (for future use in event correlation).
-    store: Arc<UnifiedGraphStore>,
+    _store: Arc<UnifiedGraphStore>,
     /// Channel sender for watch events.
     sender: mpsc::UnboundedSender<WatchEvent>,
     /// The underlying notify watcher (kept alive to continue watching).
@@ -50,7 +50,7 @@ impl Watcher {
         sender: mpsc::UnboundedSender<WatchEvent>,
     ) -> Self {
         Self {
-            store,
+            _store: store,
             sender,
             inner: Arc::new(std::sync::Mutex::new(None)),
         }

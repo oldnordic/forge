@@ -32,7 +32,7 @@
 //! ```
 
 use crate::workflow::rollback::ToolCompensation;
-use crate::workflow::task::{TaskContext, TaskError, TaskResult};
+use crate::workflow::task::TaskResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -240,7 +240,7 @@ impl ToolResult {
     /// * `stdout` - Standard output
     /// * `stderr` - Standard error
     pub fn new(exit_code: Option<i32>, stdout: String, stderr: String) -> Self {
-        let success = exit_code.map_or(false, |code| code == 0);
+        let success = exit_code == Some(0);
         Self {
             exit_code,
             stdout,
@@ -510,8 +510,8 @@ impl fmt::Debug for SkipFallback {
 /// use forge_agent::workflow::tools::{ChainFallback, RetryFallback, SkipFallback};
 ///
 /// let fallback = ChainFallback::new()
-///     .add(RetryFallback::new(3, 100))
-///     .add(SkipFallback::skip());
+///     .with_handler(RetryFallback::new(3, 100))
+///     .with_handler(SkipFallback::skip());
 /// ```
 #[derive(Clone)]
 pub struct ChainFallback {
@@ -551,10 +551,10 @@ impl ChainFallback {
     /// use forge_agent::workflow::tools::{ChainFallback, RetryFallback, SkipFallback};
     ///
     /// let fallback = ChainFallback::new()
-    ///     .add(RetryFallback::new(3, 100))
-    ///     .add(SkipFallback::skip());
+    ///     .with_handler(RetryFallback::new(3, 100))
+    ///     .with_handler(SkipFallback::skip());
     /// ```
-    pub fn add(mut self, handler: impl FallbackHandler + 'static) -> Self {
+    pub fn with_handler(mut self, handler: impl FallbackHandler + 'static) -> Self {
         self.handlers.push(Arc::new(handler));
         self
     }
@@ -1237,8 +1237,8 @@ mod tests {
 
         // Create chain with retry (fails) then skip (succeeds)
         let fallback = ChainFallback::new()
-            .add(SkipFallback::skip())
-            .add(SkipFallback::success());
+            .with_handler(SkipFallback::skip())
+            .with_handler(SkipFallback::success());
 
         let result = fallback.handle(&error, &invocation).await;
 
@@ -1262,8 +1262,8 @@ mod tests {
         }
 
         let fallback = ChainFallback::new()
-            .add(AlwaysFail)
-            .add(AlwaysFail);
+            .with_handler(AlwaysFail)
+            .with_handler(AlwaysFail);
 
         let result = fallback.handle(&error, &invocation).await;
 

@@ -153,11 +153,11 @@ impl VerificationRunner {
                         // Execute actions
                         if result.is_success() {
                             if let Some(PassAction::SetStatus(status)) = &c.on_pass {
-                                let _ = board.set_status(c.hypothesis_id, status.clone()).await;
+                                let _ = board.set_status(c.hypothesis_id, *status).await;
                             }
                         } else {
                             if let Some(FailAction::SetStatus(status)) = &c.on_fail {
-                                let _ = board.set_status(c.hypothesis_id, status.clone()).await;
+                                let _ = board.set_status(c.hypothesis_id, *status).await;
                             }
                         }
 

@@ -1,5 +1,5 @@
 [package]
-name = "forgekit-core"
+name = "forge-core"
 version = "0.2.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
@@ -27,13 +27,13 @@ async-trait = "0.1"
 notify = "8"
 
 # Graph database
-sqlitegraph = { version = "2.0.8", features = ["sqlite-backend", "native-v3"], default-features = false, optional = true }
+sqlitegraph = { version = "2.2.4", features = ["sqlite-backend"], default-features = false, optional = true }
 
 # Tool integrations - these are the crates published from individual tool repos
-magellan = { version = "2.4.6", optional = true }
-llmgrep = { version = "3.0.9", optional = true }
-mirage-analyzer = { version = "1.0.3", optional = true }
-splice = { version = "2.5.3", optional = true }
+magellan = { version = "3.3.8", optional = true }
+llmgrep = { version = "3.4.2", optional = true }
+mirage-analyzer = { version = "1.4.2", optional = true }
+splice = { version = "2.6.9", optional = true }
 
 # For CLI fallback when crates aren't available
 which = { version = "6.0", optional = true }
@@ -52,37 +52,14 @@ tempfile = "3"
 default = ["sqlite", "tools"]
 
 # Storage backends
-# Note: Both backends require sqlitegraph dependency
 sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend"]
-native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3"]
 
-# Tool integrations with backend selection
-# Each tool can use either SQLite or V3 backend
-
-# Magellan (code indexing)
+# Tool integrations
 magellan = ["dep:magellan"]
-magellan-sqlite = ["magellan"]
-magellan-v3 = ["magellan"]
-
-# LLMGrep (semantic search)
 llmgrep = ["dep:llmgrep"]
-llmgrep-sqlite = ["llmgrep"]
-llmgrep-v3 = ["llmgrep", "native-v3"]
-
-# Mirage (CFG analysis)
 mirage = ["dep:mirage-analyzer"]
-mirage-sqlite = ["mirage"]
-mirage-v3 = ["mirage", "native-v3"]
-
-# Splice (code editing)
 splice = ["dep:splice"]
-splice-sqlite = ["splice"]
-splice-v3 = ["splice", "native-v3"]
 
 # Convenience feature groups
 tools = ["magellan", "llmgrep", "mirage", "splice", "which"]
-tools-sqlite = ["magellan-sqlite", "llmgrep-sqlite", "mirage-sqlite", "splice-sqlite", "which"]
-tools-v3 = ["magellan-v3", "llmgrep-v3", "mirage-v3", "splice-v3", "native-v3", "which"]
-full = ["tools", "sqlite", "native-v3"]
-full-sqlite = ["tools-sqlite", "sqlite"]
-full-v3 = ["tools-v3", "native-v3"]
+full = ["tools", "sqlite"]

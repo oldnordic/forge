@@ -47,40 +47,63 @@ impl Mutator {
             .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))?;
 
         match &step.operation {
-            crate::planner::PlanOperation::Rename { old, new: _ } => {
-                // Snapshot the old file for rollback
+            crate::planner::PlanOperation::Rename { old, new } => {
                 let old_path = Path::new(old);
                 let _ = transaction.snapshot_file(old_path).await;
 
-                // Apply rename (placeholder for v0.3 - actual rename logic would go here)
-                // For now, just record that the operation was processed
+                if old_path.exists() {
+                    let new_path = Path::new(new);
+                    fs::rename(old_path, new_path).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to rename {} to {}: {}", old, new, e))
+                    })?;
+                }
             }
             crate::planner::PlanOperation::Delete { name } => {
-                // Snapshot the file for rollback (restore on rollback)
                 let name_path = Path::new(name);
                 transaction.snapshot_file(name_path).await?;
 
-                // Apply delete (placeholder for v0.3)
+                if name_path.exists() {
+                    fs::remove_file(name_path).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to delete {}: {}", name, e))
+                    })?;
+                }
             }
             crate::planner::PlanOperation::Create { path, content } => {
-                // Snapshot for rollback (will delete on rollback if file didn't exist)
                 let p = Path::new(path);
-                let _ = transaction.snapshot_file(p).await; // Ignore error if file doesn't exist
+                let _ = transaction.snapshot_file(p).await;
 
-                // Write new content
+                if let Some(parent) = p.parent() {
+                    fs::create_dir_all(parent).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to create dir: {}", e))
+                    })?;
+                }
                 fs::write(path, content).await.map_err(|e| {
                     AgentError::MutationFailed(format!("Failed to write {}: {}", path, e))
                 })?;
             }
             crate::planner::PlanOperation::Inspect { .. } => {
-                // No snapshot needed for read-only operations
+                // No mutation needed for read-only operations
             }
-            crate::planner::PlanOperation::Modify { file, .. } => {
-                // Snapshot the file for rollback
+            crate::planner::PlanOperation::Modify { file, start, end, replacement } => {
                 let file_path = Path::new(file);
                 transaction.snapshot_file(file_path).await?;
 
-                // Apply modification (placeholder for v0.3 - actual edit logic would go here)
+                let content = fs::read_to_string(file_path).await.map_err(|e| {
+                    AgentError::MutationFailed(format!("Failed to read {}: {}", file, e))
+                })?;
+                let content_bytes = content.as_bytes();
+                if *start <= content_bytes.len() && *end <= content_bytes.len() && *start <= *end {
+                    let mut modified = content_bytes[..*start].to_vec();
+                    modified.extend_from_slice(replacement.as_bytes());
+                    modified.extend_from_slice(&content_bytes[*end..]);
+                    fs::write(file_path, modified).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to write {}: {}", file, e))
+                    })?;
+                } else {
+                    return Err(AgentError::MutationFailed(
+                        format!("Invalid byte span {}..{} for {} ({} bytes)", start, end, file, content_bytes.len()),
+                    ));
+                }
             }
         }
 
@@ -227,6 +250,7 @@ mod tests {
                 file: file_path.to_string_lossy().to_string(),
                 start: 0,
                 end: 8,
+                replacement: "replaced".to_string(),
             },
         };
 

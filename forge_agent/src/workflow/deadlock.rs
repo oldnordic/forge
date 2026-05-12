@@ -8,6 +8,7 @@
 use crate::workflow::dag::{Workflow, WorkflowError};
 use crate::workflow::task::TaskId;
 use petgraph::algo::tarjan_scc;
+#[allow(unused_imports, reason = "HashSet used only in test code")]
 use std::collections::HashSet;
 use std::time::Duration;
 use thiserror::Error;
@@ -32,7 +33,7 @@ impl From<DeadlockError> for WorkflowError {
     fn from(err: DeadlockError) -> Self {
         match err {
             DeadlockError::DependencyCycle(cycle) => WorkflowError::CycleDetected(cycle),
-            DeadlockError::ResourceDeadlock(msg) => {
+            DeadlockError::ResourceDeadlock(_msg) => {
                 WorkflowError::Timeout(crate::workflow::timeout::TimeoutError::WorkflowTimeout {
                     timeout: Duration::from_secs(300), // Default 5 minute timeout
                 })
@@ -240,23 +241,6 @@ impl DeadlockDetector {
         }
 
         warnings
-    }
-
-    /// Finds all nodes involved in a cycle.
-    ///
-    /// Used for detailed error reporting when a cycle is detected.
-    fn find_cycle_nodes(&self, workflow: &Workflow) -> Vec<TaskId> {
-        let sccs = tarjan_scc(&workflow.graph);
-
-        sccs
-            .into_iter()
-            .filter(|scc| scc.len() > 1)
-            .flat_map(|scc| {
-                scc.into_iter()
-                    .filter_map(|idx| workflow.graph.node_weight(idx))
-                    .map(|node| node.id().clone())
-            })
-            .collect()
     }
 
     /// Validates that a workflow is deadlock-free.

@@ -4,7 +4,7 @@
 //! and simple function wrapping.
 
 use crate::workflow::task::{CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
-use crate::workflow::tools::{FallbackHandler, FallbackResult, ToolError, ToolInvocation, ToolRegistry};
+use crate::workflow::tools::{FallbackHandler, FallbackResult, ToolError, ToolInvocation};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,7 +13,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::future::Future;
 use std::time::Duration;
-use std::process::Command;
+
+type AsyncTaskFn = Box<dyn Fn(&TaskContext) -> Pin<Box<dyn Future<Output = Result<TaskResult, TaskError>> + Send>> + Send + Sync>;
 
 /// Task that wraps an async function for easy workflow definition.
 ///
@@ -37,7 +38,7 @@ use std::process::Command;
 pub struct FunctionTask {
     id: TaskId,
     name: String,
-    f: Box<dyn Fn(&TaskContext) -> Pin<Box<dyn Future<Output = Result<TaskResult, TaskError>> + Send>> + Send + Sync>,
+    f: AsyncTaskFn,
 }
 
 impl FunctionTask {
@@ -88,7 +89,7 @@ pub struct GraphQueryTask {
     id: TaskId,
     name: String,
     query_type: GraphQueryType,
-    target: String,
+    _target: String,
 }
 
 impl GraphQueryTask {
@@ -113,7 +114,7 @@ impl GraphQueryTask {
             id: TaskId::new(format!("graph_query_{:?}", query_type)),
             name: format!("Graph Query: {:?}", query_type),
             query_type,
-            target: target_str,
+            _target: target_str,
         }
     }
 
@@ -123,7 +124,7 @@ impl GraphQueryTask {
             id,
             name: format!("Graph Query: {:?}", query_type),
             query_type,
-            target: target.into(),
+            _target: target.into(),
         }
     }
 }
@@ -393,7 +394,7 @@ impl WorkflowTask for ShellCommandTask {
         }
 
         // Spawn the process
-        let child = cmd.spawn().map_err(|e| TaskError::Io(e))?;
+        let child = cmd.spawn().map_err(TaskError::Io)?;
 
         // Store the process ID for compensation
         if let Some(pid) = child.id() {
@@ -724,7 +725,7 @@ impl ToolTask {
         use crate::audit::AuditEvent;
         use chrono::Utc;
 
-        let event = AuditEvent::WorkflowToolFallback {
+        let _event = AuditEvent::WorkflowToolFallback {
             timestamp: Utc::now(),
             workflow_id: context.workflow_id.clone(),
             task_id: context.task_id.as_str().to_string(),
@@ -891,7 +892,7 @@ mod tests {
         let task = GraphQueryTask::find_symbol("process_data");
 
         assert_eq!(task.query_type, GraphQueryType::FindSymbol);
-        assert_eq!(task.target, "process_data");
+        assert_eq!(task._target, "process_data");
 
         let context = TaskContext::new("workflow_1", task.id());
         let result = task.execute(&context).await.unwrap();
@@ -903,7 +904,7 @@ mod tests {
         let task = GraphQueryTask::references("my_function");
 
         assert_eq!(task.query_type, GraphQueryType::References);
-        assert_eq!(task.target, "my_function");
+        assert_eq!(task._target, "my_function");
     }
 
     #[tokio::test]
@@ -911,7 +912,7 @@ mod tests {
         let task = GraphQueryTask::impact_analysis("struct_name");
 
         assert_eq!(task.query_type, GraphQueryType::ImpactAnalysis);
-        assert_eq!(task.target, "struct_name");
+        assert_eq!(task._target, "struct_name");
     }
 
     #[tokio::test]
@@ -923,7 +924,7 @@ mod tests {
         );
 
         assert_eq!(task.id(), TaskId::new("custom_id"));
-        assert_eq!(task.target, "my_symbol");
+        assert_eq!(task._target, "my_symbol");
     }
 
     #[tokio::test]

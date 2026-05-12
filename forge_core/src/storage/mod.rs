@@ -43,18 +43,15 @@ pub use sqlitegraph::config::{BackendKind as SqliteGraphBackendKind, GraphConfig
 ///
 /// Users choose which backend to use based on their requirements.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default)]
 pub enum BackendKind {
     /// SQLite backend - stable, mature, works with current tools
+    #[default]
     SQLite,
     /// Native V3 backend - high performance, pure Rust, updated tools required
     NativeV3,
 }
 
-impl Default for BackendKind {
-    fn default() -> Self {
-        Self::SQLite
-    }
-}
 
 impl std::fmt::Display for BackendKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -288,7 +285,7 @@ impl UnifiedGraphStore {
 
             refs.push(StoredReference {
                 to_symbol,
-                kind: reference.kind.clone(),
+                kind: reference.kind,
                 file_path: reference.location.file_path.clone(),
                 line_number: reference.location.line_number,
             });
@@ -403,7 +400,7 @@ impl UnifiedGraphStore {
                     result.push(Reference {
                         from: SymbolId(0),
                         to: symbol_id,
-                        kind: stored.kind.clone(),
+                        kind: stored.kind,
                         location: Location {
                             file_path: stored.file_path.clone(),
                             byte_start: 0,
@@ -458,12 +455,15 @@ impl UnifiedGraphStore {
         self.collect_symbols_recursive(&self.codebase_path, &mut symbols).await?;
         
         // Second pass: find all references
-        let mut ref_count = 0;
-        let mut refs = self.references.lock().unwrap();
-        refs.clear(); // Clear existing references
-        
         let reference_pattern = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(").unwrap();
-        
+
+        {
+            let mut refs = self.references.lock().unwrap();
+            refs.clear();
+        }
+
+        let mut found_refs: Vec<StoredReference> = Vec::new();
+
         for (symbol_name, (_file_path, _)) in &symbols {
             // Scan all files for references to this symbol
             for (target_file, _) in symbols.values() {
@@ -473,18 +473,17 @@ impl UnifiedGraphStore {
                         if line.contains("fn ") || line.contains("struct ") {
                             continue;
                         }
-                        
+
                         // Check for calls/references to this symbol
                         for cap in reference_pattern.captures_iter(line) {
                             if let Some(matched) = cap.get(1) {
                                 if matched.as_str() == symbol_name {
-                                    refs.push(StoredReference {
+                                    found_refs.push(StoredReference {
                                         to_symbol: format!("sym_{}", symbol_name),
                                         kind: ReferenceKind::Call,
                                         file_path: target_file.clone(),
                                         line_number: line_num + 1,
                                     });
-                                    ref_count += 1;
                                 }
                             }
                         }
@@ -492,7 +491,10 @@ impl UnifiedGraphStore {
                 }
             }
         }
-        
+
+        let ref_count = found_refs.len();
+        self.references.lock().unwrap().extend(found_refs);
+
         Ok(ref_count)
     }
     
@@ -559,7 +561,7 @@ impl UnifiedGraphStore {
                 result.push(Reference {
                     from: SymbolId(0),
                     to: SymbolId(0),
-                    kind: stored.kind.clone(),
+                    kind: stored.kind,
                     location: Location {
                         file_path: stored.file_path.clone(),
                         byte_start: 0,

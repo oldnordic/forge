@@ -191,7 +191,7 @@ impl CheckpointWebSocketServer {
             )))?;
 
         let addr = listener.local_addr()
-            .map_err(|e| ReasoningError::Io(e))?;
+            .map_err(ReasoningError::Io)?;
 
         let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
         self.shutdown_tx = Some(shutdown_tx.clone());
