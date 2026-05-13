@@ -6,25 +6,47 @@
 use crate::{AgentError, Result};
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
 /// Verifier for post-mutation validation.
 ///
 /// The Verifier runs compile checks, tests, and graph validation.
-#[derive(Clone, Default)]
+/// When an LLM is available, it interprets errors and suggests fixes.
+#[derive(Clone)]
 pub struct Verifier {
     /// Optional Forge SDK for graph consistency checks
     forge: Option<forge_core::Forge>,
+    /// Optional LLM provider for error interpretation
+    llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+}
+
+impl Default for Verifier {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Verifier {
     /// Creates a new verifier.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            forge: None,
+            llm: None,
+        }
     }
 
     /// Creates a new verifier with Forge SDK for graph checks.
     pub fn with_forge(forge: forge_core::Forge) -> Self {
-        Self { forge: Some(forge) }
+        Self {
+            forge: Some(forge),
+            llm: None,
+        }
+    }
+
+    /// Sets the LLM provider for error interpretation.
+    pub fn with_llm(mut self, provider: Arc<dyn crate::llm::LlmProvider>) -> Self {
+        self.llm = Some(provider);
+        self
     }
 
     /// Runs compile check via cargo.
@@ -155,10 +177,132 @@ impl Verifier {
 
         let passed = errors == 0;
 
+        // Interpret errors using LLM if available and errors exist
+        let suggestions = if !passed {
+            self.interpret_errors(&all_diagnostics).await
+        } else {
+            None
+        };
+
         Ok(VerificationReport {
             passed,
             diagnostics: all_diagnostics,
+            suggestions,
+            changed_files: Vec::new(),
         })
+    }
+
+    /// Runs verification scoped to changed files.
+    ///
+    /// Like `verify()` but records which files were changed and includes
+    /// diff context in LLM error interpretation.
+    pub async fn verify_changes(
+        &self,
+        working_dir: &std::path::Path,
+        changed_files: &[std::path::PathBuf],
+        diffs: &[String],
+    ) -> Result<VerificationReport> {
+        let mut all_diagnostics = Vec::new();
+
+        let compile_diags = self.compile_check(working_dir).await?;
+        all_diagnostics.extend(compile_diags);
+
+        let test_diags = self.test_check(working_dir).await?;
+        all_diagnostics.extend(test_diags);
+
+        let graph_diags = self.graph_check(working_dir).await?;
+        all_diagnostics.extend(graph_diags);
+
+        let errors = all_diagnostics
+            .iter()
+            .filter(|d| d.level == DiagnosticLevel::Error)
+            .count();
+
+        let passed = errors == 0;
+
+        let suggestions = if !passed {
+            if diffs.is_empty() {
+                self.interpret_errors(&all_diagnostics).await
+            } else {
+                self.interpret_errors_with_diffs(&all_diagnostics, diffs)
+                    .await
+            }
+        } else {
+            None
+        };
+
+        Ok(VerificationReport {
+            passed,
+            diagnostics: all_diagnostics,
+            suggestions,
+            changed_files: changed_files.to_vec(),
+        })
+    }
+
+    /// Interpret verification errors using LLM. Returns suggestions.
+    pub async fn interpret_errors(&self, diagnostics: &[Diagnostic]) -> Option<String> {
+        let llm = self.llm.as_ref()?;
+
+        let errors: Vec<&Diagnostic> = diagnostics
+            .iter()
+            .filter(|d| d.level == DiagnosticLevel::Error)
+            .collect();
+
+        if errors.is_empty() {
+            return None;
+        }
+
+        let error_text: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
+        let prompt = format!(
+            "The following compilation/test errors were detected:\n\n{}",
+            error_text.join("\n")
+        );
+
+        let system = "You are a Rust compiler error interpreter. Given compilation or test errors, provide concise fix suggestions. Focus on: root cause, specific fix, affected files. Keep response under 200 words.";
+
+        match llm.complete(&prompt, Some(system)).await {
+            Ok(suggestions) => Some(suggestions),
+            Err(e) => {
+                tracing::warn!("LLM error interpretation failed: {e}");
+                None
+            }
+        }
+    }
+
+    /// Interpret errors with diff context for richer LLM suggestions.
+    pub async fn interpret_errors_with_diffs(
+        &self,
+        diagnostics: &[Diagnostic],
+        diffs: &[String],
+    ) -> Option<String> {
+        let llm = self.llm.as_ref()?;
+
+        let errors: Vec<&Diagnostic> = diagnostics
+            .iter()
+            .filter(|d| d.level == DiagnosticLevel::Error)
+            .collect();
+
+        if errors.is_empty() {
+            return None;
+        }
+
+        let error_text: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
+        let diff_text = diffs.join("\n");
+        let prompt = format!(
+            "The following compilation/test errors were detected:\n\n{}\n\nRecent changes (diffs):\n{}",
+            error_text.join("\n"),
+            diff_text
+        );
+
+        let system = "You are a Rust compiler error interpreter. Given compilation/test errors AND the recent code changes that likely caused them, provide concise fix suggestions. Focus on: root cause in the diff, specific fix, affected files. Keep response under 200 words.";
+
+        match llm.complete(&prompt, Some(system)).await {
+            Ok(suggestions) => Some(suggestions),
+            Err(e) => {
+                tracing::warn!("LLM error interpretation with diffs failed: {e}");
+                None
+            }
+        }
     }
 }
 
@@ -169,6 +313,10 @@ pub struct VerificationReport {
     pub passed: bool,
     /// Any diagnostics or errors
     pub diagnostics: Vec<Diagnostic>,
+    /// LLM-generated fix suggestions (None if no LLM or no errors)
+    pub suggestions: Option<String>,
+    /// Files that were changed before verification (empty for full-project verify)
+    pub changed_files: Vec<std::path::PathBuf>,
 }
 
 /// Diagnostic message.
@@ -204,5 +352,100 @@ mod tests {
     fn test_diagnostic_level_equality() {
         assert_eq!(DiagnosticLevel::Error, DiagnosticLevel::Error);
         assert_ne!(DiagnosticLevel::Error, DiagnosticLevel::Warning);
+    }
+
+    #[tokio::test]
+    async fn test_verifier_interpret_errors_with_llm() {
+        let mock = Arc::new(crate::llm::MockProvider::new(
+            "Missing semicolon on line 42. Add `;` after the expression.",
+        ));
+
+        let verifier = Verifier::new().with_llm(mock);
+
+        let diagnostics = vec![Diagnostic {
+            level: DiagnosticLevel::Error,
+            message: "error: expected `;`, found `let`".to_string(),
+        }];
+
+        let result = verifier.interpret_errors(&diagnostics).await;
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("semicolon"));
+    }
+
+    #[tokio::test]
+    async fn test_verifier_interpret_errors_without_llm() {
+        let verifier = Verifier::new();
+
+        let diagnostics = vec![Diagnostic {
+            level: DiagnosticLevel::Error,
+            message: "error: something broke".to_string(),
+        }];
+
+        let result = verifier.interpret_errors(&diagnostics).await;
+        assert!(
+            result.is_none(),
+            "should return None when no LLM configured"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_verifier_interpret_errors_no_errors() {
+        let mock = Arc::new(crate::llm::MockProvider::new("should not be called"));
+        let verifier = Verifier::new().with_llm(mock);
+
+        let diagnostics = vec![Diagnostic {
+            level: DiagnosticLevel::Warning,
+            message: "warning: unused variable".to_string(),
+        }];
+
+        let result = verifier.interpret_errors(&diagnostics).await;
+        assert!(
+            result.is_none(),
+            "should return None when no errors to interpret"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_verifier_verify_changes_scoped_to_files() {
+        use std::path::PathBuf;
+
+        let verifier = Verifier::new();
+        let changed_files = vec![PathBuf::from("src/lib.rs")];
+        let diffs = vec!["--- src/lib.rs\n+++ src/lib.rs\n- old\n+ new".to_string()];
+
+        // verify_changes should accept changed files and diffs
+        // On a non-existent project dir it will fail to run cargo,
+        // but the method should exist and accept the params
+        let temp_dir = tempfile::tempdir().unwrap();
+        let result = verifier
+            .verify_changes(temp_dir.path(), &changed_files, &diffs)
+            .await;
+
+        assert!(result.is_ok(), "verify_changes should succeed");
+        let report = result.unwrap();
+        // Cargo check on empty dir will have errors, but method ran
+        assert!(!report.changed_files.is_empty());
+        assert_eq!(report.changed_files[0], PathBuf::from("src/lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_verifier_interpret_errors_with_diff_context() {
+        let mock = Arc::new(crate::llm::MockProvider::new(
+            "The diff shows you removed the import. Add it back.",
+        ));
+
+        let verifier = Verifier::new().with_llm(mock);
+
+        let diagnostics = vec![Diagnostic {
+            level: DiagnosticLevel::Error,
+            message: "error: cannot find type `Foo` in scope".to_string(),
+        }];
+        let diffs = vec!["--- src/lib.rs\n- use module::Foo;".to_string()];
+
+        let result = verifier
+            .interpret_errors_with_diffs(&diagnostics, &diffs)
+            .await;
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("import"));
     }
 }

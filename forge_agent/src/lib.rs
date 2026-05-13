@@ -42,6 +42,16 @@ pub mod audit;
 // Workflow module (Phase 8 - Plan 1)
 pub mod workflow;
 
+// LLM provider module
+pub mod llm;
+
+// Envoy coordination module
+#[cfg(feature = "envoy")]
+pub mod envoy;
+
+// Context composition module
+pub mod context;
+
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
@@ -131,6 +141,8 @@ pub struct VerificationResult {
     pub passed: bool,
     /// Any diagnostics or errors
     pub diagnostics: Vec<String>,
+    /// LLM-generated fix suggestions
+    pub suggestions: Option<String>,
 }
 
 /// Result of the commit phase.
@@ -164,10 +176,14 @@ pub struct CommitResult {
 ///
 pub struct Agent {
     /// Path to the codebase
-    #[allow(dead_code)]
     codebase_path: PathBuf,
     /// Forge SDK instance for graph queries
     forge: Option<forge_core::Forge>,
+    /// Optional LLM provider for semantic operations
+    pub(crate) llm: Option<std::sync::Arc<dyn llm::LlmProvider>>,
+    /// Optional envoy client for multi-agent coordination
+    #[cfg(feature = "envoy")]
+    pub(crate) envoy: Option<std::sync::Arc<envoy::EnvoyClient>>,
 }
 
 impl Agent {
@@ -182,10 +198,46 @@ impl Agent {
         // Try to initialize Forge SDK
         let forge = forge_core::Forge::open(&path).await.ok();
 
+        // Load envoy config from .forge.toml
+        #[cfg(feature = "envoy")]
+        let envoy = {
+            let config_path = path.join(".forge.toml");
+            envoy::EnvoyConfig::from_file(&config_path)
+                .ok()
+                .flatten()
+                .map(|c| std::sync::Arc::new(envoy::EnvoyClient::new(c)))
+        };
+
         Ok(Self {
             codebase_path: path,
             forge,
+            llm: None,
+            #[cfg(feature = "envoy")]
+            envoy,
         })
+    }
+
+    /// Sets the LLM provider for semantic operations.
+    pub fn with_llm(mut self, provider: std::sync::Arc<dyn llm::LlmProvider>) -> Self {
+        self.llm = Some(provider);
+        self
+    }
+
+    /// Sets the envoy client for multi-agent coordination.
+    #[cfg(feature = "envoy")]
+    pub fn with_envoy(mut self, client: envoy::EnvoyClient) -> Self {
+        self.envoy = Some(std::sync::Arc::new(client));
+        self
+    }
+
+    /// Connects to envoy and registers this agent. Returns the agent ID.
+    #[cfg(feature = "envoy")]
+    pub async fn connect_envoy(&self) -> std::result::Result<String, envoy::EnvoyError> {
+        let client = self
+            .envoy
+            .as_ref()
+            .ok_or(envoy::EnvoyError::NotConfigured)?;
+        client.register().await
     }
 
     /// Observes the codebase to gather context for a query.
@@ -199,10 +251,16 @@ impl Agent {
             .as_ref()
             .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
 
-        let observer = observe::Observer::new(forge.clone());
+        let mut observer = observe::Observer::new(forge.clone());
+        if let Some(ref llm) = self.llm {
+            observer = observer.with_llm(llm.clone());
+        }
+        #[cfg(feature = "envoy")]
+        if let Some(ref envoy) = self.envoy {
+            observer = observer.with_knowledge_source(envoy.clone());
+        }
         let obs = observer.gather(query).await?;
 
-        // Return the observation directly - it's already the correct type
         Ok(obs)
     }
 
@@ -251,6 +309,7 @@ impl Agent {
         let obs = observe::Observation {
             query: constrained.observation.query.clone(),
             symbols: vec![],
+            summary: None,
         };
 
         // Generate steps
@@ -306,10 +365,16 @@ impl Agent {
         })
     }
 
-    /// Verifies the mutation result.
-    pub async fn verify(&self, _result: MutationResult) -> Result<VerificationResult> {
+    /// Verifies the mutation result, scoped to changed files.
+    pub async fn verify(&self, result: MutationResult) -> Result<VerificationResult> {
         let verifier = verify::Verifier::new();
-        let report = verifier.verify(&self.codebase_path).await?;
+        let report = if result.modified_files.is_empty() {
+            verifier.verify(&self.codebase_path).await?
+        } else {
+            verifier
+                .verify_changes(&self.codebase_path, &result.modified_files, &result.diffs)
+                .await?
+        };
 
         Ok(VerificationResult {
             passed: report.passed,
@@ -318,6 +383,7 @@ impl Agent {
                 .iter()
                 .map(|d| d.message.clone())
                 .collect(),
+            suggestions: report.suggestions,
         })
     }
 
@@ -379,6 +445,11 @@ impl Agent {
         // Create fresh loop state (no state leakage between runs)
         let mut agent_loop = r#loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
 
+        // Pass LLM provider to agent loop if configured
+        if let Some(ref llm) = self.llm {
+            agent_loop = agent_loop.with_llm(llm.clone());
+        }
+
         agent_loop.run(query).await
     }
 }
@@ -439,5 +510,46 @@ mod tests {
 
         // Agent should be functional standalone
         assert_eq!(agent.codebase_path, temp.path());
+    }
+
+    #[tokio::test]
+    async fn test_agent_with_llm_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let mock = std::sync::Arc::new(llm::MockProvider::new("mocked LLM response"));
+        let agent = Agent::new(temp.path()).await.unwrap().with_llm(mock);
+
+        assert!(agent.llm.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_agent_without_llm_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let agent = Agent::new(temp.path()).await.unwrap();
+
+        assert!(agent.llm.is_none());
+    }
+
+    #[cfg(feature = "envoy")]
+    #[tokio::test]
+    async fn test_agent_with_envoy() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = envoy::EnvoyConfig {
+            url: "http://localhost:9999".to_string(),
+            agent_name: "test-forge".to_string(),
+        };
+        let client = envoy::EnvoyClient::new(config);
+        let agent = Agent::new(temp.path()).await.unwrap().with_envoy(client);
+
+        assert!(agent.envoy.is_some());
+    }
+
+    #[cfg(feature = "envoy")]
+    #[tokio::test]
+    async fn test_agent_without_envoy() {
+        let temp = tempfile::tempdir().unwrap();
+        let agent = Agent::new(temp.path()).await.unwrap();
+
+        // No .forge.toml → no envoy
+        assert!(agent.envoy.is_none());
     }
 }

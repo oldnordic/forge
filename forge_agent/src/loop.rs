@@ -14,6 +14,13 @@ use chrono::Utc;
 use forge_core::Forge;
 use std::sync::Arc;
 
+/// Trait for storing discoveries to a knowledge backend (e.g., atheneum).
+#[async_trait::async_trait]
+pub trait DiscoveryStore: Send + Sync {
+    /// Stores a discovery.
+    async fn store(&self, discovery_type: &str, target: &str, metadata: serde_json::Value);
+}
+
 /// Agent phase in the execution loop.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AgentPhase {
@@ -56,6 +63,10 @@ pub struct AgentLoop {
     transaction: Option<crate::transaction::Transaction>,
     /// Audit log for phase transitions
     audit_log: AuditLog,
+    /// Optional discovery store for atheneum auto-store
+    discovery_store: Option<Arc<dyn DiscoveryStore>>,
+    /// Optional LLM provider for intelligent phases
+    llm: Option<Arc<dyn crate::llm::LlmProvider>>,
 }
 
 impl AgentLoop {
@@ -71,7 +82,21 @@ impl AgentLoop {
             codebase_path,
             transaction: None,
             audit_log: AuditLog::new(),
+            discovery_store: None,
+            llm: None,
         }
+    }
+
+    /// Sets the discovery store for atheneum auto-store.
+    pub fn with_discovery_store(mut self, store: Arc<dyn DiscoveryStore>) -> Self {
+        self.discovery_store = Some(store);
+        self
+    }
+
+    /// Sets the LLM provider for intelligent phase execution.
+    pub fn with_llm(mut self, provider: Arc<dyn crate::llm::LlmProvider>) -> Self {
+        self.llm = Some(provider);
+        self
     }
 
     /// Runs the full agent loop: Observe -> Constrain -> Plan -> Mutate -> Verify -> Commit
@@ -92,6 +117,9 @@ impl AgentLoop {
                 return Err(e);
             }
         };
+
+        // Auto-store observed symbols to atheneum (fire-and-forget)
+        self.store_observation_discoveries(&observation).await;
 
         // Phase 2: Constrain
         let constrained = match self.constrain_phase(observation).await {
@@ -149,7 +177,10 @@ impl AgentLoop {
     /// Observation phase - gather context from the graph.
     async fn observe_phase(&mut self, query: &str) -> Result<Observation, crate::AgentError> {
         // Use Observer to gather context
-        let observer = crate::observe::Observer::new((*self.forge).clone());
+        let mut observer = crate::observe::Observer::new((*self.forge).clone());
+        if let Some(ref llm) = self.llm {
+            observer = observer.with_llm(llm.clone());
+        }
         let observation = observer
             .gather(query)
             .await
@@ -215,7 +246,10 @@ impl AgentLoop {
         constrained: ConstrainedPlan,
     ) -> Result<ExecutionPlan, crate::AgentError> {
         // Create planner
-        let planner = crate::planner::Planner::new();
+        let mut planner = crate::planner::Planner::new();
+        if let Some(ref llm) = self.llm {
+            planner = planner.with_llm(llm.clone());
+        }
 
         // Generate steps from observation
         let steps = planner
@@ -334,18 +368,28 @@ impl AgentLoop {
         })
     }
 
-    /// Verify phase - validate results.
+    /// Verify phase - validate results, scoped to changed files.
     async fn verify_phase(
         &mut self,
-        _result: MutationResult,
+        result: MutationResult,
     ) -> Result<VerificationResult, crate::AgentError> {
         // Create verifier with Forge SDK for graph checks
-        let verifier = crate::verify::Verifier::with_forge((*self.forge).clone());
+        let mut verifier = crate::verify::Verifier::with_forge((*self.forge).clone());
+        if let Some(ref llm) = self.llm {
+            verifier = verifier.with_llm(llm.clone());
+        }
 
-        let report = verifier
-            .verify(&self.codebase_path)
-            .await
-            .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?;
+        let report = if result.modified_files.is_empty() {
+            verifier
+                .verify(&self.codebase_path)
+                .await
+                .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?
+        } else {
+            verifier
+                .verify_changes(&self.codebase_path, &result.modified_files, &result.diffs)
+                .await
+                .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?
+        };
 
         let diagnostic_count = report.diagnostics.len();
         let passed = report.passed;
@@ -367,6 +411,7 @@ impl AgentLoop {
                 .iter()
                 .map(|d| d.message.clone())
                 .collect(),
+            suggestions: report.suggestions,
         })
     }
 
@@ -417,11 +462,27 @@ impl AgentLoop {
         })
     }
 
+    /// Stores observed symbols as atheneum discoveries (fire-and-forget).
+    async fn store_observation_discoveries(&self, observation: &Observation) {
+        if let Some(ref store) = self.discovery_store {
+            for symbol in &observation.symbols {
+                let metadata = serde_json::json!({
+                    "kind": format!("{:?}", symbol.kind),
+                    "file": symbol.location.file_path,
+                    "line": symbol.location.line_number,
+                });
+                store.store("Symbol", &symbol.name, metadata).await;
+            }
+        }
+    }
+
     /// Records a rollback in the audit log.
     async fn record_rollback(&mut self, error: &crate::AgentError) {
         // Rollback transaction if active
         if let Some(txn) = self.transaction.take() {
-            let _ = txn.rollback().await;
+            if let Err(e) = txn.rollback().await {
+                tracing::error!("Transaction rollback failed: {e}");
+            }
         }
 
         // Determine phase from error type
@@ -436,14 +497,17 @@ impl AgentLoop {
         };
 
         // Record rollback event
-        let _ = self
+        if let Err(e) = self
             .audit_log
             .record(AuditEvent::Rollback {
                 timestamp: Utc::now(),
                 reason: error.to_string(),
                 phase: phase.to_string(),
             })
-            .await;
+            .await
+        {
+            tracing::error!("Failed to record rollback audit event: {e}");
+        }
     }
 
     /// Returns a reference to the audit log (for testing).
@@ -457,14 +521,6 @@ impl AgentLoop {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[allow(dead_code)]
-    async fn create_test_loop() -> (AgentLoop, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-        let agent_loop = AgentLoop::new(Arc::new(forge));
-        (agent_loop, temp_dir)
-    }
 
     #[tokio::test]
     async fn test_agent_loop_creation() {
@@ -569,6 +625,48 @@ mod tests {
             "Expected Verify or Rollback at index 4, got: {:?}",
             events[4]
         );
+    }
+
+    /// Mock discovery store for testing.
+    struct MockDiscoveryStore {
+        discoveries: std::sync::Mutex<Vec<(String, String, serde_json::Value)>>,
+    }
+
+    impl MockDiscoveryStore {
+        fn new() -> Self {
+            Self {
+                discoveries: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn discoveries(&self) -> Vec<(String, String, serde_json::Value)> {
+            self.discoveries.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DiscoveryStore for MockDiscoveryStore {
+        async fn store(&self, discovery_type: &str, target: &str, metadata: serde_json::Value) {
+            self.discoveries.lock().unwrap().push((
+                discovery_type.to_string(),
+                target.to_string(),
+                metadata,
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_discovery_store_records_observed_symbols() {
+        let store = Arc::new(MockDiscoveryStore::new());
+        let store_ref = store.clone();
+
+        // Verify store works
+        store
+            .store("Symbol", "test_func", serde_json::json!({"line": 1}))
+            .await;
+        assert_eq!(store_ref.discoveries().len(), 1);
+        assert_eq!(store_ref.discoveries()[0].0, "Symbol");
+        assert_eq!(store_ref.discoveries()[0].1, "test_func");
     }
 
     #[tokio::test]

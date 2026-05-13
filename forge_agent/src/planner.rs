@@ -4,25 +4,105 @@
 //! execution steps from observations and constraints.
 
 use crate::Result;
+use std::sync::Arc;
 
 /// Planner for generating execution plans.
 ///
 /// The Planner creates ordered steps from observations, ensuring
 /// dependencies are satisfied and conflicts are detected.
-#[derive(Clone, Default)]
-pub struct Planner {}
+/// When an LLM provider is available, it uses it for intelligent
+/// step generation. Otherwise falls back to regex intent detection.
+#[derive(Clone)]
+pub struct Planner {
+    llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+}
+
+impl Default for Planner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Planner {
     /// Creates a new planner.
     pub fn new() -> Self {
-        Self::default()
+        Self { llm: None }
+    }
+
+    /// Sets the LLM provider for intelligent step generation.
+    pub fn with_llm(mut self, provider: Arc<dyn crate::llm::LlmProvider>) -> Self {
+        self.llm = Some(provider);
+        self
     }
 
     /// Generates execution steps from an observation.
     ///
-    /// Parses the observation query for intent keywords to decide what
-    /// operations to generate. Falls back to Inspect for unrecognized queries.
+    /// When an LLM is configured, sends the observation to the LLM for
+    /// intelligent step generation as JSON. Falls back to regex intent
+    /// detection when no LLM is available or LLM response is unparseable.
     pub async fn generate_steps(
+        &self,
+        observation: &super::observe::Observation,
+    ) -> Result<Vec<PlanStep>> {
+        // Try LLM first if available
+        if let Some(ref llm) = self.llm {
+            match self
+                .generate_steps_with_llm(llm.as_ref(), observation)
+                .await
+            {
+                Ok(steps) => return Ok(steps),
+                Err(e) => {
+                    tracing::warn!("LLM step generation failed, falling back to regex: {e}");
+                }
+            }
+        }
+
+        // Regex fallback
+        self.generate_steps_regex(observation).await
+    }
+
+    /// Generate steps using LLM. Returns Err if LLM call fails or response
+    /// is unparseable.
+    async fn generate_steps_with_llm(
+        &self,
+        llm: &dyn crate::llm::LlmProvider,
+        observation: &super::observe::Observation,
+    ) -> Result<Vec<PlanStep>> {
+        let summary_text = observation
+            .summary
+            .as_deref()
+            .unwrap_or("No summary available");
+
+        let symbol_list: Vec<String> = observation
+            .symbols
+            .iter()
+            .map(|s| format!("{} (id:{})", s.name, s.id.0))
+            .collect();
+
+        let prompt = format!(
+            "Query: {}\nSummary: {}\nSymbols: [{}]",
+            observation.query,
+            summary_text,
+            symbol_list.join(", ")
+        );
+
+        let system = "You are a code operation planner. Given a code query, generate execution steps as a JSON array.\n\nAvailable operations:\n\
+        - {\"operation\":\"inspect\",\"symbol_name\":\"...\",\"symbol_id\":N}\n\
+        - {\"operation\":\"rename\",\"old\":\"...\",\"new\":\"...\",\"file\":\"...\"}\n\
+        - {\"operation\":\"delete\",\"name\":\"...\",\"file\":\"...\"}\n\
+        - {\"operation\":\"create\",\"path\":\"...\",\"content\":\"...\"}\n\
+        - {\"operation\":\"modify\",\"file\":\"...\",\"start\":N,\"end\":N,\"replacement\":\"...\"}\n\n\
+        Output ONLY a JSON array. No explanation.";
+
+        let response = llm.complete(&prompt, Some(system)).await.map_err(|e| {
+            crate::AgentError::PlanningFailed(format!("LLM step generation failed: {}", e))
+        })?;
+
+        parse_llm_steps(&response)
+    }
+
+    /// Regex-based step generation (original logic).
+    async fn generate_steps_regex(
         &self,
         observation: &super::observe::Observation,
     ) -> Result<Vec<PlanStep>> {
@@ -397,6 +477,105 @@ enum PlanIntent {
     Inspect,
 }
 
+/// Parse LLM JSON response into plan steps.
+fn parse_llm_steps(response: &str) -> Result<Vec<PlanStep>> {
+    let trimmed = response.trim();
+
+    // Strip markdown code fences if present
+    let json_str = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .unwrap_or(trimmed)
+        .strip_suffix("```")
+        .unwrap_or(trimmed)
+        .trim();
+
+    let items: Vec<serde_json::Value> = serde_json::from_str(json_str).map_err(|_| {
+        crate::AgentError::PlanningFailed("Failed to parse LLM response as JSON array".to_string())
+    })?;
+
+    let mut steps = Vec::new();
+    for item in &items {
+        match json_value_to_step(item) {
+            Some(step) => steps.push(step),
+            None => {
+                tracing::warn!(
+                    "LLM plan: skipping unparseable step: {}",
+                    item.to_string().chars().take(200).collect::<String>()
+                );
+            }
+        }
+    }
+
+    let skipped = items.len() - steps.len();
+    if skipped > 0 {
+        tracing::warn!(
+            "LLM plan: {skipped} of {} steps failed to parse",
+            items.len()
+        );
+    }
+
+    Ok(steps)
+}
+
+/// Convert a JSON object to a PlanStep.
+fn json_value_to_step(val: &serde_json::Value) -> Option<PlanStep> {
+    let obj = val.as_object()?;
+    let op = obj.get("operation")?.as_str()?;
+
+    let operation = match op {
+        "inspect" => {
+            let name = obj.get("symbol_name")?.as_str()?.to_string();
+            let id = obj.get("symbol_id").and_then(|v| v.as_u64())?;
+            PlanOperation::Inspect {
+                symbol_id: forge_core::types::SymbolId(id as i64),
+                symbol_name: name,
+            }
+        }
+        "rename" => PlanOperation::Rename {
+            old: obj.get("old")?.as_str()?.to_string(),
+            new: obj.get("new")?.as_str()?.to_string(),
+            file: obj.get("file").and_then(|v| v.as_str()).map(String::from),
+        },
+        "delete" => PlanOperation::Delete {
+            name: obj.get("name")?.as_str()?.to_string(),
+            file: obj.get("file").and_then(|v| v.as_str()).map(String::from),
+        },
+        "create" => PlanOperation::Create {
+            path: obj.get("path")?.as_str()?.to_string(),
+            content: obj.get("content")?.as_str()?.to_string(),
+        },
+        "modify" => PlanOperation::Modify {
+            file: obj.get("file")?.as_str()?.to_string(),
+            start: obj.get("start")?.as_u64()? as usize,
+            end: obj.get("end")?.as_u64()? as usize,
+            replacement: obj.get("replacement")?.as_str()?.to_string(),
+        },
+        _ => return None,
+    };
+
+    let description = describe_operation(&operation);
+    Some(PlanStep {
+        description,
+        operation,
+    })
+}
+
+/// Human-readable description for a plan operation.
+fn describe_operation(op: &PlanOperation) -> String {
+    match op {
+        PlanOperation::Rename { old, new, .. } => format!("Rename {old} to {new}"),
+        PlanOperation::Delete { name, .. } => format!("Delete {name}"),
+        PlanOperation::Create { path, .. } => format!("Create {path}"),
+        PlanOperation::Inspect { symbol_name, .. } => format!("Inspect {symbol_name}"),
+        PlanOperation::Modify {
+            file, start, end, ..
+        } => {
+            format!("Modify {file}:{start}-{end}")
+        }
+    }
+}
+
 /// Detect plan intent from the observation query.
 fn detect_intent(query: &str) -> PlanIntent {
     // "rename X to Y" or "rename X -> Y"
@@ -472,6 +651,7 @@ mod tests {
         let observation = crate::observe::Observation {
             query: "test".to_string(),
             symbols: vec![],
+            summary: None,
         };
 
         let steps = planner.generate_steps(&observation).await.unwrap();
@@ -552,5 +732,68 @@ mod tests {
         }];
 
         let _impact = planner.estimate_impact(&steps).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_planner_no_llm_uses_regex() {
+        let planner = Planner::new();
+        assert!(planner.llm.is_none());
+
+        let observation = crate::observe::Observation {
+            query: "rename old_func to new_func".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+
+        let steps = planner.generate_steps(&observation).await.unwrap();
+        // No symbols → regex path produces empty steps, but doesn't error
+        assert!(steps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_planner_llm_generates_steps() {
+        use std::sync::Arc;
+
+        // MockProvider returns valid JSON steps
+        let json_steps =
+            r#"[{"operation":"inspect","symbol_name":"auth_middleware","symbol_id":42}]"#;
+        let mock = Arc::new(crate::llm::MockProvider::new(json_steps));
+
+        let planner = Planner::new().with_llm(mock);
+        assert!(planner.llm.is_some());
+
+        let observation = crate::observe::Observation {
+            query: "where is the auth middleware?".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+
+        let steps = planner.generate_steps(&observation).await.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert!(matches!(
+            &steps[0].operation,
+            PlanOperation::Inspect { symbol_name, .. } if symbol_name == "auth_middleware"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_planner_llm_fallback_on_parse_error() {
+        use std::sync::Arc;
+
+        // MockProvider returns garbage — should fall back to regex
+        let mock = Arc::new(crate::llm::MockProvider::new("not valid json at all"));
+
+        let planner = Planner::new().with_llm(mock);
+
+        let observation = crate::observe::Observation {
+            query: "inspect test query".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+
+        // Should NOT error — falls back to regex detect_intent
+        let steps = planner.generate_steps(&observation).await.unwrap();
+        // No symbols matched, regex produces Inspect with no targets → empty
+        assert!(steps.is_empty());
     }
 }
