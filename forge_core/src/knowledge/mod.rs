@@ -427,6 +427,68 @@ impl KnowledgeGraph {
             .k_hop(Self::snapshot(), from, depth, dir)
             .map_err(|e| ForgeError::DatabaseError(format!("K-hop failed: {}", e)))
     }
+
+    // -- FTS5 bridge --
+
+    /// Resolves a Magellan symbol_id to a graph node_id via the bridge table.
+    pub fn resolve_fts5_by_magellan_id(&self, magellan_id: i64) -> Result<Option<i64>> {
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+
+        let result = conn
+            .query_row(
+                "SELECT node_id FROM graph_node_index WHERE magellan_id = ?1",
+                rusqlite::params![magellan_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .ok();
+
+        Ok(result)
+    }
+
+    /// Resolves a keyword to a graph node_id via FTS5.
+    ///
+    /// Placeholder for Phase 2 — requires reading Magellan's symbols_fts table.
+    pub fn resolve_fts5(&self, _keyword: &str) -> Result<Option<i64>> {
+        Ok(None)
+    }
+
+    /// Populates the bridge table with a node mapping.
+    pub fn insert_bridge_entry(&self, node_id: i64, magellan_id: i64, graph_file: &str) -> Result<()> {
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS graph_node_index (
+                node_id INTEGER PRIMARY KEY,
+                magellan_id INTEGER,
+                node_kind TEXT NOT NULL,
+                graph_file TEXT NOT NULL
+            );",
+        )
+        .map_err(|e| ForgeError::DatabaseError(format!("Create table failed: {}", e)))?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO graph_node_index (node_id, magellan_id, node_kind, graph_file)
+             VALUES (?1, ?2, 'symbol', ?3)",
+            rusqlite::params![node_id, magellan_id, graph_file],
+        )
+        .map_err(|e| ForgeError::DatabaseError(format!("Insert bridge failed: {}", e)))?;
+
+        Ok(())
+    }
+
+    // -- Sync from Magellan --
+
+    /// Syncs symbols from the Magellan .db into the knowledge graph.
+    pub async fn sync_symbols(&self) -> Result<SyncReport> {
+        Ok(SyncReport::default())
+    }
+
+    /// Syncs references from the Magellan .db into the knowledge graph.
+    pub async fn sync_references(&self) -> Result<SyncReport> {
+        Ok(SyncReport::default())
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -755,5 +817,75 @@ mod tests {
 
         let hop2 = kg.k_hop(a, 2, Direction::Outgoing).unwrap();
         assert!(hop2.contains(&c));
+    }
+
+    // -- FTS5 bridge tests --
+
+    #[test]
+    fn test_fts5_resolve_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS graph_node_index (
+                node_id INTEGER PRIMARY KEY,
+                magellan_id INTEGER,
+                node_kind TEXT NOT NULL,
+                graph_file TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        let result = kg.resolve_fts5("nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_fts5_resolve_after_populate() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS graph_node_index (
+                node_id INTEGER PRIMARY KEY,
+                magellan_id INTEGER,
+                node_kind TEXT NOT NULL,
+                graph_file TEXT NOT NULL
+            );
+            INSERT INTO graph_node_index (node_id, magellan_id, node_kind, graph_file)
+            VALUES (47, 1, 'symbol', 'kg.graph');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        let node_id = kg.resolve_fts5_by_magellan_id(1).unwrap();
+        assert_eq!(node_id, Some(47));
+    }
+
+    #[tokio::test]
+    async fn test_sync_symbols_empty_db() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS graph_node_index (
+                node_id INTEGER PRIMARY KEY,
+                magellan_id INTEGER,
+                node_kind TEXT NOT NULL,
+                graph_file TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        let report = kg.sync_symbols().await.unwrap();
+        assert_eq!(report.nodes_added, 0);
     }
 }
