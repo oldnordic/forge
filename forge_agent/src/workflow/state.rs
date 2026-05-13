@@ -22,7 +22,7 @@
 //! - `dashmap`: Not needed - we don't require per-key concurrent access
 //!
 //! **Data Race Identified:** In `execute_parallel()`, line 850:
-//! ```rust
+//! ```ignore
 //! self.completed_tasks.insert(task_id.clone());  // DATA RACE!
 //! ```
 //! Fixed by using `ConcurrentState` for all state mutations.

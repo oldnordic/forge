@@ -74,6 +74,7 @@ async fn test_sqlite_backend_basic() {
 }
 
 #[tokio::test]
+#[ignore = "native-v3 backend removed"]
 async fn test_native_v3_backend_basic() {
     let temp = create_test_repo().await;
 
@@ -329,6 +330,7 @@ async fn test_edit_rename_symbol_sqlite() {
 }
 
 #[tokio::test]
+#[ignore = "native-v3 backend removed"]
 async fn test_edit_patch_symbol_native_v3() {
     let temp = create_test_repo().await;
 
@@ -420,6 +422,7 @@ async fn test_cfg_dominators_sqlite() {
 }
 
 #[tokio::test]
+#[ignore = "native-v3 backend removed"]
 async fn test_cfg_native_v3() {
     let temp = create_test_repo().await;
 
@@ -453,6 +456,7 @@ async fn test_cfg_native_v3() {
 // =============================================================================
 
 #[tokio::test]
+#[ignore = "native-v3 backend removed"]
 async fn test_graph_consistency_across_backends() {
     let temp = create_test_repo().await;
 
@@ -499,6 +503,7 @@ async fn test_graph_consistency_across_backends() {
 }
 
 #[tokio::test]
+#[ignore = "native-v3 backend removed"]
 async fn test_search_consistency_across_backends() {
     let temp = create_test_repo().await;
 

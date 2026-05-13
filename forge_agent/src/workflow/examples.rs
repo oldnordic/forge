@@ -78,6 +78,8 @@ use crate::workflow::{
     task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask},
     Workflow,
 };
+#[cfg(doc)]
+use crate::WorkflowError;
 use async_trait::async_trait;
 
 /// Creates a linear workflow that executes tasks sequentially.

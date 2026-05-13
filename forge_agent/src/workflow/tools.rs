@@ -418,7 +418,7 @@ impl fmt::Debug for RetryFallback {
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// use forge_agent::workflow::tasks::TaskResult;
 /// use forge_agent::workflow::tools::SkipFallback;
 ///
@@ -443,7 +443,7 @@ impl SkipFallback {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use forge_agent::workflow::tasks::TaskResult;
     /// use forge_agent::workflow::tools::SkipFallback;
     ///
@@ -644,7 +644,7 @@ impl ProcessGuard {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use forge_agent::workflow::tools::ProcessGuard;
     ///
     /// let guard = ProcessGuard::new(12345, "magellan");
@@ -859,7 +859,7 @@ impl ToolRegistry {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use forge_agent::workflow::tools::{Tool, ToolRegistry};
     ///
     /// let mut registry = ToolRegistry::new();

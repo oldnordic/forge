@@ -84,8 +84,16 @@ impl EditModule {
         let db_path = self.store.db_path.join("graph.db");
 
         if db_path.exists() {
-            self.patch_symbol_via_db(symbol, replacement, &db_path)
+            match self
+                .patch_symbol_via_db(symbol, replacement, &db_path)
                 .await
+            {
+                Ok(result) => Ok(result),
+                Err(ForgeError::SymbolNotFound(_)) => {
+                    self.patch_symbol_via_files(symbol, replacement).await
+                }
+                Err(e) => Err(e),
+            }
         } else {
             self.patch_symbol_via_files(symbol, replacement).await
         }
@@ -177,31 +185,14 @@ impl EditModule {
         ))
     }
 
-    /// Patch by scanning files in the codebase directory.
+    /// Patch by scanning files in the codebase directory recursively.
     async fn patch_symbol_via_files(&self, symbol: &str, replacement: &str) -> Result<EditResult> {
         let codebase = &self.store.codebase_path;
         let mut changed_files = Vec::new();
+        let mut files = Vec::new();
+        collect_files_recursive(codebase, &mut files).await;
 
-        let mut entries = match tokio::fs::read_dir(codebase).await {
-            Ok(entries) => entries,
-            Err(_) => {
-                return Err(ForgeError::SymbolNotFound(format!(
-                    "Symbol '{}' not found (no files in codebase)",
-                    symbol
-                )))
-            }
-        };
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read directory: {}", e)))?
-        {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-
+        for path in files {
             let content = match tokio::fs::read_to_string(&path).await {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -239,8 +230,16 @@ impl EditModule {
         let db_path = self.store.db_path.join("graph.db");
 
         if db_path.exists() {
-            self.rename_symbol_via_db(old_name, new_name, &db_path)
+            match self
+                .rename_symbol_via_db(old_name, new_name, &db_path)
                 .await
+            {
+                Ok(result) => Ok(result),
+                Err(ForgeError::SymbolNotFound(_)) => {
+                    self.rename_symbol_via_files(old_name, new_name).await
+                }
+                Err(e) => Err(e),
+            }
         } else {
             self.rename_symbol_via_files(old_name, new_name).await
         }
@@ -352,43 +351,24 @@ impl EditModule {
         ))
     }
 
-    /// Rename by scanning files and doing word-boundary replacement.
+    /// Rename by scanning files recursively and doing word-boundary replacement.
     async fn rename_symbol_via_files(&self, old_name: &str, new_name: &str) -> Result<EditResult> {
         let codebase = &self.store.codebase_path;
         let mut changed_files = Vec::new();
         let mut found_any = false;
+        let mut files = Vec::new();
+        collect_files_recursive(codebase, &mut files).await;
 
-        let mut entries = match tokio::fs::read_dir(codebase).await {
-            Ok(entries) => entries,
-            Err(_) => {
-                return Err(ForgeError::SymbolNotFound(format!(
-                    "Symbol '{}' not found (no files in codebase)",
-                    old_name
-                )))
-            }
-        };
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read directory: {}", e)))?
-        {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-
+        for path in files {
             let content = match tokio::fs::read_to_string(&path).await {
                 Ok(c) => c,
                 Err(_) => continue,
             };
 
-            // Check if file contains the symbol at all
             if !content.contains(old_name) {
                 continue;
             }
 
-            // Verify at least one definition exists (fn old_name, etc.)
             if find_symbol_span(&content, old_name).is_some() {
                 found_any = true;
             }
@@ -410,6 +390,29 @@ impl EditModule {
         }
 
         Ok(EditResult::success(changed_files))
+    }
+}
+
+/// Recursively collect all files under `dir`, skipping build artifacts.
+async fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if matches!(
+                    name,
+                    "target" | ".git" | ".forge" | ".magellan" | "node_modules"
+                ) {
+                    continue;
+                }
+            }
+            Box::pin(collect_files_recursive(&path, files)).await;
+        } else if path.is_file() {
+            files.push(path);
+        }
     }
 }
 
