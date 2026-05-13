@@ -257,6 +257,71 @@ impl KnowledgeGraph {
             data,
         )
     }
+
+    // -- Edge operations --
+
+    /// Adds an edge between two nodes.
+    pub fn add_edge(
+        &self,
+        from: i64,
+        to: i64,
+        edge_type: &str,
+        data: serde_json::Value,
+    ) -> Result<i64> {
+        let spec = sqlitegraph::backend::EdgeSpec {
+            from,
+            to,
+            edge_type: edge_type.to_string(),
+            data,
+        };
+        self.backend.insert_edge(spec).map_err(|e| {
+            ForgeError::DatabaseError(format!("Insert edge failed: {}", e))
+        })
+    }
+
+    /// Adds a bidirectional correlation between two nodes.
+    pub fn add_correlation(&self, from: i64, to: i64, confidence: f64, agent: &str) -> Result<()> {
+        let data = serde_json::json!({"confidence": confidence, "agent": agent,});
+        self.add_edge(from, to, types::edge::CORRELATES, data.clone())?;
+        self.add_edge(to, from, types::edge::CORRELATES, data)?;
+        Ok(())
+    }
+
+    /// Returns neighbors of a node filtered by edge type and direction.
+    pub fn neighbors(
+        &self,
+        node_id: i64,
+        edge_type: &str,
+        direction: Direction,
+    ) -> Result<Vec<GraphNode>> {
+        let snap = Self::snapshot();
+        let dir = match direction {
+            Direction::Incoming => sqlitegraph::backend::BackendDirection::Incoming,
+            Direction::Outgoing => sqlitegraph::backend::BackendDirection::Outgoing,
+        };
+        let query = sqlitegraph::backend::NeighborQuery {
+            direction: dir,
+            edge_type: Some(edge_type.to_string()),
+        };
+        let neighbor_ids = self
+            .backend
+            .neighbors(snap, node_id, query)
+            .map_err(|e| ForgeError::DatabaseError(format!("Neighbor query failed: {}", e)))?;
+
+        let mut results = Vec::new();
+        for nid in neighbor_ids {
+            if let Ok(entity) = self.backend.get_node(snap, nid) {
+                results.push(GraphNode {
+                    id: nid,
+                    kind: entity.kind,
+                    name: entity.name,
+                    file_path: entity.file_path,
+                    data: entity.data,
+                });
+            }
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -448,5 +513,36 @@ mod tests {
         let (_temp, kg) = open_kg();
         let result = kg.get_node(99999);
         assert!(result.is_err());
+    }
+
+    // -- Edge tests --
+
+    #[test]
+    fn test_add_edge() {
+        let (_temp, kg) = open_kg();
+        let a = kg.add_symbol("func_a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let b = kg.add_symbol("func_b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
+
+        let edge_id = kg.add_edge(a, b, "calls", serde_json::json!({"location_line": 5})).unwrap();
+        assert!(edge_id > 0);
+    }
+
+    #[test]
+    fn test_add_correlation_bidirectional() {
+        let (_temp, kg) = open_kg();
+        let sym = kg.add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let disc = kg.add_discovery("claude1", "Symbol", "my_func", serde_json::json!({})).unwrap();
+
+        kg.add_correlation(disc, sym, 0.95, "claude1").unwrap();
+
+        // Outgoing: discovery -> symbol
+        let outgoing = kg.neighbors(disc, "correlates", Direction::Outgoing).unwrap();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].name, "my_func");
+
+        // Incoming: symbol <- discovery
+        let incoming = kg.neighbors(sym, "correlates", Direction::Incoming).unwrap();
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(incoming[0].name, "my_func");
     }
 }
