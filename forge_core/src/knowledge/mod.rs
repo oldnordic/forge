@@ -400,8 +400,34 @@ impl KnowledgeGraph {
         }
         Ok(results)
     }
-}
 
+    // -- Graph algorithms --
+
+    /// Finds the shortest path between two nodes.
+    pub fn shortest_path(&self, from: i64, to: i64) -> Result<Option<Vec<i64>>> {
+        self.backend
+            .shortest_path(Self::snapshot(), from, to)
+            .map_err(|e| ForgeError::DatabaseError(format!("Shortest path failed: {}", e)))
+    }
+
+    /// Returns all nodes reachable from the given node via BFS.
+    pub fn reachability(&self, from: i64) -> Result<Vec<i64>> {
+        self.backend
+            .bfs(Self::snapshot(), from, 100)
+            .map_err(|e| ForgeError::DatabaseError(format!("Reachability failed: {}", e)))
+    }
+
+    /// K-hop traversal returning node IDs within `depth` hops.
+    pub fn k_hop(&self, from: i64, depth: u32, direction: Direction) -> Result<Vec<i64>> {
+        let dir = match direction {
+            Direction::Incoming => sqlitegraph::backend::BackendDirection::Incoming,
+            Direction::Outgoing => sqlitegraph::backend::BackendDirection::Outgoing,
+        };
+        self.backend
+            .k_hop(Self::snapshot(), from, depth, dir)
+            .map_err(|e| ForgeError::DatabaseError(format!("K-hop failed: {}", e)))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,5 +704,56 @@ mod tests {
 
         let affected = kg.affected_by(sym, 1).unwrap();
         assert_eq!(affected.len(), 1);
+    }
+
+    // -- Graph algorithm tests --
+
+    #[test]
+    fn test_shortest_path() {
+        let (_temp, kg) = open_kg();
+        let a = kg.add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let b = kg.add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
+        let c = kg.add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None).unwrap();
+
+        kg.add_edge(a, b, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(b, c, "calls", serde_json::json!({})).unwrap();
+
+        let path = kg.shortest_path(a, c).unwrap();
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert!(path.contains(&a));
+        assert!(path.contains(&c));
+    }
+
+    #[test]
+    fn test_reachability() {
+        let (_temp, kg) = open_kg();
+        let a = kg.add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let b = kg.add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
+        let c = kg.add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None).unwrap();
+
+        kg.add_edge(a, b, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(b, c, "calls", serde_json::json!({})).unwrap();
+
+        let reachable = kg.reachability(a).unwrap();
+        assert!(reachable.contains(&b));
+        assert!(reachable.contains(&c));
+    }
+
+    #[test]
+    fn test_k_hop() {
+        let (_temp, kg) = open_kg();
+        let a = kg.add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let b = kg.add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
+        let c = kg.add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None).unwrap();
+
+        kg.add_edge(a, b, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(b, c, "calls", serde_json::json!({})).unwrap();
+
+        let hop1 = kg.k_hop(a, 1, Direction::Outgoing).unwrap();
+        assert!(hop1.contains(&b));
+
+        let hop2 = kg.k_hop(a, 2, Direction::Outgoing).unwrap();
+        assert!(hop2.contains(&c));
     }
 }
