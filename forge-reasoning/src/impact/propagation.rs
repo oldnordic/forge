@@ -407,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_normalize_cycles() {
-        let board = HypothesisBoard::in_memory();
+        let _board = HypothesisBoard::in_memory();
         let graph = BeliefGraph::new();
 
         // Create changes for testing (no actual cycle in graph)

@@ -208,6 +208,6 @@ mod tests {
 
         let analyzer = ModuleAnalyzer::new(&db_path);
         // Verify creation
-        assert!(analyzer.db_path.exists() == false);
+        assert!(!analyzer.db_path.exists());
     }
 }

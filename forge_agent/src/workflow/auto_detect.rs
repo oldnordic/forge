@@ -356,14 +356,11 @@ pub enum SuggestedTaskType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::tasks::GraphQueryTask;
-    use crate::workflow::WorkflowBuilder;
-
     #[test]
     fn test_config_defaults() {
         let config = AutoDetectConfig::default();
         assert_eq!(config.max_hops, 2);
-        assert_eq!(config.include_transitive, false);
+        assert!(!config.include_transitive);
         assert_eq!(config.confidence_threshold, 0.7);
     }
 
@@ -375,7 +372,7 @@ mod tests {
             .with_confidence_threshold(0.8);
 
         assert_eq!(config.max_hops, 3);
-        assert_eq!(config.include_transitive, true);
+        assert!(config.include_transitive);
         assert_eq!(config.confidence_threshold, 0.8);
     }
 

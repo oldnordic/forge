@@ -334,9 +334,6 @@ mod tests {
     #[tokio::test]
     async fn test_planner_creation() {
         let _planner = Planner::new();
-
-        // Should create successfully
-        assert!(true);
     }
 
     #[tokio::test]
@@ -423,8 +420,6 @@ mod tests {
             },
         }];
 
-        let impact = planner.estimate_impact(&steps).await.unwrap();
-
-        assert!(!impact.affected_files.is_empty() || impact.affected_files.len() >= 0);
+        let _impact = planner.estimate_impact(&steps).await.unwrap();
     }
 }

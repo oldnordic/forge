@@ -2647,8 +2647,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_compensation_registry_integration_with_rollback() {
-        use crate::workflow::rollback::CompensationRegistry;
-
         let mut workflow = Workflow::new();
 
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
@@ -2686,8 +2684,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_validations() {
-        use crate::workflow::checkpoint::ValidationCheckpoint;
-
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
         workflow.add_task(Box::new(MockTask::new("b", "Task B")));
@@ -2720,7 +2716,7 @@ mod tests {
         let config = executor.validation_config.unwrap();
         assert_eq!(config.min_confidence, 0.5);
         assert_eq!(config.warning_threshold, 0.8);
-        assert_eq!(config.rollback_on_failure, true);
+        assert!(config.rollback_on_failure);
     }
 
     #[tokio::test]
@@ -2914,7 +2910,6 @@ mod tests {
     #[tokio::test]
     async fn test_executor_with_task_timeout() {
         use crate::workflow::timeout::{TaskTimeout, TimeoutConfig};
-        use std::time::Duration;
 
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
@@ -2938,7 +2933,6 @@ mod tests {
     #[tokio::test]
     async fn test_executor_with_workflow_timeout() {
         use crate::workflow::timeout::{TimeoutConfig, WorkflowTimeout};
-        use std::time::Duration;
 
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));
@@ -2960,7 +2954,6 @@ mod tests {
     #[tokio::test]
     async fn test_task_timeout_records_audit_event() {
         use crate::workflow::timeout::{TaskTimeout, TimeoutConfig};
-        use std::time::Duration;
 
         let mut workflow = Workflow::new();
         workflow.add_task(Box::new(MockTask::new("a", "Task A")));

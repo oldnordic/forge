@@ -194,7 +194,6 @@ impl VerificationRunner {
 mod tests {
     use super::*;
     use crate::hypothesis::confidence::Confidence;
-    use crate::hypothesis::types::HypothesisStatus;
 
     #[tokio::test]
     async fn test_runner_creation() {
@@ -232,12 +231,12 @@ mod tests {
     #[tokio::test]
     async fn test_evidence_attachment() {
         let board = Arc::new(HypothesisBoard::in_memory());
-        let runner = VerificationRunner::new(board.clone(), 10);
+        let _runner = VerificationRunner::new(board.clone(), 10);
 
         let prior = Confidence::new(0.5).unwrap();
         let h_id = board.propose("Test", prior).await.unwrap();
 
-        let check = VerificationCheck::new(
+        let _check = VerificationCheck::new(
             "test".to_string(),
             h_id,
             Duration::from_secs(1),
@@ -246,7 +245,7 @@ mod tests {
             None,
         );
 
-        let result = CheckResult::Passed {
+        let _result = CheckResult::Passed {
             output: "test output".to_string(),
             duration: Duration::from_millis(100),
         };

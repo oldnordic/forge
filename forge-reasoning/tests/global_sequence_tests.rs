@@ -12,7 +12,7 @@ fn test_global_sequence_starts_at_one() {
     let service = Arc::new(CheckpointService::new(storage));
     let session = service.create_session("test").unwrap();
 
-    let id = service.checkpoint(&session, "First checkpoint").unwrap();
+    let _id = service.checkpoint(&session, "First checkpoint").unwrap();
     let checkpoints = service.list_checkpoints(&session).unwrap();
 
     assert_eq!(checkpoints.len(), 1);
@@ -103,7 +103,7 @@ fn test_concurrent_global_sequences_are_unique() {
             let mut ids = Vec::new();
             for i in 0..10 {
                 let id = service_clone
-                    .checkpoint(&session_clone, &format!("Thread-{}-CP-{}", idx, i))
+                    .checkpoint(&session_clone, format!("Thread-{}-CP-{}", idx, i))
                     .unwrap();
                 ids.push(id);
             }
@@ -164,7 +164,7 @@ fn test_global_sequence_monotonic_under_load() {
         let mut sequences = Vec::new();
         for i in 0..100 {
             let id = service_clone
-                .checkpoint(&session_clone, &format!("Load-CP-{}", i))
+                .checkpoint(&session_clone, format!("Load-CP-{}", i))
                 .unwrap();
 
             // Get the checkpoint to verify sequence
@@ -250,7 +250,7 @@ fn test_global_sequence_survives_compaction() {
 
     // Create 10 checkpoints
     for i in 0..10 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     assert_eq!(service.global_sequence(), 10);

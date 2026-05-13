@@ -399,7 +399,6 @@ fn test_list_checkpoints_populated() {
 // TDD WAVE 3: Persistence & Durability (File-based storage)
 // ============================================================================
 
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Test 21: Can create file-based storage
@@ -531,7 +530,7 @@ fn test_import_checkpoints() {
 fn test_checkpoint_compaction() {
     let storage = Rc::new(SqliteGraphStorage::in_memory().unwrap());
     let session_id = SessionId::new();
-    let mut manager = TemporalCheckpointManager::new(storage.clone(), session_id);
+    let manager = TemporalCheckpointManager::new(storage.clone(), session_id);
 
     // Create many checkpoints
     for i in 0..10 {
@@ -576,7 +575,7 @@ fn test_compaction_preserves_tags() {
     manager.checkpoint("Normal 2").unwrap();
 
     // Compact to 2, but preserve tagged
-    let compacted = manager
+    let _compacted = manager
         .compact_with_policy(CompactionPolicy::PreserveTagged(vec![
             "preserve".to_string()
         ]))

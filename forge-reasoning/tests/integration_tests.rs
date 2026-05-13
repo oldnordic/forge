@@ -66,7 +66,7 @@ fn test_service_auto_checkpoint() {
         .unwrap();
 
     let cps = service.list_checkpoints(&session).unwrap();
-    assert!(cps.len() >= 1, "Should have at least one checkpoint");
+    assert!(!cps.is_empty(), "Should have at least one checkpoint");
 }
 
 /// Test 44: Service can restore checkpoints

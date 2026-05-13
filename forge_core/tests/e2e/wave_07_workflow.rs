@@ -120,7 +120,4 @@ async fn e2e_workflow_error_handling() {
     let _ = symbol_result;
     let _ = patch_result;
     let _ = impact_result;
-
-    // Test passes if we get here without panic
-    assert!(true);
 }

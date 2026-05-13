@@ -129,7 +129,7 @@ fn test_import_validates_checksums() {
     let service = Arc::new(CheckpointService::new(storage));
     let session = service.create_session("test").unwrap();
 
-    let id = service.checkpoint(&session, "Test").unwrap();
+    let _id = service.checkpoint(&session, "Test").unwrap();
     let export = service.export_all_checkpoints().unwrap();
 
     // Import should succeed with valid checksums
@@ -149,7 +149,7 @@ fn test_health_check_validates_checkpoints() {
 
     // Create some checkpoints
     for i in 0..5 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     // Health check should validate recent checkpoints
@@ -169,7 +169,7 @@ fn test_batch_validation() {
 
     // Create multiple checkpoints
     for i in 0..10 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     // Batch validate all checkpoints
@@ -207,7 +207,7 @@ fn test_concurrent_validation() {
 
     // Create checkpoints
     for i in 0..20 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     // Spawn threads for concurrent validation

@@ -241,13 +241,13 @@ mod tests {
 
     #[test]
     fn test_weight_changes_affect_score() {
-        let mut config = ScoringConfig::default();
-
-        // Make criticality dominant
-        config.criticality_weight = 1.0;
-        config.depth_weight = 0.0;
-        config.evidence_weight = 0.0;
-        config.age_weight = 0.0;
+        let config = ScoringConfig {
+            criticality_weight: 1.0,
+            depth_weight: 0.0,
+            evidence_weight: 0.0,
+            age_weight: 0.0,
+            auto_close_threshold: 0.9,
+        };
 
         let gap = make_test_gap(GapCriticality::High, 0, 0.0, 0);
         let score = compute_gap_score(&gap, &config);
@@ -321,8 +321,8 @@ mod tests {
         let score_max = compute_gap_score(&max_gap, &config);
         let score_min = compute_gap_score(&min_gap, &config);
 
-        assert!(score_max >= 0.0 && score_max <= 1.0);
-        assert!(score_min >= 0.0 && score_min <= 1.0);
+        assert!((0.0..=1.0).contains(&score_max));
+        assert!((0.0..=1.0).contains(&score_min));
     }
 
     #[test]

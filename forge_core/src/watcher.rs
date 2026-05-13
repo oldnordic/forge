@@ -448,10 +448,8 @@ mod tests {
         );
 
         // Verify the last event represents the final state
-        if let Some(last_event) = events.last() {
-            if let WatchEvent::Modified(path) = last_event {
-                assert_eq!(path, &test_file);
-            }
+        if let Some(WatchEvent::Modified(path)) = events.last() {
+            assert_eq!(path, &test_file);
         }
     }
 }

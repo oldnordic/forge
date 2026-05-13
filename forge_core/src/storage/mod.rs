@@ -63,7 +63,7 @@ impl std::fmt::Display for BackendKind {
 impl BackendKind {
     /// Converts to sqlitegraph's BackendKind.
     #[cfg(test)] // Only used in tests currently
-    fn to_sqlitegraph_kind(&self) -> SqliteGraphBackendKind {
+    fn to_sqlitegraph_kind(self) -> SqliteGraphBackendKind {
         match self {
             Self::SQLite => SqliteGraphBackendKind::SQLite,
             Self::NativeV3 => SqliteGraphBackendKind::Native,

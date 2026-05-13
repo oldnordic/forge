@@ -14,7 +14,7 @@ fn e2e_validation_workflow() {
 
     // Create checkpoints
     for i in 0..5 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     // Validate all checkpoints
@@ -35,7 +35,7 @@ fn e2e_health_check_with_validation() {
 
     // Create some checkpoints
     for i in 0..10 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     // Health check with validation

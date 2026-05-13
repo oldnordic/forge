@@ -165,9 +165,6 @@ mod tests {
     #[tokio::test]
     async fn test_verifier_creation() {
         let _verifier = Verifier::new();
-
-        // Should create successfully
-        assert!(true);
     }
 
     #[test]

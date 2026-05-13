@@ -769,7 +769,7 @@ mod tests {
         let display = format!("{}", id);
 
         // Should format as UUID
-        assert!(display.len() > 0);
+        assert!(!display.is_empty());
     }
 
     #[test]
@@ -1169,9 +1169,6 @@ mod tests {
 
     #[test]
     fn test_task_ids_checksum_deterministic() {
-        let workflow1 = Workflow::new();
-        let workflow2 = Workflow::new();
-
         let ids1 = vec![
             TaskId::new("task-3"),
             TaskId::new("task-1"),
@@ -1206,7 +1203,7 @@ mod tests {
     #[test]
     fn test_rollback_recommendation_variants() {
         let prev = RollbackRecommendation::ToPreviousCheckpoint;
-        let specific = RollbackRecommendation::SpecificTask(TaskId::new("task-1"));
+        let _specific = RollbackRecommendation::SpecificTask(TaskId::new("task-1"));
         let full = RollbackRecommendation::FullRollback;
         let none = RollbackRecommendation::None;
 
@@ -1237,7 +1234,7 @@ mod tests {
 
         assert_eq!(config.min_confidence, 0.7);
         assert_eq!(config.warning_threshold, 0.85);
-        assert_eq!(config.rollback_on_failure, true);
+        assert!(config.rollback_on_failure);
     }
 
     #[test]
@@ -1250,7 +1247,7 @@ mod tests {
 
         assert_eq!(config.min_confidence, 0.5);
         assert_eq!(config.warning_threshold, 0.8);
-        assert_eq!(config.rollback_on_failure, false);
+        assert!(!config.rollback_on_failure);
     }
 
     #[test]

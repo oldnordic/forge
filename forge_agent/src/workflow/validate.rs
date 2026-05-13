@@ -338,7 +338,7 @@ mod tests {
         let report = validator.validate(&workflow).unwrap();
 
         assert!(!report.is_valid());
-        assert!(report.missing_dependencies().len() > 0);
+        assert!(!report.missing_dependencies().is_empty());
         assert!(report
             .missing_dependencies()
             .contains(&TaskId::new("nonexistent")));

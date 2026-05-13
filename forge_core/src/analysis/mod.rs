@@ -1237,7 +1237,7 @@ mod tests {
         let cfg = CfgModule::new(store.clone());
         let edit = EditModule::new(store);
 
-        let mut analysis = AnalysisModule::new(graph, cfg, edit, search);
+        let analysis = AnalysisModule::new(graph, cfg, edit, search);
 
         // 1. Look up a symbol
         let symbols = analysis.graph().find_symbol("test").await.unwrap();

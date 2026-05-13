@@ -307,7 +307,7 @@ mod tests {
         let path = temp_dir.path().join("test");
         let builder = ForgeBuilder::new().path(&path);
 
-        assert_eq!(builder.path, Some(std::path::PathBuf::from(path)));
+        assert_eq!(builder.path, Some(path));
     }
 
     #[test]

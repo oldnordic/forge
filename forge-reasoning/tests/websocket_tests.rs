@@ -338,9 +338,11 @@ async fn test_websocket_authentication() {
     let storage = ThreadSafeStorage::in_memory().unwrap();
     let service = Arc::new(CheckpointService::new(storage));
 
-    let mut config = WebSocketConfig::default();
-    config.require_auth = true;
-    config.auth_token = Some("secret-token".to_string());
+    let config = WebSocketConfig {
+        require_auth: true,
+        auth_token: Some("secret-token".to_string()),
+        ..Default::default()
+    };
 
     let mut server =
         CheckpointWebSocketServer::with_config("127.0.0.1:0".to_string(), service, config);
@@ -349,7 +351,7 @@ async fn test_websocket_authentication() {
     let url = format!("ws://{}/", addr);
 
     // Connect without auth should fail
-    let result = tokio_tungstenite::connect_async(&url).await;
+    let _result = tokio_tungstenite::connect_async(&url).await;
     // Note: Connection might succeed but first command should fail
 
     // Connect with auth

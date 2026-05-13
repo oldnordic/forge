@@ -1516,7 +1516,7 @@ mod tests {
         // default() now calls with_standard_tools() which pre-registers tools
         // The registry should not be empty (may have magellan, cargo, splice if found)
         // Just verify it was created successfully
-        assert!(registry.len() >= 0);
+        let _ = registry.len();
     }
 
     #[tokio::test]

@@ -20,7 +20,7 @@ fn e2e_service_restart_persistence() {
 
         for i in 0..5 {
             let _ = service
-                .checkpoint(&session, &format!("Checkpoint {}", i))
+                .checkpoint(&session, format!("Checkpoint {}", i))
                 .unwrap();
         }
 
@@ -58,7 +58,7 @@ fn e2e_recovery_from_corruption() {
 
     // Create some checkpoints
     for i in 0..3 {
-        let _ = service.checkpoint(&session, &format!("CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&session, format!("CP-{}", i)).unwrap();
     }
 
     // Verify all is well
@@ -114,7 +114,7 @@ fn e2e_concurrent_sessions() {
 
             // Each session creates its own checkpoints
             for j in 0..10 {
-                let _ = svc.checkpoint(&session, &format!("CP-{}", j)).unwrap();
+                let _ = svc.checkpoint(&session, format!("CP-{}", j)).unwrap();
             }
 
             session
@@ -148,8 +148,8 @@ fn e2e_export_import_roundtrip() {
     let s2 = service.create_session("session-2").unwrap();
 
     for i in 0..5 {
-        let _ = service.checkpoint(&s1, &format!("S1-CP-{}", i)).unwrap();
-        let _ = service.checkpoint(&s2, &format!("S2-CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&s1, format!("S1-CP-{}", i)).unwrap();
+        let _ = service.checkpoint(&s2, format!("S2-CP-{}", i)).unwrap();
     }
 
     // Export

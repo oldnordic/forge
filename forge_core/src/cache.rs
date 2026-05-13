@@ -195,6 +195,20 @@ where
     }
 }
 
+impl<K, V> std::fmt::Debug for QueryCache<K, V>
+where
+    K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryCache")
+            .field("max_size", &self.max_size)
+            .field("ttl", &self.ttl)
+            .field("inner", &"<cache>")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,19 +449,5 @@ mod tests {
 
         // Verify len decreased
         assert_eq!(cache.len().await, 0);
-    }
-}
-
-impl<K, V> std::fmt::Debug for QueryCache<K, V>
-where
-    K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QueryCache")
-            .field("max_size", &self.max_size)
-            .field("ttl", &self.ttl)
-            .field("inner", &"<cache>")
-            .finish()
     }
 }

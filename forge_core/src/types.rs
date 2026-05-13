@@ -537,8 +537,8 @@ mod tests {
         // This test documents the current behavior
         let lang = Language::Rust;
         match lang {
-            Language::Rust => assert!(true),
-            _ => assert!(false),
+            Language::Rust => {}
+            _ => panic!("expected Rust variant"),
         }
     }
 

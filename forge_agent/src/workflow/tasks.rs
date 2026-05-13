@@ -935,9 +935,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_command_task_stub() {
-        let task =
-            ShellCommandTask::new(TaskId::new("shell_task"), "Shell Task".to_string(), "echo")
-                .with_args(vec!["hello".to_string(), "world".to_string()]);
+        let config = ShellCommandConfig::new("echo")
+            .args(vec!["hello".to_string(), "world".to_string()]);
+        let task = ShellCommandTask::with_config(
+            TaskId::new("shell_task"),
+            "Shell Task".to_string(),
+            config,
+        );
 
         assert_eq!(task.id(), TaskId::new("shell_task"));
         assert_eq!(task.command(), "echo");
@@ -1010,9 +1014,12 @@ mod tests {
     async fn test_shell_command_compensation() {
         // Create a task that spawns a long-running process
         // For testing, we use echo which exits immediately
-        let task =
-            ShellCommandTask::new(TaskId::new("shell_task"), "Shell Task".to_string(), "echo")
-                .with_args(vec!["test".to_string()]);
+        let config = ShellCommandConfig::new("echo").args(vec!["test".to_string()]);
+        let task = ShellCommandTask::with_config(
+            TaskId::new("shell_task"),
+            "Shell Task".to_string(),
+            config,
+        );
 
         // Before execution, compensation should indicate no process spawned
         let compensation = task.compensation();
@@ -1222,7 +1229,7 @@ mod tests {
 
         // Registry should be created successfully (even if no tools found)
         // This is a basic smoke test
-        assert!(tool_count >= 0);
+        let _ = tool_count;
     }
 
     #[tokio::test]
@@ -1230,7 +1237,6 @@ mod tests {
         use crate::workflow::dag::Workflow;
         use crate::workflow::executor::WorkflowExecutor;
         use crate::workflow::tools::{Tool, ToolRegistry};
-        use std::sync::Arc;
 
         // Create a workflow with a tool task
         let mut workflow = Workflow::new();
@@ -1256,7 +1262,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_fallback_audit_event() {
-        use crate::audit::{AuditEvent, AuditLog};
+        use crate::audit::AuditLog;
 
         // Create an audit log
         let audit_log = AuditLog::new();

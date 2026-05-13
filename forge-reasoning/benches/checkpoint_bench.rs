@@ -2,9 +2,6 @@
 //!
 //! Criterion.rs benchmarks for checkpoint operations
 
-use std::sync::Arc;
-use std::time::Duration;
-
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use forge_reasoning::*;
 
@@ -174,7 +171,6 @@ fn bench_concurrent_creation(c: &mut Criterion) {
                     let handles: Vec<_> = (0..threads)
                         .map(|thread_id| {
                             let storage = storage.clone();
-                            let session_id = session_id.clone();
                             tokio::spawn(async move {
                                 let manager = ThreadSafeCheckpointManager::new(storage, session_id);
                                 for i in 0..10 {

@@ -285,7 +285,7 @@ mod concurrent_state_tests {
         let cloned = concurrent.clone();
         assert_eq!(concurrent.ref_count(), 2);
 
-        let cloned2 = cloned.clone();
+        let _cloned2 = cloned.clone();
         assert_eq!(concurrent.ref_count(), 3);
     }
 

@@ -193,7 +193,7 @@ mod tests {
         let id = HypothesisId::new();
         let s = format!("{}", id);
         // UUID string format
-        assert!(s.len() > 0);
+        assert!(!s.is_empty());
     }
 
     #[test]

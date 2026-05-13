@@ -142,6 +142,6 @@ mod tests {
 
         let analyzer = DeadCodeAnalyzer::new(&db_path);
         // Just verify it creates without error
-        assert!(analyzer.db_path.exists() == false); // DB doesn't exist yet
+        assert!(!analyzer.db_path.exists()); // DB doesn't exist yet
     }
 }

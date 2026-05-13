@@ -999,6 +999,7 @@ mod tests {
         id: TaskId,
         name: String,
         deps: Vec<TaskId>,
+        #[allow(dead_code)]
         compensation: Option<CompensationAction>,
     }
 
@@ -1012,11 +1013,13 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn with_dep(mut self, dep: impl Into<TaskId>) -> Self {
             self.deps.push(dep.into());
             self
         }
 
+        #[allow(dead_code)]
         fn with_compensation(mut self, action: CompensationAction) -> Self {
             self.compensation = Some(action);
             self

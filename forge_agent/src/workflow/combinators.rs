@@ -270,7 +270,6 @@ mod tests {
     use super::*;
     use crate::workflow::tasks::FunctionTask;
     use std::time::Duration;
-    use std::time::Instant;
 
     #[tokio::test]
     async fn test_conditional_task_then_branch() {

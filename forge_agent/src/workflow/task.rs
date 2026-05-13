@@ -500,8 +500,6 @@ mod tests {
 
     #[test]
     fn test_context_without_cancellation_token() {
-        use crate::workflow::cancellation::CancellationToken;
-
         let task_id = TaskId::new("task-1");
         let context = TaskContext::new("workflow-1", task_id);
 
@@ -664,8 +662,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_compensation_integration() {
-        use crate::workflow::rollback::ToolCompensation;
-
         // Test task with compensation
         struct TaskWithCompensation {
             id: TaskId,

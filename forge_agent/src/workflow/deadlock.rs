@@ -317,6 +317,7 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn with_dep(mut self, dep: impl Into<TaskId>) -> Self {
             self.deps.push(dep.into());
             self
@@ -345,7 +346,7 @@ mod tests {
     #[test]
     fn test_deadlock_detector_creation() {
         let _detector = DeadlockDetector::new();
-        let _detector2 = DeadlockDetector::default();
+        let _detector2 = DeadlockDetector;
     }
 
     #[test]

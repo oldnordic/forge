@@ -9,7 +9,6 @@
 //! Both SQLite and Native V3 backends are tested.
 
 use forge_core::{BackendKind, Forge};
-use std::path::PathBuf;
 
 // =============================================================================
 // Helper Functions
@@ -417,7 +416,7 @@ async fn test_cfg_dominators_sqlite() {
         .expect("Failed to compute dominators");
 
     // At minimum should have entry block
-    assert!(dominators.len() >= 1, "Should have at least entry block");
+    assert!(!dominators.is_empty(), "Should have at least entry block");
 }
 
 #[tokio::test]

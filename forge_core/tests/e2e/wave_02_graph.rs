@@ -82,7 +82,7 @@ async fn e2e_graph_find_symbol_by_name() {
     // Should find at least one symbol
     assert!(symbols.is_ok(), "Should be able to query symbols");
 
-    let symbols = symbols.unwrap();
+    let _symbols = symbols.unwrap();
     // Note: Results depend on indexing - may be 0 if not indexed
     // Just verify the query doesn't panic
 }

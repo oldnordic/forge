@@ -79,9 +79,6 @@ mod tests {
     #[tokio::test]
     async fn test_committer_creation() {
         let _committer = Committer::new();
-
-        // Should create successfully
-        assert!(true);
     }
 
     #[tokio::test]

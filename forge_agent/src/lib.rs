@@ -412,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn test_agent_with_runtime() {
         let temp = tempfile::tempdir().unwrap();
-        let (_agent, mut runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+        let (_agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
         // Verify runtime is accessible
         assert_eq!(runtime.codebase_path(), temp.path());

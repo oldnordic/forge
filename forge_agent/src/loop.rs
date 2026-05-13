@@ -432,6 +432,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[allow(dead_code)]
     async fn create_test_loop() -> (AgentLoop, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let forge = Forge::open(temp_dir.path()).await.unwrap();
