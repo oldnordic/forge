@@ -489,6 +489,34 @@ impl KnowledgeGraph {
     pub async fn sync_references(&self) -> Result<SyncReport> {
         Ok(SyncReport::default())
     }
+
+    // -- Query entry point --
+
+    /// Entry-point query: resolves a keyword via FTS5, then traverses the graph.
+    ///
+    /// 1. FTS5 resolves keyword → graph node_id
+    /// 2. Graph traversal discovers callers, callees, correlations, affected
+    pub async fn query(&self, keyword: &str, depth: u32) -> Result<QueryResult> {
+        let entry_id = self.resolve_fts5(keyword)?;
+        let Some(entry_id) = entry_id else {
+            return Ok(QueryResult::default());
+        };
+
+        let entry_node = self.get_node(entry_id).ok();
+        let callers = self.callers_of(entry_id, depth).unwrap_or_default();
+        let callees = self.callees_of(entry_id, depth).unwrap_or_default();
+        let correlated = self.correlated(entry_id).unwrap_or_default();
+        let affected = self.affected_by(entry_id, depth).unwrap_or_default();
+
+        Ok(QueryResult {
+            entry_node,
+            callers,
+            callees,
+            correlated,
+            affected,
+            similar: Vec::new(),
+        })
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -887,5 +915,61 @@ mod tests {
         let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
         let report = kg.sync_symbols().await.unwrap();
         assert_eq!(report.nodes_added, 0);
+    }
+
+    // -- Query tests --
+
+    #[tokio::test]
+    async fn test_query_no_results() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS graph_node_index (
+                node_id INTEGER PRIMARY KEY,
+                magellan_id INTEGER,
+                node_kind TEXT NOT NULL,
+                graph_file TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        let result = kg.query("nonexistent", 3).await.unwrap();
+        assert!(result.entry_node.is_none());
+        assert!(result.callers.is_empty());
+    }
+
+    #[test]
+    fn test_query_traverse_from_bridge_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS graph_node_index (
+                node_id INTEGER PRIMARY KEY,
+                magellan_id INTEGER,
+                node_kind TEXT NOT NULL,
+                graph_file TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+
+        let sym_id = kg.add_symbol("my_func", "Function", "a::my_func", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let caller_id = kg.add_symbol("caller", "Function", "a::caller", "f.rs", 5, 0, 10, "Rust", None).unwrap();
+        kg.add_edge(caller_id, sym_id, "calls", serde_json::json!({})).unwrap();
+
+        kg.insert_bridge_entry(sym_id, 1, "kg.graph").unwrap();
+
+        let entry = kg.resolve_fts5_by_magellan_id(1).unwrap();
+        assert_eq!(entry, Some(sym_id));
+
+        let callers = kg.callers_of(sym_id, 1).unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].name, "caller");
     }
 }
