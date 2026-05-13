@@ -288,6 +288,84 @@ impl KnowledgeGraph {
     }
 
     /// Returns neighbors of a node filtered by edge type and direction.
+    // -- Traversal --
+
+    /// Finds all symbols that call the given symbol (incoming `calls` edges).
+    pub fn callers_of(&self, symbol_id: i64, max_depth: u32) -> Result<Vec<GraphNode>> {
+        self.bfs_by_edge_type(symbol_id, types::edge::CALLS, Direction::Incoming, max_depth)
+    }
+
+    /// Finds all symbols called by the given symbol (outgoing `calls` edges).
+    pub fn callees_of(&self, symbol_id: i64, max_depth: u32) -> Result<Vec<GraphNode>> {
+        self.bfs_by_edge_type(symbol_id, types::edge::CALLS, Direction::Outgoing, max_depth)
+    }
+
+    /// Finds all nodes correlated with the given node (bidirectional `correlates` edges).
+    pub fn correlated(&self, node_id: i64) -> Result<Vec<GraphNode>> {
+        let incoming = self.neighbors(node_id, types::edge::CORRELATES, Direction::Incoming)?;
+        let outgoing = self.neighbors(node_id, types::edge::CORRELATES, Direction::Outgoing)?;
+        let mut seen = std::collections::HashSet::new();
+        let mut results = Vec::new();
+        for node in incoming.into_iter().chain(outgoing) {
+            if seen.insert(node.id) {
+                results.push(node);
+            }
+        }
+        Ok(results)
+    }
+
+    /// Finds all symbols affected by issues (incoming `affects` edges, BFS to depth).
+    pub fn affected_by(&self, symbol_id: i64, depth: u32) -> Result<Vec<GraphNode>> {
+        self.bfs_by_edge_type(symbol_id, types::edge::AFFECTS, Direction::Incoming, depth)
+    }
+
+    fn bfs_by_edge_type(
+        &self,
+        start: i64,
+        edge_type: &str,
+        direction: Direction,
+        max_depth: u32,
+    ) -> Result<Vec<GraphNode>> {
+        let snap = Self::snapshot();
+        let dir = match direction {
+            Direction::Incoming => sqlitegraph::backend::BackendDirection::Incoming,
+            Direction::Outgoing => sqlitegraph::backend::BackendDirection::Outgoing,
+        };
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(start);
+        let mut results = Vec::new();
+        let mut frontier: Vec<i64> = vec![start];
+
+        for _ in 0..max_depth {
+            let mut next_frontier = Vec::new();
+            for node_id in &frontier {
+                let query = sqlitegraph::backend::NeighborQuery {
+                    direction: dir,
+                    edge_type: Some(edge_type.to_string()),
+                };
+                if let Ok(neighbor_ids) = self.backend.neighbors(snap, *node_id, query) {
+                    for nid in neighbor_ids {
+                        if visited.insert(nid) {
+                            next_frontier.push(nid);
+                            if let Ok(entity) = self.backend.get_node(snap, nid) {
+                                results.push(GraphNode {
+                                    id: nid,
+                                    kind: entity.kind,
+                                    name: entity.name,
+                                    file_path: entity.file_path,
+                                    data: entity.data,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            frontier = next_frontier;
+        }
+        Ok(results)
+    }
+
+    /// Returns neighbors of a node filtered by edge type and direction.
     pub fn neighbors(
         &self,
         node_id: i64,
@@ -544,5 +622,61 @@ mod tests {
         let incoming = kg.neighbors(sym, "correlates", Direction::Incoming).unwrap();
         assert_eq!(incoming.len(), 1);
         assert_eq!(incoming[0].name, "my_func");
+    }
+
+    // -- Traversal tests --
+
+    #[test]
+    fn test_callers_of() {
+        let (_temp, kg) = open_kg();
+        let target = kg.add_symbol("target_func", "Function", "t", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let caller_a = kg.add_symbol("caller_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None).unwrap();
+        let caller_b = kg.add_symbol("caller_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None).unwrap();
+
+        kg.add_edge(caller_a, target, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(caller_b, target, "calls", serde_json::json!({})).unwrap();
+
+        let callers = kg.callers_of(target, 1).unwrap();
+        assert_eq!(callers.len(), 2);
+    }
+
+    #[test]
+    fn test_callees_of() {
+        let (_temp, kg) = open_kg();
+        let func = kg.add_symbol("func", "Function", "f", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let callee_a = kg.add_symbol("callee_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None).unwrap();
+        let callee_b = kg.add_symbol("callee_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None).unwrap();
+
+        kg.add_edge(func, callee_a, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(func, callee_b, "calls", serde_json::json!({})).unwrap();
+
+        let callees = kg.callees_of(func, 1).unwrap();
+        assert_eq!(callees.len(), 2);
+    }
+
+    #[test]
+    fn test_correlated_nodes() {
+        let (_temp, kg) = open_kg();
+        let sym = kg.add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let disc1 = kg.add_discovery("agent1", "Symbol", "my_func", serde_json::json!({})).unwrap();
+        let disc2 = kg.add_discovery("agent2", "CFG", "my_func", serde_json::json!({})).unwrap();
+
+        kg.add_correlation(disc1, sym, 0.9, "agent1").unwrap();
+        kg.add_correlation(disc2, sym, 0.8, "agent2").unwrap();
+
+        let correlated = kg.correlated(sym).unwrap();
+        assert_eq!(correlated.len(), 2);
+    }
+
+    #[test]
+    fn test_affected_by() {
+        let (_temp, kg) = open_kg();
+        let sym = kg.add_symbol("process_payment", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let issue = kg.add_issue("high", "race condition", None).unwrap();
+
+        kg.add_edge(issue, sym, "affects", serde_json::json!({})).unwrap();
+
+        let affected = kg.affected_by(sym, 1).unwrap();
+        assert_eq!(affected.len(), 1);
     }
 }
