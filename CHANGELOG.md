@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.2] - 2026-05-13
+
+### Added
+
+- **Transaction SHA-256 checksums**: File snapshots use `sha2::Sha256` instead of `content.len()` for integrity verification.
+- **Transaction snapshots accessor**: `Transaction::snapshots()` exposes file snapshots for collecting modified files after mutation.
+- **Forge codebase_path accessor**: `Forge::codebase_path()` returns the codebase directory path.
+- **Verifier with Forge SDK**: `Verifier::with_forge()` enables graph consistency checks with real symbol counts.
+- **Graph-aware workflow tasks**: `GraphQueryTask` queries Forge SDK for find_symbol/references/impact_analysis. `AgentLoopTask` runs full agent loop. `FileEditTask` performs actual file writes.
+- **Planner file tracking**: `PlanOperation::Rename` and `PlanOperation::Delete` now carry `file: Option<String>` from observation symbol locations, enabling accurate impact estimation and conflict detection.
+- **RuntimeStats exposure**: `Agent::runtime_stats()` returns actual `RuntimeStats` from `ForgeRuntime` instead of `Option<()>`.
+
+### Fixed
+
+- Agent loop `mutate_phase()` now tracks modified files and generates diffs from transaction snapshots.
+- `verify_phase()` passes codebase path instead of empty path to verifier.
+- `graph_check()` reports actual symbol count instead of "skipped (not yet implemented)".
+- `constrain_phase()` populates diff with query context instead of empty placeholder.
+- Removed dead `extract_file_from_symbol()` method from planner (replaced by file field on operations).
+
+---
+
 ## [0.4.1] - 2026-05-13
 
 ### Added

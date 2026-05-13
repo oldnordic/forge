@@ -6,6 +6,7 @@
 //! to the original state.
 
 use crate::AgentError;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -26,7 +27,9 @@ pub struct FileSnapshot {
 impl FileSnapshot {
     /// Creates a new file snapshot.
     fn new(path: PathBuf, original_content: String) -> Self {
-        let checksum = format!("{}", original_content.len());
+        let mut hasher = Sha256::new();
+        hasher.update(original_content.as_bytes());
+        let checksum = format!("{:x}", hasher.finalize());
         Self {
             path,
             original_content,
@@ -37,10 +40,13 @@ impl FileSnapshot {
     /// Creates an empty snapshot for files that don't exist yet.
     /// During rollback, this indicates the file should be deleted.
     fn new_empty(path: PathBuf) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"");
+        let checksum = format!("{:x}", hasher.finalize());
         Self {
             path,
             original_content: String::new(),
-            checksum: "0".to_string(),
+            checksum,
         }
     }
 }
@@ -137,7 +143,7 @@ impl Transaction {
         // Rollback in reverse order (last modified first)
         for snapshot in self.snapshots.iter().rev() {
             // Check if file was created during transaction (empty original content)
-            if snapshot.checksum == "0" && snapshot.original_content.is_empty() {
+            if snapshot.original_content.is_empty() {
                 // File didn't exist before - delete it if it exists now
                 if snapshot.path.exists() {
                     tokio::fs::remove_file(&snapshot.path).await.map_err(|e| {
@@ -198,6 +204,11 @@ impl Transaction {
     #[cfg(test)]
     pub fn snapshot_count(&self) -> usize {
         self.snapshots.len()
+    }
+
+    /// Returns the file snapshots (for collecting modified files).
+    pub fn snapshots(&self) -> &[FileSnapshot] {
+        &self.snapshots
     }
 }
 

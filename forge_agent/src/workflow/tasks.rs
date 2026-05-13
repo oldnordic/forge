@@ -127,6 +127,11 @@ impl GraphQueryTask {
         }
     }
 
+    /// Gets the query target symbol name.
+    pub fn target(&self) -> &str {
+        &self._target
+    }
+
     /// Creates a GraphQueryTask with a custom ID.
     pub fn with_id(id: TaskId, query_type: GraphQueryType, target: impl Into<String>) -> Self {
         Self {
@@ -140,13 +145,55 @@ impl GraphQueryTask {
 
 #[async_trait]
 impl WorkflowTask for GraphQueryTask {
-    async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, TaskError> {
-        // Phase 8 stub - all graph queries return success
-        // Actual Forge SDK integration will be in Phase 10
+    async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+        let forge = context.forge.as_ref().ok_or_else(|| {
+            TaskError::ExecutionFailed("Forge SDK not available in TaskContext".to_string())
+        })?;
+
         match self.query_type {
-            GraphQueryType::FindSymbol => Ok(TaskResult::Success),
-            GraphQueryType::References => Ok(TaskResult::Success),
-            GraphQueryType::ImpactAnalysis => Ok(TaskResult::Success),
+            GraphQueryType::FindSymbol => {
+                let symbols = forge
+                    .graph()
+                    .find_symbol(&self._target)
+                    .await
+                    .map_err(|e| {
+                        TaskError::ExecutionFailed(format!("Find symbol failed: {}", e))
+                    })?;
+                if symbols.is_empty() {
+                    Ok(TaskResult::Failed(format!(
+                        "Symbol '{}' not found",
+                        self._target
+                    )))
+                } else {
+                    Ok(TaskResult::Success)
+                }
+            }
+            GraphQueryType::References => {
+                let refs = forge.graph().references(&self._target).await.map_err(|e| {
+                    TaskError::ExecutionFailed(format!("References query failed: {}", e))
+                })?;
+                Ok(if refs.is_empty() {
+                    TaskResult::Failed(format!("No references found for '{}'", self._target))
+                } else {
+                    TaskResult::Success
+                })
+            }
+            GraphQueryType::ImpactAnalysis => {
+                let result = forge
+                    .analysis()
+                    .impact_analysis(&self._target)
+                    .await
+                    .map_err(|e| {
+                        TaskError::ExecutionFailed(format!("Impact analysis failed: {}", e))
+                    })?;
+                Ok(
+                    if result.referenced_by.is_empty() && result.references.is_empty() {
+                        TaskResult::Failed(format!("No impact found for '{}'", self._target))
+                    } else {
+                        TaskResult::Success
+                    },
+                )
+            }
         }
     }
 
@@ -193,9 +240,18 @@ impl AgentLoopTask {
 
 #[async_trait]
 impl WorkflowTask for AgentLoopTask {
-    async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, TaskError> {
-        // Stub implementation - actual AgentLoop integration in Phase 10
-        // For now, just return success to indicate the task structure is valid
+    async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+        let forge = context.forge.as_ref().ok_or_else(|| {
+            TaskError::ExecutionFailed("Forge SDK not available in TaskContext".to_string())
+        })?;
+
+        let mut agent_loop = crate::r#loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
+        let result = agent_loop
+            .run(&self.query)
+            .await
+            .map_err(|e| TaskError::ExecutionFailed(format!("Agent loop failed: {}", e)))?;
+
+        let _ = result;
         Ok(TaskResult::Success)
     }
 
@@ -518,8 +574,15 @@ impl FileEditTask {
 #[async_trait]
 impl WorkflowTask for FileEditTask {
     async fn execute(&self, _context: &TaskContext) -> Result<TaskResult, TaskError> {
-        // Phase 8 stub - actual file editing will be implemented in Phase 11
-        // For now, return Success to indicate the task structure is valid
+        // Write new content to file, creating parent dirs if needed
+        if let Some(parent) = self.file_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(TaskError::Io)?;
+        }
+        tokio::fs::write(&self.file_path, &self.new_content)
+            .await
+            .map_err(TaskError::Io)?;
         Ok(TaskResult::Success)
     }
 
@@ -888,9 +951,10 @@ mod tests {
         assert_eq!(task.name(), "Agent Task");
         assert_eq!(task.query(), "Find all functions");
 
+        // Without Forge in context, should return error
         let context = TaskContext::new("workflow_1", TaskId::new("agent_task"));
-        let result = task.execute(&context).await.unwrap();
-        assert_eq!(result, TaskResult::Success);
+        let result = task.execute(&context).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -899,10 +963,12 @@ mod tests {
 
         assert_eq!(task.query_type, GraphQueryType::FindSymbol);
         assert_eq!(task._target, "process_data");
+        assert_eq!(task.target(), "process_data");
 
+        // Without Forge in context, should return error
         let context = TaskContext::new("workflow_1", task.id());
-        let result = task.execute(&context).await.unwrap();
-        assert_eq!(result, TaskResult::Success);
+        let result = task.execute(&context).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

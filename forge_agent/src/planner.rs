@@ -33,6 +33,8 @@ impl Planner {
         let intent = detect_intent(&query_lower);
 
         for symbol in &observation.symbols {
+            let file = symbol.location.file_path.to_str().map(|s| s.to_string());
+
             match &intent {
                 PlanIntent::Rename { new_name } => {
                     steps.push(PlanStep {
@@ -40,6 +42,7 @@ impl Planner {
                         operation: PlanOperation::Rename {
                             old: symbol.name.clone(),
                             new: new_name.clone(),
+                            file: file.clone(),
                         },
                     });
                 }
@@ -48,6 +51,7 @@ impl Planner {
                         description: format!("Delete {}", symbol.name),
                         operation: PlanOperation::Delete {
                             name: symbol.name.clone(),
+                            file: file.clone(),
                         },
                     });
                 }
@@ -93,15 +97,14 @@ impl Planner {
         // Collect all affected files
         for step in steps {
             match &step.operation {
-                PlanOperation::Rename { old, .. } => {
-                    // Extract file from symbol name (simplified)
-                    if let Some(file) = self.extract_file_from_symbol(old) {
-                        affected_files.insert(file);
+                PlanOperation::Rename { file, .. } => {
+                    if let Some(f) = file {
+                        affected_files.insert(f.clone());
                     }
                 }
-                PlanOperation::Delete { name } => {
-                    if let Some(file) = self.extract_file_from_symbol(name) {
-                        affected_files.insert(file);
+                PlanOperation::Delete { file, .. } => {
+                    if let Some(f) = file {
+                        affected_files.insert(f.clone());
                     }
                 }
                 PlanOperation::Create { path, .. } => {
@@ -250,7 +253,7 @@ impl Planner {
                     PlanOperation::Rename { old, .. } => RollbackOperation::Rename {
                         new_name: old.clone(),
                     },
-                    PlanOperation::Delete { name } => {
+                    PlanOperation::Delete { name, .. } => {
                         RollbackOperation::Restore { name: name.clone() }
                     }
                     PlanOperation::Create { path, .. } => {
@@ -265,17 +268,16 @@ impl Planner {
             .collect()
     }
 
-    /// Extracts file path from symbol name (simplified).
-    fn extract_file_from_symbol(&self, _symbol: &str) -> Option<String> {
-        // In production, this would query the graph for symbol location
-        // For now, return None
-        None
-    }
-
     /// Gets the file region affected by a step.
     fn get_step_region(&self, step: &PlanStep) -> Option<FileRegion> {
         match &step.operation {
-            PlanOperation::Rename { .. } | PlanOperation::Delete { .. } => None,
+            PlanOperation::Rename { file, .. } | PlanOperation::Delete { file, .. } => {
+                file.as_ref().map(|f| FileRegion {
+                    file: f.clone(),
+                    start: 0,
+                    end: usize::MAX,
+                })
+            }
             PlanOperation::Create { path, .. } => Some(FileRegion {
                 file: path.clone(),
                 start: 0,
@@ -306,9 +308,13 @@ pub struct PlanStep {
 #[derive(Clone, Debug)]
 pub enum PlanOperation {
     /// Rename a symbol
-    Rename { old: String, new: String },
+    Rename {
+        old: String,
+        new: String,
+        file: Option<String>,
+    },
     /// Delete a symbol
-    Delete { name: String },
+    Delete { name: String, file: Option<String> },
     /// Create new code
     Create { path: String, content: String },
     /// Inspect a symbol (read-only)
@@ -428,11 +434,11 @@ fn should_precede(a: &PlanOperation, b: &PlanOperation) -> bool {
             symbol_name == old
         }
         // Inspect before Delete of same symbol
-        (PlanOperation::Inspect { symbol_name, .. }, PlanOperation::Delete { name }) => {
+        (PlanOperation::Inspect { symbol_name, .. }, PlanOperation::Delete { name, .. }) => {
             symbol_name == name
         }
         // Rename before Delete for same symbol
-        (PlanOperation::Rename { old, .. }, PlanOperation::Delete { name }) => old == name,
+        (PlanOperation::Rename { old, .. }, PlanOperation::Delete { name, .. }) => old == name,
         // Create before Modify for same file
         (PlanOperation::Create { path, .. }, PlanOperation::Modify { file, .. }) => path == file,
         _ => false,
@@ -491,6 +497,7 @@ mod tests {
                 description: "Delete foo".to_string(),
                 operation: PlanOperation::Delete {
                     name: "foo".to_string(),
+                    file: None,
                 },
             },
             PlanStep {
@@ -498,6 +505,7 @@ mod tests {
                 operation: PlanOperation::Rename {
                     old: "foo".to_string(),
                     new: "bar".to_string(),
+                    file: None,
                 },
             },
         ];

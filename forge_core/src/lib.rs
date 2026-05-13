@@ -138,6 +138,11 @@ impl Forge {
     pub fn analysis(&self) -> analysis::AnalysisModule {
         analysis::AnalysisModule::new(self.graph(), self.cfg(), self.edit(), self.search())
     }
+
+    /// Returns the codebase path.
+    pub fn codebase_path(&self) -> &std::path::Path {
+        &self.store.codebase_path
+    }
 }
 
 /// Builder for configuring and creating a Forge instance.

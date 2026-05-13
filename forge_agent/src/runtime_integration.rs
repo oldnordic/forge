@@ -100,20 +100,9 @@ impl Agent {
         self.run(query).await
     }
 
-    /// Gets reference to runtime cache if available.
-    ///
-    /// Access the runtime's query cache.
-    ///
-    /// Not yet implemented — returns `None`.
-    pub fn runtime_cache(&self) -> Option<()> {
-        None
-    }
-
     /// Access runtime statistics (cache size, watch status, reindex count).
-    ///
-    /// Not yet implemented — returns `None`.
-    pub fn runtime_stats(&self) -> Option<()> {
-        None
+    pub fn runtime_stats(&self, runtime: &ForgeRuntime) -> forge_runtime::RuntimeStats {
+        runtime.stats()
     }
 }
 
@@ -144,20 +133,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_agent_runtime_stats_returns_none() {
+    async fn test_agent_runtime_stats() {
         let temp = tempfile::tempdir().unwrap();
-        let (agent, _runtime) = Agent::with_runtime(temp.path()).await.unwrap();
+        let (agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
-        // For v0.4, runtime_stats returns None
-        assert!(agent.runtime_stats().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_agent_runtime_cache_returns_none() {
-        let temp = tempfile::tempdir().unwrap();
-        let (agent, _runtime) = Agent::with_runtime(temp.path()).await.unwrap();
-
-        // For v0.4, runtime_cache returns None
-        assert!(agent.runtime_cache().is_none());
+        let stats = agent.runtime_stats(&runtime);
+        assert!(!stats.watch_active);
     }
 }

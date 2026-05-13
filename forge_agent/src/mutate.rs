@@ -47,8 +47,11 @@ impl Mutator {
             .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))?;
 
         match &step.operation {
-            crate::planner::PlanOperation::Rename { old, new } => {
-                let old_path = Path::new(old);
+            crate::planner::PlanOperation::Rename { old, new, file, .. } => {
+                let old_path = file
+                    .as_deref()
+                    .map(Path::new)
+                    .unwrap_or_else(|| Path::new(old));
                 let _ = transaction.snapshot_file(old_path).await;
 
                 if old_path.exists() {
@@ -61,8 +64,11 @@ impl Mutator {
                     })?;
                 }
             }
-            crate::planner::PlanOperation::Delete { name } => {
-                let name_path = Path::new(name);
+            crate::planner::PlanOperation::Delete { name, file, .. } => {
+                let name_path = file
+                    .as_deref()
+                    .map(Path::new)
+                    .unwrap_or_else(|| Path::new(name));
                 transaction.snapshot_file(name_path).await?;
 
                 if name_path.exists() {
@@ -166,10 +172,10 @@ impl Mutator {
                 crate::planner::PlanOperation::Create { path, content } => {
                     previews.push(format!("Create {}:\n{}", path, content));
                 }
-                crate::planner::PlanOperation::Delete { name } => {
+                crate::planner::PlanOperation::Delete { name, .. } => {
                     previews.push(format!("Delete {}", name));
                 }
-                crate::planner::PlanOperation::Rename { old, new } => {
+                crate::planner::PlanOperation::Rename { old, new, .. } => {
                     previews.push(format!("Rename {} to {}", old, new));
                 }
                 _ => {}
@@ -367,6 +373,7 @@ mod tests {
                 description: "Delete file".to_string(),
                 operation: crate::planner::PlanOperation::Delete {
                     name: "old.rs".to_string(),
+                    file: None,
                 },
             },
         ];

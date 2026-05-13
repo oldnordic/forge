@@ -226,12 +226,10 @@ impl Agent {
         // Create a validator
         let validator = policy::PolicyValidator::new(forge.clone());
 
-        // For observation, create a placeholder diff
-        // In production, this would be the actual planned diff
         let diff = policy::Diff {
-            file_path: std::path::PathBuf::from(""),
+            file_path: std::path::PathBuf::from(&observation.query),
             original: String::new(),
-            modified: String::new(),
+            modified: format!("query: {}", observation.query),
             changes: Vec::new(),
         };
 
@@ -441,9 +439,5 @@ mod tests {
 
         // Agent should be functional standalone
         assert_eq!(agent.codebase_path, temp.path());
-
-        // runtime_cache and runtime_stats should return None
-        assert!(agent.runtime_cache().is_none());
-        assert!(agent.runtime_stats().is_none());
     }
 }

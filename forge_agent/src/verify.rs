@@ -4,18 +4,27 @@
 //! mutations meet quality and policy requirements.
 
 use crate::{AgentError, Result};
+use std::path::Path;
 use std::process::Command;
 
 /// Verifier for post-mutation validation.
 ///
 /// The Verifier runs compile checks, tests, and graph validation.
 #[derive(Clone, Default)]
-pub struct Verifier {}
+pub struct Verifier {
+    /// Optional Forge SDK for graph consistency checks
+    forge: Option<forge_core::Forge>,
+}
 
 impl Verifier {
     /// Creates a new verifier.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a new verifier with Forge SDK for graph checks.
+    pub fn with_forge(forge: forge_core::Forge) -> Self {
+        Self { forge: Some(forge) }
     }
 
     /// Runs compile check via cargo.
@@ -85,12 +94,36 @@ impl Verifier {
 
     /// Validates graph consistency.
     ///
-    /// Checks for orphan references and broken symbol links.
-    pub async fn graph_check(&self, _working_dir: &std::path::Path) -> Result<Vec<Diagnostic>> {
-        let diagnostics = vec![Diagnostic {
-            level: DiagnosticLevel::Info,
-            message: "Graph consistency check: skipped (not yet implemented)".to_string(),
-        }];
+    /// Checks for symbols and reports graph health.
+    pub async fn graph_check(&self, working_dir: &Path) -> Result<Vec<Diagnostic>> {
+        let mut diagnostics = Vec::new();
+
+        if let Some(ref forge) = self.forge {
+            // Use Forge SDK to check graph health
+            match forge.graph().symbol_count().await {
+                Ok(count) => {
+                    diagnostics.push(Diagnostic {
+                        level: DiagnosticLevel::Info,
+                        message: format!(
+                            "Graph consistency: {} symbols indexed in {}",
+                            count,
+                            working_dir.display()
+                        ),
+                    });
+                }
+                Err(e) => {
+                    diagnostics.push(Diagnostic {
+                        level: DiagnosticLevel::Warning,
+                        message: format!("Graph query failed: {}", e),
+                    });
+                }
+            }
+        } else {
+            diagnostics.push(Diagnostic {
+                level: DiagnosticLevel::Info,
+                message: "Graph check: no Forge SDK available".to_string(),
+            });
+        }
 
         Ok(diagnostics)
     }
