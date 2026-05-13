@@ -146,6 +146,23 @@ impl Forge {
     pub fn codebase_path(&self) -> &std::path::Path {
         &self.store.codebase_path
     }
+
+    /// Returns the knowledge graph module.
+    ///
+    /// Opens or creates the `.magellan/knowledge.graph` file using
+    /// sqlitegraph native-v3 backend.
+    #[cfg(feature = "native-v3")]
+    pub fn knowledge(&self) -> anyhow::Result<knowledge::KnowledgeGraph> {
+        let graph_path = self.store.codebase_path.join(".magellan").join("knowledge.graph");
+        let db_path = self.store.db_path.clone();
+
+        if let Some(parent) = graph_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        knowledge::KnowledgeGraph::open(&graph_path, &db_path)
+            .map_err(|e| anyhow!("Failed to open knowledge graph: {}", e))
+    }
 }
 
 /// Builder for configuring and creating a Forge instance.
@@ -345,5 +362,18 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("path"));
+    }
+
+    #[cfg(feature = "native-v3")]
+    #[tokio::test]
+    async fn test_forge_knowledge_accessor() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+
+        let kg = forge.knowledge();
+        assert!(kg.is_ok());
+
+        let kg = kg.unwrap();
+        assert!(kg.graph_path().exists());
     }
 }
