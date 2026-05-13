@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graph-aware workflow tasks**: `GraphQueryTask` queries Forge SDK for find_symbol/references/impact_analysis. `AgentLoopTask` runs full agent loop. `FileEditTask` performs actual file writes.
 - **Planner file tracking**: `PlanOperation::Rename` and `PlanOperation::Delete` now carry `file: Option<String>` from observation symbol locations, enabling accurate impact estimation and conflict detection.
 - **RuntimeStats exposure**: `Agent::runtime_stats()` returns actual `RuntimeStats` from `ForgeRuntime` instead of `Option<()>`.
+- **Semantic observation**: `Observer::gather_symbols()` uses `SearchModule::semantic_search()` via llmgrep for all queries, with exact name lookup for structured queries (rename/delete/find).
 
 ### Fixed
 

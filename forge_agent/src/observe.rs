@@ -55,20 +55,33 @@ impl Observer {
         Ok(observation)
     }
 
-    /// Gathers symbols by parsing the query.
+    /// Gathers symbols by querying the search module and graph.
     async fn gather_symbols(&self, query: &str) -> Result<Vec<ObservedSymbol>> {
         let forge = self.forge.as_ref();
+        let mut seen = std::collections::HashSet::new();
         let mut symbols = Vec::new();
 
-        let query_lower = query.to_lowercase();
+        // Step 1: Semantic search via llmgrep/file scanning
+        if let Ok(results) = forge.search().semantic_search(query).await {
+            for sym in results {
+                if seen.insert(sym.id) {
+                    symbols.push(ObservedSymbol {
+                        id: sym.id,
+                        name: sym.name,
+                        kind: sym.kind,
+                        location: sym.location,
+                    });
+                }
+            }
+        }
 
-        if query_lower.contains("find") && query_lower.contains("named") {
-            if let Some(pos) = query_lower.find("named") {
-                let remaining = &query[pos + 6..];
-                let name = remaining.trim().trim_end_matches('?').trim().to_string();
-                if !name.is_empty() {
-                    if let Ok(found) = forge.graph().find_symbol(&name).await {
-                        for sym in found {
+        // Step 2: Exact name lookup if query contains a specific name
+        let query_lower = query.to_lowercase();
+        if let Some(name) = extract_name_from_query(&query_lower) {
+            if !name.is_empty() {
+                if let Ok(found) = forge.graph().find_symbol(&name).await {
+                    for sym in found {
+                        if seen.insert(sym.id) {
                             symbols.push(ObservedSymbol {
                                 id: sym.id,
                                 name: sym.name,
@@ -113,6 +126,31 @@ pub struct ObservedSymbol {
     pub kind: forge_core::types::SymbolKind,
     /// Source location
     pub location: forge_core::types::Location,
+}
+
+/// Extracts a symbol name from a structured query.
+fn extract_name_from_query(query: &str) -> Option<String> {
+    // "rename X to Y" -> X
+    if let Some(rest) = query.strip_prefix("rename ") {
+        if let Some((name, _)) = rest.split_once(" to ") {
+            return Some(name.trim().to_string());
+        }
+    }
+    // "delete X" or "remove X" -> X
+    if let Some(rest) = query
+        .strip_prefix("delete ")
+        .or_else(|| query.strip_prefix("remove "))
+    {
+        return Some(rest.trim().to_string());
+    }
+    // "find named X" or "find X" -> X
+    if let Some(rest) = query.strip_prefix("find named ") {
+        return Some(rest.trim().trim_end_matches('?').trim().to_string());
+    }
+    if let Some(rest) = query.strip_prefix("find ") {
+        return Some(rest.trim().trim_end_matches('?').trim().to_string());
+    }
+    None
 }
 
 #[cfg(test)]
