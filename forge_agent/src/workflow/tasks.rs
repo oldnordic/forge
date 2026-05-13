@@ -935,8 +935,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_command_task_stub() {
-        let config = ShellCommandConfig::new("echo")
-            .args(vec!["hello".to_string(), "world".to_string()]);
+        let config =
+            ShellCommandConfig::new("echo").args(vec!["hello".to_string(), "world".to_string()]);
         let task = ShellCommandTask::with_config(
             TaskId::new("shell_task"),
             "Shell Task".to_string(),
