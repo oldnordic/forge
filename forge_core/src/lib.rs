@@ -41,6 +41,9 @@ pub mod search;
 pub mod storage;
 pub mod treesitter;
 
+// Knowledge graph module (sqlitegraph native-v3)
+pub mod knowledge;
+
 // Runtime layer modules
 pub mod cache;
 pub mod indexing;
