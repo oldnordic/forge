@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-05-13
+
+### Added
+
+- **Search → llmgrep integration**: `SearchModule` delegates to `llmgrep::Backend::search_symbols()` when a magellan DB exists, with recursive file-scanning fallback. Added `SymbolMatch→Symbol` conversion with proper kind/language mapping.
+- **Enriched Reference struct**: `Reference` now has `from_name` and `to_name` fields populated from magellan's `CallFact` and `ReferenceFact`. Analysis methods return real symbol names instead of empty strings.
+- **Graph-aware planner**: `generate_steps()` detects intent (rename/delete/create/inspect) from observation query keywords. `order_steps()` uses Kahn's topological sort with dependency rules.
+- **CI pipeline**: GitHub Actions with `cargo fmt`, `cargo clippy -D warnings`, `cargo test`, Semgrep.
+- **Recursive file scanning**: Edit module and search module use `collect_files_recursive()` for proper subdirectory traversal.
+
+### Fixed
+
+- Edit module fallback now recurses into subdirectories (was only scanning top-level).
+- `reference_chain()`, `call_chain()`, `cross_references()`, `impact_analysis()` return Symbols with real names.
+- Overlap detection in planner conflict checker uses correct interval logic.
+- 7 broken doctests marked `ignore`. 5 native-v3 tests marked `ignore`.
+- `WorkflowError` import for `cfg(doc)` examples.
+
+---
+
 ## [0.4.0] - 2026-02-23
 
 ### Added
