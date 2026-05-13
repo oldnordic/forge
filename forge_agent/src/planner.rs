@@ -423,15 +423,13 @@ fn detect_intent(query: &str) -> PlanIntent {
 fn should_precede(a: &PlanOperation, b: &PlanOperation) -> bool {
     match (a, b) {
         // Inspect before Rename of same symbol
-        (
-            PlanOperation::Inspect { symbol_name, .. },
-            PlanOperation::Rename { old, .. },
-        ) => symbol_name == old,
+        (PlanOperation::Inspect { symbol_name, .. }, PlanOperation::Rename { old, .. }) => {
+            symbol_name == old
+        }
         // Inspect before Delete of same symbol
-        (
-            PlanOperation::Inspect { symbol_name, .. },
-            PlanOperation::Delete { name },
-        ) => symbol_name == name,
+        (PlanOperation::Inspect { symbol_name, .. }, PlanOperation::Delete { name }) => {
+            symbol_name == name
+        }
         // Rename before Delete for same symbol
         (PlanOperation::Rename { old, .. }, PlanOperation::Delete { name }) => old == name,
         // Create before Modify for same file
