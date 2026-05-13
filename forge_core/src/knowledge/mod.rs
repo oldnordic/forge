@@ -30,10 +30,7 @@ impl KnowledgeGraph {
     pub fn open(graph_path: &Path, db_path: &Path) -> Result<Self> {
         if let Some(parent) = graph_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                ForgeError::DatabaseError(format!(
-                    "Failed to create graph directory: {}",
-                    e
-                ))
+                ForgeError::DatabaseError(format!("Failed to create graph directory: {}", e))
             })?;
         }
 
@@ -78,18 +75,19 @@ impl KnowledgeGraph {
             file_path: file_path.map(|s| s.to_string()),
             data,
         };
-        self.backend.insert_node(spec).map_err(|e| {
-            ForgeError::DatabaseError(format!("Insert node failed: {}", e))
-        })
+        self.backend
+            .insert_node(spec)
+            .map_err(|e| ForgeError::DatabaseError(format!("Insert node failed: {}", e)))
     }
 
     // -- Node CRUD --
 
     /// Retrieves a node by ID.
     pub fn get_node(&self, node_id: i64) -> Result<GraphNode> {
-        let entity = self.backend.get_node(Self::snapshot(), node_id).map_err(
-            |e| ForgeError::DatabaseError(format!("Node not found: {}", e)),
-        )?;
+        let entity = self
+            .backend
+            .get_node(Self::snapshot(), node_id)
+            .map_err(|e| ForgeError::DatabaseError(format!("Node not found: {}", e)))?;
         Ok(GraphNode {
             id: node_id,
             kind: entity.kind,
@@ -102,9 +100,10 @@ impl KnowledgeGraph {
     /// Finds all nodes of a given kind.
     pub fn find_nodes_by_kind(&self, kind: &str) -> Result<Vec<GraphNode>> {
         let snap = Self::snapshot();
-        let ids = self.backend.entity_ids().map_err(|e| {
-            ForgeError::DatabaseError(format!("Entity list failed: {}", e))
-        })?;
+        let ids = self
+            .backend
+            .entity_ids()
+            .map_err(|e| ForgeError::DatabaseError(format!("Entity list failed: {}", e)))?;
         let mut results = Vec::new();
         for id in ids {
             if let Ok(entity) = self.backend.get_node(snap, id) {
@@ -123,6 +122,7 @@ impl KnowledgeGraph {
     }
 
     /// Adds a symbol node.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_symbol(
         &self,
         name: &str,
@@ -184,8 +184,7 @@ impl KnowledgeGraph {
         description: &str,
         rule_id: Option<&str>,
     ) -> Result<i64> {
-        let mut data =
-            serde_json::json!({"severity": severity, "description": description,});
+        let mut data = serde_json::json!({"severity": severity, "description": description,});
         if let Some(rid) = rule_id {
             data["rule_id"] = serde_json::json!(rid);
         }
@@ -274,9 +273,9 @@ impl KnowledgeGraph {
             edge_type: edge_type.to_string(),
             data,
         };
-        self.backend.insert_edge(spec).map_err(|e| {
-            ForgeError::DatabaseError(format!("Insert edge failed: {}", e))
-        })
+        self.backend
+            .insert_edge(spec)
+            .map_err(|e| ForgeError::DatabaseError(format!("Insert edge failed: {}", e)))
     }
 
     /// Adds a bidirectional correlation between two nodes.
@@ -287,17 +286,27 @@ impl KnowledgeGraph {
         Ok(())
     }
 
-    /// Returns neighbors of a node filtered by edge type and direction.
+    // Returns neighbors of a node filtered by edge type and direction.
     // -- Traversal --
 
     /// Finds all symbols that call the given symbol (incoming `calls` edges).
     pub fn callers_of(&self, symbol_id: i64, max_depth: u32) -> Result<Vec<GraphNode>> {
-        self.bfs_by_edge_type(symbol_id, types::edge::CALLS, Direction::Incoming, max_depth)
+        self.bfs_by_edge_type(
+            symbol_id,
+            types::edge::CALLS,
+            Direction::Incoming,
+            max_depth,
+        )
     }
 
     /// Finds all symbols called by the given symbol (outgoing `calls` edges).
     pub fn callees_of(&self, symbol_id: i64, max_depth: u32) -> Result<Vec<GraphNode>> {
-        self.bfs_by_edge_type(symbol_id, types::edge::CALLS, Direction::Outgoing, max_depth)
+        self.bfs_by_edge_type(
+            symbol_id,
+            types::edge::CALLS,
+            Direction::Outgoing,
+            max_depth,
+        )
     }
 
     /// Finds all nodes correlated with the given node (bidirectional `correlates` edges).
@@ -454,7 +463,12 @@ impl KnowledgeGraph {
     }
 
     /// Populates the bridge table with a node mapping.
-    pub fn insert_bridge_entry(&self, node_id: i64, magellan_id: i64, graph_file: &str) -> Result<()> {
+    pub fn insert_bridge_entry(
+        &self,
+        node_id: i64,
+        magellan_id: i64,
+        graph_file: &str,
+    ) -> Result<()> {
         let conn = rusqlite::Connection::open(&self.db_path)
             .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
 
@@ -541,7 +555,7 @@ mod tests {
         let graph_path = temp.path().join("nested").join("dir").join("kg.graph");
         let db_path = temp.path().join("magellan.db");
 
-        let kg = KnowledgeGraph::open(&graph_path, &db_path).unwrap();
+        let _kg = KnowledgeGraph::open(&graph_path, &db_path).unwrap();
         assert!(graph_path.exists());
     }
 
@@ -592,7 +606,10 @@ mod tests {
         assert_eq!(node.kind, "symbol");
         assert_eq!(node.name, "my_func");
         assert_eq!(node.prop_str("symbol_kind"), Some("Function"));
-        assert_eq!(node.prop_str("qualified_name"), Some("crate::module::my_func"));
+        assert_eq!(
+            node.prop_str("qualified_name"),
+            Some("crate::module::my_func")
+        );
         assert_eq!(node.prop_str("file"), Some("src/lib.rs"));
         assert_eq!(node.prop_u64("line"), Some(42));
     }
@@ -641,7 +658,9 @@ mod tests {
     #[test]
     fn test_add_pattern_node() {
         let (_temp, kg) = open_kg();
-        let id = kg.add_pattern("builder", 0.92, "builder pattern detected").unwrap();
+        let id = kg
+            .add_pattern("builder", 0.92, "builder pattern detected")
+            .unwrap();
         let node = kg.get_node(id).unwrap();
         assert_eq!(node.kind, "pattern");
         assert_eq!(node.prop_str("pattern_type"), Some("builder"));
@@ -714,28 +733,42 @@ mod tests {
     #[test]
     fn test_add_edge() {
         let (_temp, kg) = open_kg();
-        let a = kg.add_symbol("func_a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let b = kg.add_symbol("func_b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
+        let a = kg
+            .add_symbol("func_a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let b = kg
+            .add_symbol("func_b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .unwrap();
 
-        let edge_id = kg.add_edge(a, b, "calls", serde_json::json!({"location_line": 5})).unwrap();
+        let edge_id = kg
+            .add_edge(a, b, "calls", serde_json::json!({"location_line": 5}))
+            .unwrap();
         assert!(edge_id > 0);
     }
 
     #[test]
     fn test_add_correlation_bidirectional() {
         let (_temp, kg) = open_kg();
-        let sym = kg.add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let disc = kg.add_discovery("claude1", "Symbol", "my_func", serde_json::json!({})).unwrap();
+        let sym = kg
+            .add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let disc = kg
+            .add_discovery("claude1", "Symbol", "my_func", serde_json::json!({}))
+            .unwrap();
 
         kg.add_correlation(disc, sym, 0.95, "claude1").unwrap();
 
         // Outgoing: discovery -> symbol
-        let outgoing = kg.neighbors(disc, "correlates", Direction::Outgoing).unwrap();
+        let outgoing = kg
+            .neighbors(disc, "correlates", Direction::Outgoing)
+            .unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0].name, "my_func");
 
         // Incoming: symbol <- discovery
-        let incoming = kg.neighbors(sym, "correlates", Direction::Incoming).unwrap();
+        let incoming = kg
+            .neighbors(sym, "correlates", Direction::Incoming)
+            .unwrap();
         assert_eq!(incoming.len(), 1);
         assert_eq!(incoming[0].name, "my_func");
     }
@@ -745,12 +778,30 @@ mod tests {
     #[test]
     fn test_callers_of() {
         let (_temp, kg) = open_kg();
-        let target = kg.add_symbol("target_func", "Function", "t", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let caller_a = kg.add_symbol("caller_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None).unwrap();
-        let caller_b = kg.add_symbol("caller_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None).unwrap();
+        let target = kg
+            .add_symbol(
+                "target_func",
+                "Function",
+                "t",
+                "f.rs",
+                1,
+                0,
+                10,
+                "Rust",
+                None,
+            )
+            .unwrap();
+        let caller_a = kg
+            .add_symbol("caller_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None)
+            .unwrap();
+        let caller_b = kg
+            .add_symbol("caller_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None)
+            .unwrap();
 
-        kg.add_edge(caller_a, target, "calls", serde_json::json!({})).unwrap();
-        kg.add_edge(caller_b, target, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(caller_a, target, "calls", serde_json::json!({}))
+            .unwrap();
+        kg.add_edge(caller_b, target, "calls", serde_json::json!({}))
+            .unwrap();
 
         let callers = kg.callers_of(target, 1).unwrap();
         assert_eq!(callers.len(), 2);
@@ -759,12 +810,20 @@ mod tests {
     #[test]
     fn test_callees_of() {
         let (_temp, kg) = open_kg();
-        let func = kg.add_symbol("func", "Function", "f", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let callee_a = kg.add_symbol("callee_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None).unwrap();
-        let callee_b = kg.add_symbol("callee_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None).unwrap();
+        let func = kg
+            .add_symbol("func", "Function", "f", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let callee_a = kg
+            .add_symbol("callee_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None)
+            .unwrap();
+        let callee_b = kg
+            .add_symbol("callee_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None)
+            .unwrap();
 
-        kg.add_edge(func, callee_a, "calls", serde_json::json!({})).unwrap();
-        kg.add_edge(func, callee_b, "calls", serde_json::json!({})).unwrap();
+        kg.add_edge(func, callee_a, "calls", serde_json::json!({}))
+            .unwrap();
+        kg.add_edge(func, callee_b, "calls", serde_json::json!({}))
+            .unwrap();
 
         let callees = kg.callees_of(func, 1).unwrap();
         assert_eq!(callees.len(), 2);
@@ -773,9 +832,15 @@ mod tests {
     #[test]
     fn test_correlated_nodes() {
         let (_temp, kg) = open_kg();
-        let sym = kg.add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let disc1 = kg.add_discovery("agent1", "Symbol", "my_func", serde_json::json!({})).unwrap();
-        let disc2 = kg.add_discovery("agent2", "CFG", "my_func", serde_json::json!({})).unwrap();
+        let sym = kg
+            .add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let disc1 = kg
+            .add_discovery("agent1", "Symbol", "my_func", serde_json::json!({}))
+            .unwrap();
+        let disc2 = kg
+            .add_discovery("agent2", "CFG", "my_func", serde_json::json!({}))
+            .unwrap();
 
         kg.add_correlation(disc1, sym, 0.9, "agent1").unwrap();
         kg.add_correlation(disc2, sym, 0.8, "agent2").unwrap();
@@ -787,10 +852,23 @@ mod tests {
     #[test]
     fn test_affected_by() {
         let (_temp, kg) = open_kg();
-        let sym = kg.add_symbol("process_payment", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
+        let sym = kg
+            .add_symbol(
+                "process_payment",
+                "Function",
+                "a",
+                "f.rs",
+                1,
+                0,
+                10,
+                "Rust",
+                None,
+            )
+            .unwrap();
         let issue = kg.add_issue("high", "race condition", None).unwrap();
 
-        kg.add_edge(issue, sym, "affects", serde_json::json!({})).unwrap();
+        kg.add_edge(issue, sym, "affects", serde_json::json!({}))
+            .unwrap();
 
         let affected = kg.affected_by(sym, 1).unwrap();
         assert_eq!(affected.len(), 1);
@@ -801,9 +879,15 @@ mod tests {
     #[test]
     fn test_shortest_path() {
         let (_temp, kg) = open_kg();
-        let a = kg.add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let b = kg.add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
-        let c = kg.add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None).unwrap();
+        let a = kg
+            .add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let b = kg
+            .add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .unwrap();
+        let c = kg
+            .add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None)
+            .unwrap();
 
         kg.add_edge(a, b, "calls", serde_json::json!({})).unwrap();
         kg.add_edge(b, c, "calls", serde_json::json!({})).unwrap();
@@ -818,9 +902,15 @@ mod tests {
     #[test]
     fn test_reachability() {
         let (_temp, kg) = open_kg();
-        let a = kg.add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let b = kg.add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
-        let c = kg.add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None).unwrap();
+        let a = kg
+            .add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let b = kg
+            .add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .unwrap();
+        let c = kg
+            .add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None)
+            .unwrap();
 
         kg.add_edge(a, b, "calls", serde_json::json!({})).unwrap();
         kg.add_edge(b, c, "calls", serde_json::json!({})).unwrap();
@@ -833,9 +923,15 @@ mod tests {
     #[test]
     fn test_k_hop() {
         let (_temp, kg) = open_kg();
-        let a = kg.add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let b = kg.add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None).unwrap();
-        let c = kg.add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None).unwrap();
+        let a = kg
+            .add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .unwrap();
+        let b = kg
+            .add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .unwrap();
+        let c = kg
+            .add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None)
+            .unwrap();
 
         kg.add_edge(a, b, "calls", serde_json::json!({})).unwrap();
         kg.add_edge(b, c, "calls", serde_json::json!({})).unwrap();
@@ -959,9 +1055,34 @@ mod tests {
 
         let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
 
-        let sym_id = kg.add_symbol("my_func", "Function", "a::my_func", "f.rs", 1, 0, 10, "Rust", None).unwrap();
-        let caller_id = kg.add_symbol("caller", "Function", "a::caller", "f.rs", 5, 0, 10, "Rust", None).unwrap();
-        kg.add_edge(caller_id, sym_id, "calls", serde_json::json!({})).unwrap();
+        let sym_id = kg
+            .add_symbol(
+                "my_func",
+                "Function",
+                "a::my_func",
+                "f.rs",
+                1,
+                0,
+                10,
+                "Rust",
+                None,
+            )
+            .unwrap();
+        let caller_id = kg
+            .add_symbol(
+                "caller",
+                "Function",
+                "a::caller",
+                "f.rs",
+                5,
+                0,
+                10,
+                "Rust",
+                None,
+            )
+            .unwrap();
+        kg.add_edge(caller_id, sym_id, "calls", serde_json::json!({}))
+            .unwrap();
 
         kg.insert_bridge_entry(sym_id, 1, "kg.graph").unwrap();
 
