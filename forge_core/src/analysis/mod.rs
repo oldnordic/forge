@@ -540,7 +540,7 @@ impl AnalysisModule {
                 .map(|r| {
                     let name = r.to_name.unwrap_or_default();
                     Symbol {
-                        id: r.from,
+                        id: r.to,
                         name: name.clone(),
                         fully_qualified_name: name,
                         kind: crate::types::SymbolKind::Function,

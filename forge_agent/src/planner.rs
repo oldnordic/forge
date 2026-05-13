@@ -148,16 +148,17 @@ impl Planner {
             for i in 0..regions.len() {
                 for j in (i + 1)..regions.len() {
                     let (idx1, start1, end1) = regions[i];
-                    let (idx2, start2, _end2) = regions[j];
+                    let (idx2, start2, end2) = regions[j];
 
-                    // Check for overlap (no dereference needed, values are already usize)
-                    if start1 < end1 && start2 < end1 {
+                    // Two intervals [start1,end1) and [start2,end2) overlap
+                    // when start1 < end2 && start2 < end1
+                    if start1 < end2 && start2 < end1 {
                         conflicts.push(Conflict {
                             step_indices: vec![idx1, idx2],
                             file: file.clone(),
                             reason: ConflictReason::OverlappingRegion {
-                                start: start1,
-                                end: end1,
+                                start: start1.min(start2),
+                                end: end1.max(end2),
                             },
                         });
                     }
