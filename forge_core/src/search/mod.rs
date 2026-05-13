@@ -2,10 +2,12 @@
 //!
 //! This module provides semantic code search by integrating with llmgrep,
 //! which queries magellan databases for symbols, references, and calls.
+//! When the llmgrep feature is disabled, falls back to regex-based file scanning.
 
 use crate::error::{ForgeError, Result as ForgeResult};
 use crate::storage::UnifiedGraphStore;
-use crate::types::{Language, Location, Symbol, SymbolKind};
+use crate::types::{Language, Location, Symbol, SymbolId, SymbolKind};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Search module for semantic code queries.
@@ -21,90 +23,26 @@ impl SearchModule {
 
     /// Indexes the codebase for search.
     ///
-    /// This is a no-op for the current implementation which scans files directly.
-    /// In a future version with embedding-based search, this would build the index.
+    /// llmgrep reads magellan's DB directly, so this is a no-op.
+    /// The graph module's `index()` populates the shared DB.
     pub async fn index(&self) -> ForgeResult<()> {
-        // Current implementation scans files directly, no indexing needed
         Ok(())
     }
 
-    /// Pattern-based search using regex (async).
+    /// Pattern-based search using regex.
     ///
-    /// Scans source files for patterns like "fn \w+\(" and returns matching symbols.
+    /// With llmgrep: queries the magellan DB with regex matching.
+    /// Without: scans source files recursively with regex.
     pub async fn pattern_search(&self, pattern: &str) -> ForgeResult<Vec<Symbol>> {
-        use regex::Regex;
-
-        // Compile the regex pattern
-        let regex = Regex::new(pattern)
-            .map_err(|e| ForgeError::DatabaseError(format!("Invalid regex pattern: {}", e)))?;
-
-        let mut results = Vec::new();
-
-        // Scan source files recursively
-        Self::search_files_recursive(
-            &self.store.codebase_path,
-            &self.store.codebase_path,
-            &regex,
-            &mut results,
-        )
-        .await?;
-
-        Ok(results)
-    }
-
-    /// Recursively search files for pattern matches
-    async fn search_files_recursive(
-        root: &std::path::Path,
-        dir: &std::path::Path,
-        regex: &regex::Regex,
-        results: &mut Vec<Symbol>,
-    ) -> ForgeResult<()> {
-        use tokio::fs;
-
-        let mut entries = fs::read_dir(dir)
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
+        #[cfg(feature = "llmgrep")]
         {
-            let path = entry.path();
-            if path.is_dir() {
-                // Recurse into subdirectories
-                Box::pin(Self::search_files_recursive(root, &path, regex, results)).await?;
-            } else if path.is_file() && path.extension().map(|e| e == "rs").unwrap_or(false) {
-                // Read and search Rust files
-                if let Ok(content) = fs::read_to_string(&path).await {
-                    for (line_num, line) in content.lines().enumerate() {
-                        if regex.is_match(line) {
-                            // Extract symbol name from the matched line
-                            let symbol_name = extract_symbol_from_line(line);
-                            let relative_path = path.strip_prefix(root).unwrap_or(&path);
-
-                            results.push(Symbol {
-                                id: crate::types::SymbolId(0),
-                                name: symbol_name.clone(),
-                                fully_qualified_name: symbol_name,
-                                kind: SymbolKind::Function, // Assume function for fn patterns
-                                language: Language::Rust,
-                                location: Location {
-                                    file_path: relative_path.to_path_buf(),
-                                    byte_start: 0,
-                                    byte_end: line.len() as u32,
-                                    line_number: line_num + 1,
-                                },
-                                parent_id: None,
-                                metadata: serde_json::Value::Null,
-                            });
-                        }
-                    }
-                }
+            let db_path = self.store.db_path.join("graph.db");
+            if db_path.exists() {
+                return self.search_via_llmgrep(pattern, true).await;
             }
         }
 
-        Ok(())
+        self.pattern_search_via_files(pattern).await
     }
 
     /// Pattern-based search (alias for `pattern_search`).
@@ -112,16 +50,140 @@ impl SearchModule {
         self.pattern_search(pattern).await
     }
 
-    /// Semantic search using natural language (async).
+    /// Semantic search using natural language.
     ///
-    /// Note: True semantic search would require embedding generation.
-    /// This implementation uses keyword matching on symbol names, with
-    /// substring matching for partial word matches.
+    /// With llmgrep: queries the magellan DB with fuzzy/substring matching.
+    /// Without: splits query into keywords and scans files.
     pub async fn semantic_search(&self, query: &str) -> ForgeResult<Vec<Symbol>> {
-        // Extract keywords from the query
+        #[cfg(feature = "llmgrep")]
+        {
+            let db_path = self.store.db_path.join("graph.db");
+            if db_path.exists() {
+                return self.search_via_llmgrep(query, false).await;
+            }
+        }
+
+        self.semantic_search_via_files(query).await
+    }
+
+    /// Semantic search (alias for `semantic_search`).
+    pub async fn semantic(&self, query: &str) -> ForgeResult<Vec<Symbol>> {
+        self.semantic_search(query).await
+    }
+
+    /// Find a specific symbol by name.
+    pub async fn symbol_by_name(&self, name: &str) -> ForgeResult<Option<Symbol>> {
+        let symbols = self.pattern_search(name).await?;
+        Ok(symbols.into_iter().find(|s| s.name == name))
+    }
+
+    /// Find all symbols of a specific kind.
+    pub async fn symbols_by_kind(&self, kind: SymbolKind) -> ForgeResult<Vec<Symbol>> {
+        let all_symbols = self
+            .store
+            .get_all_symbols()
+            .await
+            .map_err(|e| ForgeError::DatabaseError(format!("Kind search failed: {}", e)))?;
+
+        Ok(all_symbols.into_iter().filter(|s| s.kind == kind).collect())
+    }
+
+    // -- llmgrep-backed search --
+
+    #[cfg(feature = "llmgrep")]
+    async fn search_via_llmgrep(&self, query: &str, use_regex: bool) -> ForgeResult<Vec<Symbol>> {
+        use llmgrep::query::SearchOptions;
+
+        let db_path = self.store.db_path.join("graph.db");
+        let backend = llmgrep::Backend::detect_and_open(&db_path).map_err(|e| {
+            ForgeError::DatabaseError(format!("Failed to open llmgrep backend: {}", e))
+        })?;
+
+        let options = SearchOptions {
+            db_path: &db_path,
+            query,
+            path_filter: None,
+            kind_filter: None,
+            language_filter: None,
+            limit: 50,
+            use_regex,
+            candidates: 100,
+            context: llmgrep::query::ContextOptions::default(),
+            snippet: llmgrep::query::SnippetOptions::default(),
+            fqn: llmgrep::query::FqnOptions {
+                fqn: true,
+                ..Default::default()
+            },
+            include_score: false,
+            sort_by: llmgrep::SortMode::default(),
+            metrics: llmgrep::query::MetricsOptions::default(),
+            ast: llmgrep::query::AstOptions::new(),
+            depth: llmgrep::query::DepthOptions::default(),
+            algorithm: llmgrep::AlgorithmOptions::default(),
+            symbol_id: None,
+            fqn_pattern: None,
+            exact_fqn: None,
+            coverage_filter: None,
+        };
+
+        let (response, _truncated, _fts_used) = backend
+            .search_symbols(options)
+            .map_err(|e| ForgeError::DatabaseError(format!("llmgrep search failed: {}", e)))?;
+
+        Ok(response
+            .results
+            .into_iter()
+            .map(llmgrep_match_to_symbol)
+            .collect())
+    }
+
+    // -- File-based fallback search --
+
+    async fn pattern_search_via_files(&self, pattern: &str) -> ForgeResult<Vec<Symbol>> {
+        use regex::Regex;
+
+        let regex = Regex::new(pattern)
+            .map_err(|e| ForgeError::DatabaseError(format!("Invalid regex pattern: {}", e)))?;
+
+        let mut results = Vec::new();
+        let mut files = Vec::new();
+        collect_source_files(&self.store.codebase_path, &mut files).await;
+
+        for path in files {
+            if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                for (line_num, line) in content.lines().enumerate() {
+                    if regex.is_match(line) {
+                        let symbol_name = extract_symbol_from_line(line);
+                        let relative_path = path
+                            .strip_prefix(&self.store.codebase_path)
+                            .unwrap_or(&path);
+                        results.push(Symbol {
+                            id: SymbolId(0),
+                            name: symbol_name.clone(),
+                            fully_qualified_name: symbol_name,
+                            kind: SymbolKind::Function,
+                            language: Language::Rust,
+                            location: Location {
+                                file_path: relative_path.to_path_buf(),
+                                byte_start: 0,
+                                byte_end: line.len() as u32,
+                                line_number: line_num + 1,
+                            },
+                            parent_id: None,
+                            metadata: serde_json::Value::Null,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn semantic_search_via_files(&self, query: &str) -> ForgeResult<Vec<Symbol>> {
         let keywords: Vec<&str> = query
             .split_whitespace()
-            .filter(|w| w.len() >= 3) // Consider words 3+ chars
+            .filter(|w| w.len() >= 3)
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .filter(|w| !w.is_empty())
             .collect();
@@ -130,271 +192,161 @@ impl SearchModule {
             return Ok(Vec::new());
         }
 
-        // First try exact pattern search
-        let mut all_results = Vec::new();
-        for keyword in &keywords {
-            let matches = self.pattern_search(keyword).await?;
-            all_results.extend(matches);
-        }
+        let mut results = Vec::new();
+        let mut files = Vec::new();
+        collect_source_files(&self.store.codebase_path, &mut files).await;
 
-        // Also scan files for keywords that might match as substrings
-        // This handles cases like "addition" matching "add"
-        self.scan_for_substring_matches(&keywords, &mut all_results)
-            .await?;
-
-        // Remove duplicates (by name)
-        let mut seen = std::collections::HashSet::new();
-        all_results.retain(|s| seen.insert(s.name.clone()));
-
-        Ok(all_results)
-    }
-
-    /// Scan files for symbols that contain keyword substrings
-    async fn scan_for_substring_matches(
-        &self,
-        keywords: &[&str],
-        results: &mut Vec<Symbol>,
-    ) -> ForgeResult<()> {
-        use tokio::fs;
-
-        let codebase_path = &self.store.codebase_path;
-        let mut entries = fs::read_dir(codebase_path)
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read dir: {}", e)))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
-        {
-            let path = entry.path();
-            if path.is_dir() {
-                // Recurse (simplified - in production use walkdir)
-                if let Ok(sub_entries) = fs::read_dir(&path).await {
-                    let mut sub_entries = sub_entries;
-                    while let Ok(Some(sub_entry)) = sub_entries.next_entry().await {
-                        let sub_path = sub_entry.path();
-                        if sub_path.is_file()
-                            && sub_path.extension().map(|e| e == "rs").unwrap_or(false)
-                        {
-                            Self::check_file_for_submatches(
-                                &sub_path,
-                                keywords,
-                                results,
-                                codebase_path,
-                            )
-                            .await?;
-                        }
-                    }
-                }
-            } else if path.is_file() && path.extension().map(|e| e == "rs").unwrap_or(false) {
-                Self::check_file_for_submatches(&path, keywords, results, codebase_path).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn check_file_for_submatches(
-        path: &std::path::Path,
-        keywords: &[&str],
-        results: &mut Vec<Symbol>,
-        root: &std::path::Path,
-    ) -> ForgeResult<()> {
-        use tokio::fs;
-
-        if let Ok(content) = fs::read_to_string(path).await {
+        for path in files {
+            let Ok(content) = tokio::fs::read_to_string(&path).await else {
+                continue;
+            };
             for (line_num, line) in content.lines().enumerate() {
-                // Look for function definitions
-                if line.contains("fn ") {
-                    let fn_name = extract_symbol_from_line(line);
-                    // Check if any keyword is a substring of this function name
-                    // or if function name is a substring of any keyword
-                    for keyword in keywords {
-                        if fn_name.contains(keyword) || keyword.contains(&fn_name) {
-                            if !fn_name.is_empty() && fn_name != "fn" {
-                                let relative_path = path.strip_prefix(root).unwrap_or(path);
-                                results.push(Symbol {
-                                    id: crate::types::SymbolId(0),
-                                    name: fn_name.clone(),
-                                    fully_qualified_name: fn_name,
-                                    kind: SymbolKind::Function,
-                                    language: Language::Rust,
-                                    location: Location {
-                                        file_path: relative_path.to_path_buf(),
-                                        byte_start: 0,
-                                        byte_end: line.len() as u32,
-                                        line_number: line_num + 1,
-                                    },
-                                    parent_id: None,
-                                    metadata: serde_json::Value::Null,
-                                });
-                            }
-                            break;
-                        }
-                    }
+                let name = extract_symbol_from_line(line);
+                if name.is_empty() || name == "fn" {
+                    continue;
                 }
-
-                // Also look for struct definitions (for "calculator" -> "Calculator")
-                if line.contains("struct ") {
-                    let struct_name = extract_struct_from_line(line);
-                    for keyword in keywords {
-                        let keyword_lower = keyword.to_lowercase();
-                        let struct_lower = struct_name.to_lowercase();
-                        if struct_lower.contains(&keyword_lower)
-                            || keyword_lower.contains(&struct_lower)
-                        {
-                            if !struct_name.is_empty() {
-                                let relative_path = path.strip_prefix(root).unwrap_or(path);
-                                results.push(Symbol {
-                                    id: crate::types::SymbolId(0),
-                                    name: struct_name.clone(),
-                                    fully_qualified_name: struct_name,
-                                    kind: SymbolKind::Struct,
-                                    language: Language::Rust,
-                                    location: Location {
-                                        file_path: relative_path.to_path_buf(),
-                                        byte_start: 0,
-                                        byte_end: line.len() as u32,
-                                        line_number: line_num + 1,
-                                    },
-                                    parent_id: None,
-                                    metadata: serde_json::Value::Null,
-                                });
-                            }
-                            break;
-                        }
-                    }
+                let name_lower = name.to_lowercase();
+                let matches_keyword = keywords.iter().any(|kw| {
+                    let kw_lower = kw.to_lowercase();
+                    name_lower.contains(&kw_lower) || kw_lower.contains(&name_lower)
+                });
+                if matches_keyword {
+                    let relative_path = path
+                        .strip_prefix(&self.store.codebase_path)
+                        .unwrap_or(&path);
+                    results.push(Symbol {
+                        id: SymbolId(0),
+                        name: name.clone(),
+                        fully_qualified_name: name,
+                        kind: if line.contains("struct ") {
+                            SymbolKind::Struct
+                        } else {
+                            SymbolKind::Function
+                        },
+                        language: Language::Rust,
+                        location: Location {
+                            file_path: relative_path.to_path_buf(),
+                            byte_start: 0,
+                            byte_end: line.len() as u32,
+                            line_number: line_num + 1,
+                        },
+                        parent_id: None,
+                        metadata: serde_json::Value::Null,
+                    });
                 }
             }
         }
 
-        Ok(())
-    }
+        let mut seen = std::collections::HashSet::new();
+        results.retain(|s| seen.insert(s.name.clone()));
 
-    /// Semantic search (alias for `semantic_search`).
-    pub async fn semantic(&self, query: &str) -> ForgeResult<Vec<Symbol>> {
-        self.semantic_search(query).await
-    }
-
-    /// Find a specific symbol by name (async).
-    pub async fn symbol_by_name(&self, name: &str) -> ForgeResult<Option<Symbol>> {
-        let symbols = self.pattern_search(name).await?;
-        // Return first exact match or None
-        Ok(symbols.into_iter().find(|s| s.name == name))
-    }
-
-    /// Find all symbols of a specific kind (async).
-    pub async fn symbols_by_kind(&self, kind: SymbolKind) -> ForgeResult<Vec<Symbol>> {
-        // Query all symbols and filter by kind
-        let all_symbols = self
-            .store
-            .get_all_symbols()
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Kind search failed: {}", e)))?;
-
-        let filtered: Vec<Symbol> = all_symbols.into_iter().filter(|s| s.kind == kind).collect();
-
-        Ok(filtered)
+        Ok(results)
     }
 }
 
-/// Map magellan SymbolKind to forge SymbolKind
-#[cfg(feature = "magellan")]
-#[expect(dead_code)] // Helper for magellan integration
-fn map_magellan_kind(kind: &magellan::SymbolKind) -> SymbolKind {
-    use magellan::SymbolKind as MagellanKind;
+/// Recursively collect source files, skipping build artifacts.
+async fn collect_source_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if matches!(
+                    name,
+                    "target" | ".git" | ".forge" | ".magellan" | "node_modules"
+                ) {
+                    continue;
+                }
+            }
+            Box::pin(collect_source_files(&path, files)).await;
+        } else if path.is_file()
+            && path
+                .extension()
+                .map(|e| {
+                    matches!(
+                        e.to_str(),
+                        Some("rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp")
+                    )
+                })
+                .unwrap_or(false)
+        {
+            files.push(path);
+        }
+    }
+}
 
+#[cfg(feature = "llmgrep")]
+fn llmgrep_match_to_symbol(m: llmgrep::output::SymbolMatch) -> Symbol {
+    let kind = map_llmgrep_kind(&m.kind);
+    let language = m
+        .language
+        .as_deref()
+        .map(map_llmgrep_language)
+        .unwrap_or(Language::Unknown("unknown".to_string()));
+    let fqn = m.fqn.clone().unwrap_or_else(|| m.name.clone());
+
+    Symbol {
+        id: SymbolId(0),
+        name: m.name,
+        fully_qualified_name: fqn,
+        kind,
+        language,
+        location: Location {
+            file_path: PathBuf::from(&m.span.file_path),
+            byte_start: m.span.byte_start as u32,
+            byte_end: m.span.byte_end as u32,
+            line_number: m.span.start_line as usize,
+        },
+        parent_id: None,
+        metadata: serde_json::Value::Null,
+    }
+}
+
+#[cfg(feature = "llmgrep")]
+fn map_llmgrep_kind(kind: &str) -> SymbolKind {
     match kind {
-        MagellanKind::Function => SymbolKind::Function,
-        MagellanKind::Method => SymbolKind::Method,
-        MagellanKind::Class => SymbolKind::Struct,
-        MagellanKind::Interface => SymbolKind::Trait,
-        MagellanKind::Enum => SymbolKind::Enum,
-        MagellanKind::Module => SymbolKind::Module,
-        MagellanKind::TypeAlias => SymbolKind::TypeAlias,
-        MagellanKind::Union => SymbolKind::Enum,
-        MagellanKind::Namespace => SymbolKind::Module,
-        MagellanKind::Unknown => SymbolKind::Function,
+        "function_item" | "function" => SymbolKind::Function,
+        "method_item" | "method" | "impl_item" => SymbolKind::Method,
+        "struct_item" | "struct" | "class" => SymbolKind::Struct,
+        "trait_item" | "trait" | "interface" => SymbolKind::Trait,
+        "enum_item" | "enum" => SymbolKind::Enum,
+        "mod_item" | "module" | "namespace" => SymbolKind::Module,
+        "type_item" | "type_alias" => SymbolKind::TypeAlias,
+        "const_item" | "constant" => SymbolKind::Constant,
+        "field" | "property" => SymbolKind::Field,
+        _ => SymbolKind::Function,
+    }
+}
+
+#[cfg(feature = "llmgrep")]
+fn map_llmgrep_language(lang: &str) -> Language {
+    match lang {
+        "rust" => Language::Rust,
+        "python" => Language::Python,
+        "c" => Language::C,
+        "cpp" | "c++" => Language::Cpp,
+        "java" => Language::Java,
+        "javascript" | "js" => Language::JavaScript,
+        "typescript" | "ts" => Language::TypeScript,
+        "go" => Language::Go,
+        _ => Language::Unknown(lang.to_string()),
     }
 }
 
 /// Extract function name from a source line
-/// e.g., "pub fn add(a: i32) -> i32 {" -> "add"
 fn extract_symbol_from_line(line: &str) -> String {
     let line = line.trim();
 
-    // Try to extract function name
     if let Some(fn_pos) = line.find("fn ") {
         let after_fn = &line[fn_pos + 3..];
-        // Find the end of the identifier (whitespace or ()
         if let Some(end_pos) = after_fn.find(|c: char| c.is_whitespace() || c == '(') {
             return after_fn[..end_pos].trim().to_string();
         }
     }
 
-    // Default: return first word
     line.split_whitespace().next().unwrap_or("").to_string()
-}
-
-/// Extract struct name from a source line
-/// e.g., "pub struct Calculator {" -> "Calculator"
-fn extract_struct_from_line(line: &str) -> String {
-    let line = line.trim();
-
-    if let Some(struct_pos) = line.find("struct ") {
-        let after_struct = &line[struct_pos + 7..];
-        if let Some(end_pos) =
-            after_struct.find(|c: char| c.is_whitespace() || c == '{' || c == ';' || c == '(')
-        {
-            return after_struct[..end_pos].trim().to_string();
-        }
-    }
-
-    // Default: return first word
-    line.split_whitespace().next().unwrap_or("").to_string()
-}
-
-/// Simple glob pattern matching (supports * wildcard)
-#[expect(dead_code)] // Helper for pattern matching
-fn glob_match(pattern: &str, text: &str) -> bool {
-    if !pattern.contains('*') {
-        return pattern == text;
-    }
-
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.is_empty() {
-        return true;
-    }
-
-    let mut text_remaining = text;
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-
-        if i == 0 && !pattern.starts_with('*') {
-            // First part must match at start
-            if !text_remaining.starts_with(part) {
-                return false;
-            }
-            text_remaining = &text_remaining[part.len()..];
-        } else if i == parts.len() - 1 && !pattern.ends_with('*') {
-            // Last part must match at end
-            if !text_remaining.ends_with(part) {
-                return false;
-            }
-        } else {
-            // Middle part can match anywhere
-            if let Some(pos) = text_remaining.find(part) {
-                text_remaining = &text_remaining[pos + part.len()..];
-            } else {
-                return false;
-            }
-        }
-    }
-
-    true
 }
 
 #[cfg(test)]
@@ -452,7 +404,15 @@ mod tests {
         let search = SearchModule::new(store);
 
         let functions = search.symbols_by_kind(SymbolKind::Function).await.unwrap();
-        // Empty since no symbols inserted yet
         assert!(functions.is_empty());
+    }
+
+    #[test]
+    fn test_extract_symbol_from_line() {
+        assert_eq!(
+            extract_symbol_from_line("pub fn add(a: i32) -> i32 {"),
+            "add"
+        );
+        assert_eq!(extract_symbol_from_line("fn hello() {"), "hello");
     }
 }

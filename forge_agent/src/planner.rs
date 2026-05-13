@@ -20,26 +20,63 @@ impl Planner {
 
     /// Generates execution steps from an observation.
     ///
-    /// # Arguments
-    ///
-    /// * `observation` - The observation data
+    /// Parses the observation query for intent keywords to decide what
+    /// operations to generate. Falls back to Inspect for unrecognized queries.
     pub async fn generate_steps(
         &self,
         observation: &super::observe::Observation,
     ) -> Result<Vec<PlanStep>> {
+        let query_lower = observation.query.to_lowercase();
         let mut steps = Vec::new();
 
-        // For each symbol in the observation, create appropriate steps
+        // Detect intent from query
+        let intent = detect_intent(&query_lower);
+
         for symbol in &observation.symbols {
-            // In production, this would use LLM to decide what operations
-            // For now, create placeholder steps
-            steps.push(PlanStep {
-                description: format!("Process symbol {}", symbol.name),
-                operation: PlanOperation::Inspect {
-                    symbol_id: symbol.id,
-                    symbol_name: symbol.name.clone(),
-                },
-            });
+            match &intent {
+                PlanIntent::Rename { new_name } => {
+                    steps.push(PlanStep {
+                        description: format!("Rename {} to {}", symbol.name, new_name),
+                        operation: PlanOperation::Rename {
+                            old: symbol.name.clone(),
+                            new: new_name.clone(),
+                        },
+                    });
+                }
+                PlanIntent::Delete => {
+                    steps.push(PlanStep {
+                        description: format!("Delete {}", symbol.name),
+                        operation: PlanOperation::Delete {
+                            name: symbol.name.clone(),
+                        },
+                    });
+                }
+                PlanIntent::Create { content } => {
+                    let file_path = symbol.location.file_path.to_string_lossy().to_string();
+                    steps.push(PlanStep {
+                        description: format!("Create {} in {}", symbol.name, file_path),
+                        operation: PlanOperation::Create {
+                            path: file_path,
+                            content: content.clone(),
+                        },
+                    });
+                }
+                PlanIntent::Inspect => {
+                    steps.push(PlanStep {
+                        description: format!(
+                            "Inspect {} ({:?} at {}:{})",
+                            symbol.name,
+                            symbol.kind,
+                            symbol.location.file_path.display(),
+                            symbol.location.line_number,
+                        ),
+                        operation: PlanOperation::Inspect {
+                            symbol_id: symbol.id,
+                            symbol_name: symbol.name.clone(),
+                        },
+                    });
+                }
+            }
         }
 
         Ok(steps)
@@ -131,43 +168,67 @@ impl Planner {
         Ok(conflicts)
     }
 
-    /// Orders steps based on dependencies.
+    /// Orders steps using topological sort based on dependencies.
     ///
-    /// # Arguments
-    ///
-    /// * `steps` - The planned steps
+    /// Rules:
+    /// - Inspect of symbol X must come before Rename/Delete/Modify of X
+    /// - Rename of symbol X must come before Delete of X
+    /// - Create of file F must come before Modify of file F
     pub fn order_steps(&self, steps: &mut [PlanStep]) -> Result<()> {
-        // Simple topological sort based on step dependencies
-        // For now, keep existing order (production would use DAG)
-        // In a full implementation, this would:
-        // 1. Build dependency graph
-        // 2. Topologically sort
-        // 3. Detect cycles
+        if steps.len() <= 1 {
+            return Ok(());
+        }
 
-        // Ensure Rename comes before Delete for same symbol
-        let mut rename_indices = Vec::new();
-        let mut delete_indices = Vec::new();
+        let n = steps.len();
+        // Build adjacency: edge i->j means step i must happen before step j
+        let mut edges: Vec<(usize, usize)> = Vec::new();
 
-        for (idx, step) in steps.iter().enumerate() {
-            match &step.operation {
-                PlanOperation::Rename { old, .. } => {
-                    rename_indices.push((idx, old.clone()));
+        for i in 0..n {
+            for j in 0..n {
+                if i == j {
+                    continue;
                 }
-                PlanOperation::Delete { name } => {
-                    delete_indices.push((idx, name.clone()));
+                if should_precede(&steps[i].operation, &steps[j].operation) {
+                    edges.push((i, j));
                 }
-                _ => {}
             }
         }
 
-        // Move renames before deletes for same symbols
-        for (rename_idx, name) in &rename_indices {
-            for (delete_idx, delete_name) in &delete_indices {
-                if name == delete_name && rename_idx > delete_idx {
-                    // Swap the steps
-                    steps.swap(*rename_idx, *delete_idx);
+        // Kahn's algorithm for topological sort
+        let mut in_degree = vec![0usize; n];
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for &(from, to) in &edges {
+            adj[from].push(to);
+            in_degree[to] += 1;
+        }
+
+        let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+        for (i, &deg) in in_degree.iter().enumerate() {
+            if deg == 0 {
+                queue.push_back(i);
+            }
+        }
+
+        let mut sorted_indices = Vec::with_capacity(n);
+        while let Some(node) = queue.pop_front() {
+            sorted_indices.push(node);
+            for &neighbor in &adj[node] {
+                in_degree[neighbor] -= 1;
+                if in_degree[neighbor] == 0 {
+                    queue.push_back(neighbor);
                 }
             }
+        }
+
+        if sorted_indices.len() != n {
+            // Cycle detected — fall back to original order
+            return Ok(());
+        }
+
+        // Reorder steps in-place
+        let original: Vec<PlanStep> = steps.to_vec();
+        for (target_pos, &source_idx) in sorted_indices.iter().enumerate() {
+            steps[target_pos] = original[source_idx].clone();
         }
 
         Ok(())
@@ -314,6 +375,69 @@ pub enum RollbackOperation {
     Delete { path: String },
     /// No rollback needed
     None,
+}
+
+/// Intent detected from an observation query.
+#[derive(Clone, Debug)]
+enum PlanIntent {
+    /// Rename symbols to a new name
+    Rename { new_name: String },
+    /// Delete symbols
+    Delete,
+    /// Create new code
+    Create { content: String },
+    /// Inspect symbols (default)
+    Inspect,
+}
+
+/// Detect plan intent from the observation query.
+fn detect_intent(query: &str) -> PlanIntent {
+    // "rename X to Y" or "rename X -> Y"
+    if let Some(rest) = query.strip_prefix("rename ") {
+        if let Some((_, new)) = rest.split_once(" to ") {
+            return PlanIntent::Rename {
+                new_name: new.trim().to_string(),
+            };
+        }
+        if let Some((_, new)) = rest.split_once(" -> ") {
+            return PlanIntent::Rename {
+                new_name: new.trim().to_string(),
+            };
+        }
+    }
+
+    if query.contains("delete ") || query.contains("remove ") {
+        return PlanIntent::Delete;
+    }
+
+    if query.contains("create ") || query.contains("add ") {
+        return PlanIntent::Create {
+            content: String::new(),
+        };
+    }
+
+    PlanIntent::Inspect
+}
+
+/// Returns true if operation `a` must happen before operation `b`.
+fn should_precede(a: &PlanOperation, b: &PlanOperation) -> bool {
+    match (a, b) {
+        // Inspect before Rename of same symbol
+        (
+            PlanOperation::Inspect { symbol_name, .. },
+            PlanOperation::Rename { old, .. },
+        ) => symbol_name == old,
+        // Inspect before Delete of same symbol
+        (
+            PlanOperation::Inspect { symbol_name, .. },
+            PlanOperation::Delete { name },
+        ) => symbol_name == name,
+        // Rename before Delete for same symbol
+        (PlanOperation::Rename { old, .. }, PlanOperation::Delete { name }) => old == name,
+        // Create before Modify for same file
+        (PlanOperation::Create { path, .. }, PlanOperation::Modify { file, .. }) => path == file,
+        _ => false,
+    }
 }
 
 /// A file region.

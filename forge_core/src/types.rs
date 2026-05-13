@@ -232,6 +232,10 @@ pub struct Reference {
     pub from: SymbolId,
     /// The referenced symbol
     pub to: SymbolId,
+    /// Name of the referencing symbol (caller/source)
+    pub from_name: Option<String>,
+    /// Name of the referenced symbol (callee/target)
+    pub to_name: Option<String>,
     /// Reference kind
     pub kind: ReferenceKind,
     /// Location of the reference
@@ -607,6 +611,8 @@ mod tests {
         let reference = Reference {
             from: SymbolId(1),
             to: SymbolId(2),
+            from_name: None,
+            to_name: None,
             kind: ReferenceKind::Call,
             location: Location {
                 file_path: PathBuf::from("test.rs"),

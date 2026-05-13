@@ -398,6 +398,8 @@ impl UnifiedGraphStore {
                     result.push(Reference {
                         from: SymbolId(0),
                         to: symbol_id,
+                        from_name: None,
+                        to_name: None,
                         kind: stored.kind,
                         location: Location {
                             file_path: stored.file_path.clone(),
@@ -569,6 +571,8 @@ impl UnifiedGraphStore {
                 result.push(Reference {
                     from: SymbolId(0),
                     to: SymbolId(0),
+                    from_name: None,
+                    to_name: None,
                     kind: stored.kind,
                     location: Location {
                         file_path: stored.file_path.clone(),
@@ -715,6 +719,8 @@ mod tests {
         let reference = Reference {
             from: SymbolId(1),
             to: SymbolId(2),
+            from_name: None,
+            to_name: None,
             kind: ReferenceKind::Call,
             location: Location {
                 file_path: PathBuf::from("src/lib.rs"),

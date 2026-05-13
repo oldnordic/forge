@@ -521,28 +521,34 @@ impl AnalysisModule {
             call_count,
             referenced_by: callers
                 .into_iter()
-                .map(|r| Symbol {
-                    id: r.from,
-                    name: String::new(),
-                    fully_qualified_name: String::new(),
-                    kind: crate::types::SymbolKind::Function,
-                    language: crate::types::Language::Unknown("unknown".to_string()),
-                    location: r.location,
-                    parent_id: None,
-                    metadata: serde_json::Value::Null,
+                .map(|r| {
+                    let name = r.from_name.unwrap_or_default();
+                    Symbol {
+                        id: r.from,
+                        name: name.clone(),
+                        fully_qualified_name: name,
+                        kind: crate::types::SymbolKind::Function,
+                        language: crate::types::Language::Unknown("unknown".to_string()),
+                        location: r.location,
+                        parent_id: None,
+                        metadata: serde_json::Value::Null,
+                    }
                 })
                 .collect(),
             references: refs
                 .into_iter()
-                .map(|r| Symbol {
-                    id: r.from,
-                    name: String::new(),
-                    fully_qualified_name: String::new(),
-                    kind: crate::types::SymbolKind::Function,
-                    language: crate::types::Language::Unknown("unknown".to_string()),
-                    location: r.location,
-                    parent_id: None,
-                    metadata: serde_json::Value::Null,
+                .map(|r| {
+                    let name = r.to_name.unwrap_or_default();
+                    Symbol {
+                        id: r.from,
+                        name: name.clone(),
+                        fully_qualified_name: name,
+                        kind: crate::types::SymbolKind::Function,
+                        language: crate::types::Language::Unknown("unknown".to_string()),
+                        location: r.location,
+                        parent_id: None,
+                        metadata: serde_json::Value::Null,
+                    }
                 })
                 .collect(),
             impact_score,
@@ -621,21 +627,22 @@ impl AnalysisModule {
     pub async fn reference_chain(&self, symbol: &str) -> Result<Vec<Symbol>> {
         let start = Instant::now();
 
-        // Get all symbols this one references
         let refs = self.graph.references(symbol).await?;
 
-        // Return direct references as symbols
         let chain: Vec<Symbol> = refs
             .into_iter()
-            .map(|r| Symbol {
-                id: r.from,
-                name: String::new(),
-                fully_qualified_name: String::new(),
-                kind: crate::types::SymbolKind::Function,
-                language: crate::types::Language::Unknown("unknown".to_string()),
-                location: r.location,
-                parent_id: None,
-                metadata: serde_json::Value::Null,
+            .map(|r| {
+                let name = r.to_name.unwrap_or_default();
+                Symbol {
+                    id: r.from,
+                    name: name.clone(),
+                    fully_qualified_name: name,
+                    kind: crate::types::SymbolKind::Function,
+                    language: crate::types::Language::Unknown("unknown".to_string()),
+                    location: r.location,
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
+                }
             })
             .collect();
 
@@ -656,18 +663,20 @@ impl AnalysisModule {
 
         let callers = self.graph.callers_of(symbol).await?;
 
-        // Return direct callers as symbols
         let chain: Vec<Symbol> = callers
             .into_iter()
-            .map(|r| Symbol {
-                id: r.from,
-                name: String::new(),
-                fully_qualified_name: String::new(),
-                kind: crate::types::SymbolKind::Function,
-                language: crate::types::Language::Unknown("unknown".to_string()),
-                location: r.location,
-                parent_id: None,
-                metadata: serde_json::Value::Null,
+            .map(|r| {
+                let name = r.from_name.unwrap_or_default();
+                Symbol {
+                    id: r.from,
+                    name: name.clone(),
+                    fully_qualified_name: name,
+                    kind: crate::types::SymbolKind::Function,
+                    language: crate::types::Language::Unknown("unknown".to_string()),
+                    location: r.location,
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
+                }
             })
             .collect();
 
@@ -773,29 +782,35 @@ impl AnalysisModule {
 
         let callers = caller_refs
             .iter()
-            .map(|r| Symbol {
-                id: r.from,
-                name: String::new(),
-                fully_qualified_name: String::new(),
-                kind: crate::types::SymbolKind::Function,
-                language: crate::types::Language::Unknown(String::new()),
-                location: r.location.clone(),
-                parent_id: None,
-                metadata: serde_json::Value::Null,
+            .map(|r| {
+                let name = r.from_name.clone().unwrap_or_default();
+                Symbol {
+                    id: r.from,
+                    name: name.clone(),
+                    fully_qualified_name: name,
+                    kind: crate::types::SymbolKind::Function,
+                    language: crate::types::Language::Unknown(String::new()),
+                    location: r.location.clone(),
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
+                }
             })
             .collect();
 
         let callees = callee_refs
             .iter()
-            .map(|r| Symbol {
-                id: r.to,
-                name: String::new(),
-                fully_qualified_name: String::new(),
-                kind: crate::types::SymbolKind::Function,
-                language: crate::types::Language::Unknown(String::new()),
-                location: r.location.clone(),
-                parent_id: None,
-                metadata: serde_json::Value::Null,
+            .map(|r| {
+                let name = r.to_name.clone().unwrap_or_default();
+                Symbol {
+                    id: r.to,
+                    name: name.clone(),
+                    fully_qualified_name: name,
+                    kind: crate::types::SymbolKind::Function,
+                    language: crate::types::Language::Unknown(String::new()),
+                    location: r.location.clone(),
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
+                }
             })
             .collect();
 

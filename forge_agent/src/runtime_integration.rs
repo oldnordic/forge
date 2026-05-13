@@ -102,33 +102,17 @@ impl Agent {
 
     /// Gets reference to runtime cache if available.
     ///
-    /// This method provides access to the runtime's query cache for
-    /// optimization of repeated graph queries.
+    /// Access the runtime's query cache.
     ///
-    /// # Returns
-    ///
-    /// Returns `None` - cache access requires runtime association (not yet implemented).
-    ///
-    /// Note: This is a placeholder for future functionality.
+    /// Not yet implemented — returns `None`.
     pub fn runtime_cache(&self) -> Option<()> {
-        // TODO: Return cache from associated runtime
-        // For v0.4, return None (cache access will be added in future version)
         None
     }
 
-    /// Gets runtime statistics if available.
+    /// Access runtime statistics (cache size, watch status, reindex count).
     ///
-    /// This method provides access to runtime metrics including cache size,
-    /// watch status, and reindex count.
-    ///
-    /// # Returns
-    ///
-    /// Returns `None` - stats access requires runtime association (not yet implemented).
-    ///
-    /// Note: This is a placeholder for future functionality.
+    /// Not yet implemented — returns `None`.
     pub fn runtime_stats(&self) -> Option<()> {
-        // TODO: Return stats from associated runtime
-        // For v0.4, return None
         None
     }
 }

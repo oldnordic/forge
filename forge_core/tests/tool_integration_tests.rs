@@ -235,6 +235,7 @@ async fn test_search_pattern_sqlite() {
 }
 
 #[tokio::test]
+#[ignore = "native-v3 backend removed"]
 async fn test_search_semantic_native_v3() {
     let temp = create_test_repo().await;
 

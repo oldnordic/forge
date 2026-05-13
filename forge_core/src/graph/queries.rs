@@ -43,6 +43,8 @@ impl GraphQueryEngine {
                 refs.push(Reference {
                     from: SymbolId(caller_id),
                     to: SymbolId(target_id),
+                    from_name: Some(node.name.clone()),
+                    to_name: None,
                     kind: ReferenceKind::Call,
                     location: Location {
                         file_path: std::path::PathBuf::from(node.file_path.unwrap_or_default()),
@@ -81,6 +83,8 @@ impl GraphQueryEngine {
                 refs.push(Reference {
                     from: SymbolId(neighbor_id),
                     to: SymbolId(target_id),
+                    from_name: Some(node.name.clone()),
+                    to_name: None,
                     kind: ReferenceKind::TypeReference,
                     location: Location {
                         file_path: std::path::PathBuf::from(node.file_path.unwrap_or_default()),

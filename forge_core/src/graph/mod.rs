@@ -166,6 +166,8 @@ impl GraphModule {
                             callers.push(Reference {
                                 from: SymbolId(0),
                                 to: SymbolId(0),
+                                from_name: Some(fact.caller.clone()),
+                                to_name: Some(fact.callee.clone()),
                                 kind: ReferenceKind::Call,
                                 location: crate::types::Location {
                                     file_path: fact.file_path.clone(),
@@ -229,6 +231,8 @@ impl GraphModule {
                                 refs.push(Reference {
                                     from: SymbolId(0),
                                     to: SymbolId(id),
+                                    from_name: None,
+                                    to_name: Some(fact.referenced_symbol.clone()),
                                     kind: ReferenceKind::TypeReference,
                                     location: crate::types::Location {
                                         file_path: fact.file_path.clone(),
