@@ -1,14 +1,57 @@
 # Forge Plan Graph Schema
 
+## Grounded Analysis (from magellan DB)
+
+**DB:** `.magellan/forge.db` — 79 files, 2431 symbols, 1644 references
+
+**What already exists in the codebase:**
+
+| Module | Key Types | File | Status |
+|--------|-----------|------|--------|
+| Workflow DAG | `Workflow`, `TaskNode`, `TaskId` | `forge_agent/src/workflow/dag.rs` | Implemented |
+| Task system | `TaskContext`, `TaskResult`, `Dependency` (Hard/Soft) | `forge_agent/src/workflow/task.rs` | Implemented |
+| Workflow builder | `WorkflowBuilder` (fluent API) | `forge_agent/src/workflow/builder.rs` | Implemented |
+| Executor | `WorkflowExecutor`, `WorkflowResult` | `forge_agent/src/workflow/executor.rs` | Implemented |
+| State machine | `WorkflowState` | `forge_agent/src/workflow/state.rs` | Implemented |
+| Checkpoints | `WorkflowCheckpoint`, `WorkflowCheckpointService` | `forge_agent/src/workflow/checkpoint.rs` | Implemented |
+| Cancellation | `CancellationToken`, `CancellationTokenSource` | `forge_agent/src/workflow/cancellation.rs` | Implemented |
+| Timeouts | `TaskTimeout`, `WorkflowTimeout`, `TimeoutConfig` | `forge_agent/src/workflow/timeout.rs` | Implemented |
+| YAML config | `YamlWorkflow`, `YamlTask`, `YamlTaskParams` | `forge_agent/src/workflow/yaml.rs` | Implemented |
+| Agent loop | `AgentLoop`, `AgentPhase` (6 phases) | `forge_agent/src/loop.rs` | Implemented |
+| Agent phases | Observe → Constrain → Plan → Mutate → Verify → Commit | `forge_agent/src/loop.rs:19-39` | Implemented |
+| Audit trail | `AuditEvent` (20 variants), `AuditLog` | `forge_agent/src/audit.rs` | Implemented |
+| Policy | `PolicyValidator` | `forge_agent/src/policy.rs` | Implemented |
+| Reasoning | `HypothesisBoard`, `Evidence`, `KnowledgeGapAnalyzer` | `forge-reasoning/src/` | Implemented |
+| Dead code | `DeadCodeAnalyzer` | `forge_core/src/analysis/dead_code.rs` | Implemented |
+| Complexity | `ComplexityMetrics`, `RiskLevel` | `forge_core/src/analysis/complexity.rs` | Implemented |
+| CFG | `CfgModule`, `FunctionCfg`, `PathBuilder` | `forge_core/src/cfg/mod.rs` | Implemented |
+| Metrics | `RuntimeMetrics`, `MetricKind`, `MetricsSummary` | `forge_runtime/src/metrics.rs` | Implemented |
+
+**What does NOT exist yet:**
+- Quality gate definitions (no `Gate`, `GateResult`, `SemgrepRule`, `SemgrepFinding`)
+- Plan-level requirements (no `Requirement`, `Plan`, `Decision`, `Constraint` nodes)
+- User approval/rejection (no `Approval`, `Rejection` types)
+- User-written tests as graph nodes (no `UserTest`)
+- LLM turn/session tracking (no `Turn`, `Session` types)
+- Edit tracking with SHA before/after (no `Edit` node with diffs)
+- Tool call recording (no `ToolCall` with structured input/output)
+- Semgrep integration layer (rules exist but no programmatic gate runner)
+
+---
+
 ## Overview
 
 The forge plan is stored as a graph in sqlitegraph. Every artifact — requirements,
-tasks, edits, gates, decisions, test results — is a node. Every relationship is an
-edge. The graph is the audit trail.
+tasks, edits, gates, decisions, test results — is a node. Every relationship is
+an edge. The graph is the audit trail.
 
 Before any code is written, the plan exists as a subgraph that the user can inspect,
 modify, and approve. During execution, nodes and edges are added. After delivery,
 the full graph is the proof of what happened and why.
+
+**This schema extends the existing forge_agent types.** The `TaskId`, `Workflow`,
+`AuditEvent`, and `AgentPhase` types already exist — the plan graph adds the layer
+above (requirements, decisions, gates) and below (edits, tool calls, findings).
 
 ---
 
