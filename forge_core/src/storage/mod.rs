@@ -30,6 +30,7 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::{ForgeError, Result};
 use crate::types::{Language, Location, Reference, ReferenceKind, Symbol, SymbolId, SymbolKind};
@@ -330,8 +331,8 @@ impl UnifiedGraphStore {
 
                             symbols.push(Symbol {
                                 id: SymbolId(symbols.len() as i64 + 1),
-                                name: name.clone(),
-                                fully_qualified_name: name,
+                                name: Arc::from(name.clone()),
+                                fully_qualified_name: Arc::from(name.clone()),
                                 kind: SymbolKind::Function,
                                 language: Language::Rust,
                                 location: Location {
@@ -680,8 +681,8 @@ mod tests {
 
         let symbol = Symbol {
             id: SymbolId(0),
-            name: "test_function".to_string(),
-            fully_qualified_name: "crate::test_function".to_string(),
+            name: Arc::from("test_function"),
+            fully_qualified_name: Arc::from("crate::test_function"),
             kind: SymbolKind::Function,
             language: Language::Rust,
             location: Location {

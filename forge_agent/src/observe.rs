@@ -102,7 +102,7 @@ impl Observer {
                                 if seen.insert(sym.id) {
                                     symbols.push(ObservedSymbol {
                                         id: sym.id,
-                                        name: sym.name,
+                                        name: sym.name.to_string(),
                                         kind: sym.kind,
                                         location: sym.location,
                                     });
@@ -120,7 +120,7 @@ impl Observer {
                 if seen.insert(sym.id) {
                     symbols.push(ObservedSymbol {
                         id: sym.id,
-                        name: sym.name,
+                        name: sym.name.to_string(),
                         kind: sym.kind,
                         location: sym.location,
                     });
@@ -137,7 +137,7 @@ impl Observer {
                         if seen.insert(sym.id) {
                             symbols.push(ObservedSymbol {
                                 id: sym.id,
-                                name: sym.name,
+                                name: sym.name.to_string(),
                                 kind: sym.kind,
                                 location: sym.location,
                             });
@@ -155,7 +155,7 @@ impl Observer {
                                 if seen.insert(sym.id) {
                                     symbols.push(ObservedSymbol {
                                         id: sym.id,
-                                        name: sym.name,
+                                        name: sym.name.to_string(),
                                         kind: sym.kind,
                                         location: sym.location,
                                     });

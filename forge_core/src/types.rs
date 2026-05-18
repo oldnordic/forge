@@ -1,6 +1,7 @@
 //! Core types for ForgeKit.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Stable identifier for a symbol across reindexing.
 ///
@@ -210,9 +211,9 @@ pub struct Symbol {
     /// Stable symbol identifier
     pub id: SymbolId,
     /// Display name
-    pub name: String,
+    pub name: Arc<str>,
     /// Fully qualified name
-    pub fully_qualified_name: String,
+    pub fully_qualified_name: Arc<str>,
     /// Symbol kind
     pub kind: SymbolKind,
     /// Programming language
@@ -277,6 +278,7 @@ pub struct Loop {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     // SymbolId Tests (4 tests)
 
@@ -589,8 +591,8 @@ mod tests {
     fn test_symbol_new() {
         let symbol = Symbol {
             id: SymbolId(1),
-            name: "test".to_string(),
-            fully_qualified_name: "crate::test".to_string(),
+            name: Arc::from("test"),
+            fully_qualified_name: Arc::from("crate::test"),
             kind: SymbolKind::Function,
             language: Language::Rust,
             location: Location {
@@ -603,7 +605,7 @@ mod tests {
             metadata: serde_json::Value::Null,
         };
         assert_eq!(symbol.id.0, 1);
-        assert_eq!(symbol.name, "test");
+        assert_eq!(symbol.name, Arc::from("test"));
     }
 
     #[test]
@@ -629,8 +631,8 @@ mod tests {
     fn test_symbol_with_parent() {
         let symbol = Symbol {
             id: SymbolId(2),
-            name: "inner".to_string(),
-            fully_qualified_name: "crate::Parent::inner".to_string(),
+            name: Arc::from("inner"),
+            fully_qualified_name: Arc::from("crate::Parent::inner"),
             kind: SymbolKind::Method,
             language: Language::Rust,
             location: Location {
@@ -653,8 +655,8 @@ mod tests {
         let metadata = serde_json::json!({"key": "value"});
         let symbol = Symbol {
             id: SymbolId(1),
-            name: "test".to_string(),
-            fully_qualified_name: "crate::test".to_string(),
+            name: Arc::from("test"),
+            fully_qualified_name: Arc::from("crate::test"),
             kind: SymbolKind::Function,
             language: Language::Rust,
             location: Location {
@@ -694,8 +696,8 @@ mod tests {
         let metadata = serde_json::json!({});
         let symbol = Symbol {
             id: SymbolId(1),
-            name: "test".to_string(),
-            fully_qualified_name: "crate::test".to_string(),
+            name: Arc::from("test"),
+            fully_qualified_name: Arc::from("crate::test"),
             kind: SymbolKind::Function,
             language: Language::Rust,
             location: Location {

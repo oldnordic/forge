@@ -125,7 +125,7 @@ impl CfgModule {
     pub fn paths(&self, function: SymbolId) -> PathBuilder {
         PathBuilder {
             function: Some(function),
-            store: Some(self.store.clone()),
+            store: Some(Arc::clone(&self.store)),
             ..PathBuilder::default()
         }
     }
@@ -773,7 +773,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let module = CfgModule::new(store.clone());
+        let module = CfgModule::new(Arc::clone(&store));
 
         assert_eq!(module.store.db_path(), store.db_path());
     }
@@ -787,7 +787,7 @@ mod tests {
         );
 
         let dummy_module = CfgModule {
-            store: store.clone(),
+            store: Arc::clone(&store),
         };
 
         let builder = dummy_module.paths(SymbolId(1)).normal_only().max_length(10);

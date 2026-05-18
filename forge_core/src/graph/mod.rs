@@ -88,11 +88,10 @@ impl GraphModule {
 
                             results.push(Symbol {
                                 id: SymbolId(0), // magellan uses different ID system
-                                name: sym_name.clone(),
-                                fully_qualified_name: sym
-                                    .fqn
-                                    .clone()
-                                    .unwrap_or_else(|| sym_name.clone()),
+                                name: Arc::from(sym_name.clone()),
+                                fully_qualified_name: Arc::from(
+                                    sym.fqn.clone().unwrap_or_else(|| sym_name.clone()),
+                                ),
                                 kind,
                                 language: map_magellan_language(&sym.file_path),
                                 location: crate::types::Location {
@@ -494,7 +493,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let module = GraphModule::new(store.clone());
+        let module = GraphModule::new(Arc::clone(&store));
         assert_eq!(module.store.db_path(), store.db_path());
     }
 

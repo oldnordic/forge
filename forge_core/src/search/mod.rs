@@ -74,7 +74,7 @@ impl SearchModule {
     /// Find a specific symbol by name.
     pub async fn symbol_by_name(&self, name: &str) -> ForgeResult<Option<Symbol>> {
         let symbols = self.pattern_search(name).await?;
-        Ok(symbols.into_iter().find(|s| s.name == name))
+        Ok(symbols.into_iter().find(|s| s.name == Arc::from(name)))
     }
 
     /// Find all symbols of a specific kind.
@@ -159,8 +159,8 @@ impl SearchModule {
                             .unwrap_or(&path);
                         results.push(Symbol {
                             id: SymbolId(0),
-                            name: symbol_name.clone(),
-                            fully_qualified_name: symbol_name,
+                            name: Arc::from(symbol_name.clone()),
+                            fully_qualified_name: Arc::from(symbol_name),
                             kind: SymbolKind::Function,
                             language: Language::Rust,
                             location: Location {
@@ -216,8 +216,8 @@ impl SearchModule {
                         .unwrap_or(&path);
                     results.push(Symbol {
                         id: SymbolId(0),
-                        name: name.clone(),
-                        fully_qualified_name: name,
+                        name: Arc::from(name.clone()),
+                        fully_qualified_name: Arc::from(name.clone()),
                         kind: if line.contains("struct ") {
                             SymbolKind::Struct
                         } else {
@@ -285,11 +285,11 @@ fn llmgrep_match_to_symbol(m: llmgrep::output::SymbolMatch) -> Symbol {
         .as_deref()
         .map(map_llmgrep_language)
         .unwrap_or(Language::Unknown("unknown".to_string()));
-    let fqn = m.fqn.clone().unwrap_or_else(|| m.name.clone());
+    let fqn: Arc<str> = Arc::from(m.fqn.clone().unwrap_or_else(|| m.name.clone()));
 
     Symbol {
         id: SymbolId(0),
-        name: m.name,
+        name: Arc::from(m.name),
         fully_qualified_name: fqn,
         kind,
         language,
@@ -362,7 +362,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let _search = SearchModule::new(store.clone());
+        let _search = SearchModule::new(Arc::clone(&store));
     }
 
     #[tokio::test]

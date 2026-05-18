@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::graph::GraphModule;
 use crate::search::SearchModule;
 use crate::types::Symbol;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub mod complexity;
@@ -522,7 +523,7 @@ impl AnalysisModule {
             referenced_by: callers
                 .into_iter()
                 .map(|r| {
-                    let name = r.from_name.unwrap_or_default();
+                    let name: Arc<str> = Arc::from(r.from_name.unwrap_or_default());
                     Symbol {
                         id: r.from,
                         name: name.clone(),
@@ -538,7 +539,7 @@ impl AnalysisModule {
             references: refs
                 .into_iter()
                 .map(|r| {
-                    let name = r.to_name.unwrap_or_default();
+                    let name: Arc<str> = Arc::from(r.to_name.unwrap_or_default());
                     Symbol {
                         id: r.to,
                         name: name.clone(),
@@ -632,7 +633,7 @@ impl AnalysisModule {
         let chain: Vec<Symbol> = refs
             .into_iter()
             .map(|r| {
-                let name = r.to_name.unwrap_or_default();
+                let name: Arc<str> = Arc::from(r.to_name.unwrap_or_default());
                 Symbol {
                     id: r.from,
                     name: name.clone(),
@@ -666,7 +667,7 @@ impl AnalysisModule {
         let chain: Vec<Symbol> = callers
             .into_iter()
             .map(|r| {
-                let name = r.from_name.unwrap_or_default();
+                let name: Arc<str> = Arc::from(r.from_name.unwrap_or_default());
                 Symbol {
                     id: r.from,
                     name: name.clone(),
@@ -783,7 +784,7 @@ impl AnalysisModule {
         let callers = caller_refs
             .iter()
             .map(|r| {
-                let name = r.from_name.clone().unwrap_or_default();
+                let name: Arc<str> = Arc::from(r.from_name.clone().unwrap_or_default());
                 Symbol {
                     id: r.from,
                     name: name.clone(),
@@ -800,7 +801,7 @@ impl AnalysisModule {
         let callees = callee_refs
             .iter()
             .map(|r| {
-                let name = r.to_name.clone().unwrap_or_default();
+                let name: Arc<str> = Arc::from(r.to_name.clone().unwrap_or_default());
                 Symbol {
                     id: r.to,
                     name: name.clone(),
@@ -876,9 +877,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -897,9 +898,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -917,9 +918,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -937,9 +938,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -957,9 +958,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -981,9 +982,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1002,9 +1003,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1068,9 +1069,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1091,9 +1092,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1114,9 +1115,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1136,9 +1137,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1158,9 +1159,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1192,9 +1193,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let mut analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1247,9 +1248,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1277,9 +1278,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1305,9 +1306,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1325,9 +1326,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1349,9 +1350,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1382,9 +1383,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);
@@ -1403,9 +1404,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let graph = GraphModule::new(store.clone());
-        let search = SearchModule::new(store.clone());
-        let cfg = CfgModule::new(store.clone());
+        let graph = GraphModule::new(Arc::clone(&store));
+        let search = SearchModule::new(Arc::clone(&store));
+        let cfg = CfgModule::new(Arc::clone(&store));
         let edit = EditModule::new(store);
 
         let analysis = AnalysisModule::new(graph, cfg, edit, search);

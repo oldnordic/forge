@@ -5,6 +5,7 @@
 use crate::error::{ForgeError, Result};
 use crate::types::Symbol;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Dead code analyzer
 pub struct DeadCodeAnalyzer<'a> {
@@ -95,8 +96,8 @@ impl From<DeadSymbol> for Symbol {
 
         Symbol {
             id: SymbolId(dead.id),
-            name: dead.name.clone(),
-            fully_qualified_name: dead.name,
+            name: Arc::from(dead.name.clone()),
+            fully_qualified_name: Arc::from(dead.name),
             kind: parse_symbol_kind(&dead.kind),
             language: Language::Rust,
             location: Location {

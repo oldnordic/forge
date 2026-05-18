@@ -130,7 +130,7 @@ impl Planner {
                     steps.push(PlanStep {
                         description: format!("Delete {}", symbol.name),
                         operation: PlanOperation::Delete {
-                            name: symbol.name.clone(),
+                            name: symbol.name.to_string(),
                             file: file.clone(),
                         },
                     });
@@ -156,7 +156,7 @@ impl Planner {
                         ),
                         operation: PlanOperation::Inspect {
                             symbol_id: symbol.id,
-                            symbol_name: symbol.name.clone(),
+                            symbol_name: symbol.name.to_string(),
                         },
                     });
                 }

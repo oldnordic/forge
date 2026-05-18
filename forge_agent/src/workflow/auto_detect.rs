@@ -323,7 +323,7 @@ impl DependencyAnalyzer {
                 // Suggest tasks for analyzing these symbols
                 suggestions.push(TaskSuggestion {
                     task_type: SuggestedTaskType::GraphQuery,
-                    target: Some(symbol.name.clone()),
+                    target: Some(symbol.name.to_string()),
                     reason: format!("Symbol '{}' found in codebase", symbol.name),
                 });
             }

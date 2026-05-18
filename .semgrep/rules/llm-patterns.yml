@@ -89,10 +89,55 @@ rules:
                   ...
               }
           }
+      # Arc refcount bump — not a data clone
+      - pattern-not: Arc::clone($EXPR)
+      # Test code — cloning is normal in tests
+      - pattern-not-inside: |
+          #[test]
+          fn $TEST(...) {
+              ...
+          }
+      - pattern-not-inside: |
+          #[tokio::test]
+          async fn $TEST(...) {
+              ...
+          }
+      # Getter-style self.field.clone() returning owned values
+      - pattern-not: self.$FIELD.clone()
+      # serde_json temporary clone for type conversion
+      - pattern-not: serde_json::from_value::<$T>($EXPR.clone()).ok()
+      - pattern-not: serde_json::from_value::<$T>($EXPR.clone())
+      # Collection building patterns
+      - pattern-not: $VEC.push($EXPR.clone())
+      - pattern-not: $MAP.insert($KEY.clone(), $VAL.clone())
+      - pattern-not: $MAP.insert($KEY.clone(), $VAL)
+      - pattern-not: $SET.retain(|$X| $SEEN.insert($X.$FIELD.clone()))
+      # PathBuf cloning (Copy not available)
+      - pattern-not: $PATH.clone()
+      # async spawn/task captures — clones required for move
+      - pattern-not-inside: |
+          tokio::spawn(async move {
+              ...
+          })
+      - pattern-not-inside: |
+          tokio::task::spawn(async move {
+              ...
+          })
+      # Benchmark black_box wrapping
+      - pattern-not-inside: |
+          black_box($EXPR.clone())
+      # Error/option construction with clones
+      - pattern-not: Err($ERR($EXPR.clone()))
+      - pattern-not: Ok($EXPR.clone())
+      - pattern-not: Some($EXPR.clone())
+      # Builder/constructor patterns with owned args
+      - pattern-not: $STRUCT::new($EXPR.clone())
+      - pattern-not: $STRUCT::with_id($EXPR.clone(), ...)
+      - pattern-not: $STRUCT::new($A, $EXPR.clone())
     message: >-
       .clone() used outside of obvious borrow contexts. Consider whether
-      a reference would work. Excessive cloning is a common LLM pattern.
-    severity: WARNING
+      a reference or Arc would work. Excessive cloning is a common LLM pattern.
+    severity: INFO
     languages: [rust]
     metadata:
       category: performance

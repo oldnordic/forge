@@ -144,7 +144,7 @@ impl ForgeRuntime {
 
         // Create indexer with path filter
         let filter = PathFilter::include_dirs(&[&config.watch_dir]);
-        let indexer = IncrementalIndexer::with_filter(store.clone(), filter);
+        let indexer = IncrementalIndexer::with_filter(Arc::clone(&store), filter);
 
         // Create query cache
         let cache = QueryCache::new(

@@ -9,6 +9,7 @@
 //! Both SQLite and Native V3 backends are tested.
 
 use forge_core::{BackendKind, Forge};
+use std::sync::Arc;
 
 // =============================================================================
 // Helper Functions
@@ -108,7 +109,7 @@ async fn test_graph_find_symbol_sqlite() {
         .expect("Failed to find symbol");
 
     assert!(!symbols.is_empty(), "Should find 'add' symbol");
-    assert!(symbols.iter().any(|s| s.name == "add"));
+    assert!(symbols.iter().any(|s| s.name == Arc::from("add")));
 }
 
 #[tokio::test]

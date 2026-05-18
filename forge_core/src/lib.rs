@@ -32,6 +32,8 @@
 pub mod error;
 pub mod types;
 
+use std::sync::Arc;
+
 // Public API modules
 pub mod analysis;
 pub mod cfg;
@@ -119,22 +121,22 @@ impl Forge {
 
     /// Returns the graph module for symbol and reference queries.
     pub fn graph(&self) -> graph::GraphModule {
-        graph::GraphModule::new(self.store.clone())
+        graph::GraphModule::new(Arc::clone(&self.store))
     }
 
     /// Returns the search module for semantic code queries.
     pub fn search(&self) -> search::SearchModule {
-        search::SearchModule::new(self.store.clone())
+        search::SearchModule::new(Arc::clone(&self.store))
     }
 
     /// Returns the CFG module for control flow analysis.
     pub fn cfg(&self) -> cfg::CfgModule {
-        cfg::CfgModule::new(self.store.clone())
+        cfg::CfgModule::new(Arc::clone(&self.store))
     }
 
     /// Returns the edit module for span-safe refactoring.
     pub fn edit(&self) -> edit::EditModule {
-        edit::EditModule::new(self.store.clone())
+        edit::EditModule::new(Arc::clone(&self.store))
     }
 
     /// Returns the analysis module for combined operations.

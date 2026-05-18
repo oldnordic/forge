@@ -65,7 +65,7 @@ impl Runtime {
     /// Returns an error if the graph store cannot be initialized.
     pub async fn new(path: PathBuf) -> anyhow::Result<Self> {
         let store = Arc::new(UnifiedGraphStore::open(&path).await?);
-        let indexer = IncrementalIndexer::new(store.clone());
+        let indexer = IncrementalIndexer::new(Arc::clone(&store));
 
         // Default cache: 1000 entries, 5 minute TTL
         let cache = QueryCache::new(1000, Duration::from_secs(300));
@@ -94,7 +94,7 @@ impl Runtime {
     /// Returns an error if the directory cannot be watched.
     pub async fn start_with_watching(&mut self) -> anyhow::Result<()> {
         let (tx, _rx) = Watcher::channel();
-        let watcher = Watcher::new(self.store.clone(), tx);
+        let watcher = Watcher::new(Arc::clone(&self.store), tx);
 
         // Start watching the current directory
         let path = std::env::current_dir()?;
