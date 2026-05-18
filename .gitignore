@@ -40,3 +40,14 @@ Thumbs.db
 /.gitlab-ci.yml
 /azure-pipelines.yml
 /appveyor.yml
+
+# Agent/tooling files — not user-facing, keep out of public repo
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.mcp.json
+.mcp/
+.magellan/
+.hermes/
+.claude/
+.remember/
