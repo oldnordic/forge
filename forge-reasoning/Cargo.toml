@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2021"
 authors = ["Forge Contributors"]
 description = "Reasoning tools for LLM debugging - checkpointing, hypotheses, contradictions"
-license = "GPL-3.0"
+license = "GPL-3.0-only"
 repository = "https://github.com/oldnordic/forge"
 documentation = "https://docs.rs/forge-reasoning"
 
