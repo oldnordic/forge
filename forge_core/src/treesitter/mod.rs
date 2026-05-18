@@ -35,7 +35,7 @@ impl CfgExtractor {
 
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_c::language())
+            .set_language(&tree_sitter_c::LANGUAGE.into())
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to set C language: {:?}", e)))?;
 
         let tree = parser
@@ -57,7 +57,7 @@ impl CfgExtractor {
 
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_java::language())
+            .set_language(&tree_sitter_java::LANGUAGE.into())
             .map_err(|e| {
                 ForgeError::DatabaseError(format!("Failed to set Java language: {:?}", e))
             })?;
@@ -81,7 +81,7 @@ impl CfgExtractor {
 
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_rust::language())
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
             .map_err(|e| {
                 ForgeError::DatabaseError(format!("Failed to set Rust language: {:?}", e))
             })?;
