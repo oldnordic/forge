@@ -1,0 +1,168 @@
+rules:
+  # ── Injection patterns ──────────────────────────────────────────────────
+  # LLMs frequently generate string-concatenated queries instead of
+  # parameterized ones. This catches the most common variants.
+
+  - id: llm-string-concat-cypher
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $GRAPH.cypher_query($PREFIX + $VAR + ...)
+          - pattern: |
+              $GRAPH.cypher_query(f"...")
+          - pattern: |
+              $GRAPH.cypher_query("..." % $VAR)
+      - pattern-not: |
+          $GRAPH.cypher_query($LITERAL)
+    message: >-
+      String interpolation in Cypher query. Use _cypher_escape() for
+      user-provided values and reject semicolons.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in a Command"
+      owasp: "A03:2021-Injection"
+
+  - id: llm-string-concat-sql
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $CURSOR.execute($QUERY + $VAR)
+          - pattern: |
+              $CURSOR.execute(f"...")
+          - pattern: |
+              $CONN.execute("..." % $VAR)
+      - pattern-not: |
+          $CURSOR.execute($QUERY, $PARAMS)
+    message: >-
+      String concatenation/interpolation in SQL query. Use parameterized
+      queries ($CURSOR.execute(query, params)).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-89"
+      owasp: "A03:2021-Injection"
+
+  # ── Error handling patterns ─────────────────────────────────────────────
+  # LLMs generate bare except and pass which silently swallow errors.
+
+  - id: llm-bare-except-pass
+    pattern: |
+      except:
+          pass
+    message: >-
+      Bare except with pass silently swallows all errors including
+      KeyboardInterrupt and SystemExit. Use specific exception types.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: correctness
+
+  - id: llm-broad-except-pass
+    pattern: |
+      try:
+          ...
+      except Exception as $E:
+          pass
+    message: >-
+      Catching all exceptions and passing loses error information.
+      At minimum, log the error before suppressing it.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: best-practice
+
+  # ── Rust patterns ───────────────────────────────────────────────────────
+
+  - id: llm-clone-escape-hatch
+    patterns:
+      - pattern: $EXPR.clone()
+      - pattern-not-inside: |
+          fn $FUNC($ARG: &$T) -> $RET {
+              ...
+          }
+      - pattern-not-inside: |
+          impl $T {
+              fn $METHOD(&$SELF, ...) -> $RET {
+                  ...
+              }
+          }
+    message: >-
+      .clone() used outside of obvious borrow contexts. Consider whether
+      a reference would work. Excessive cloning is a common LLM pattern.
+    severity: WARNING
+    languages: [rust]
+    metadata:
+      category: performance
+
+  - id: llm-giant-match
+    patterns:
+      - pattern: |
+          match $EXPR {
+              $ARM1 => ...,
+              $ARM2 => ...,
+              $ARM3 => ...,
+              $ARM4 => ...,
+              $ARM5 => ...,
+              $ARM6 => ...,
+              $ARM7 => ...,
+              $ARM8 => ...,
+          }
+    message: >-
+      Large match block (8+ arms). Consider using trait objects, an enum
+      dispatch table, or breaking into separate functions.
+    severity: WARNING
+    languages: [rust]
+    metadata:
+      category: maintainability
+
+  # NOTE: Lifetime analysis is better served by clippy lints
+  # (elided_lifetimes_in_paths, needless_lifetimes) than semgrep patterns.
+
+  # ── Hardcoded secrets ───────────────────────────────────────────────────
+  # LLMs copy-paste examples with API keys.
+
+  - id: llm-hardcoded-api-key
+    patterns:
+      - pattern-either:
+          - pattern: |
+              API_KEY = "..."
+          - pattern: |
+              api_key = "..."
+          - pattern: |
+              token = "sk-..."
+          - pattern: |
+              password = "..."
+      - pattern-not: |
+          $VAR = os.environ[...]
+      - pattern-not: |
+          $VAR = environ[...]
+      - pattern-not: |
+          $VAR = getenv(...)
+    message: >-
+      Hardcoded secret. Use environment variables or a secrets manager.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021-Identification and Authentication Failures"
+
+  # ── Scope violations ────────────────────────────────────────────────────
+  # Detect when an agent edits files outside its declared scope.
+
+  - id: llm-edit-outside-src
+    patterns:
+      - pattern: |
+          open("/etc/...", $MODE)
+      - pattern-not: |
+          open($VAR, $MODE)
+    message: >-
+      Opening a file outside the project tree. Agent should not modify
+      system files or files outside its declared scope.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
