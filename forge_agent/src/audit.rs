@@ -188,6 +188,42 @@ pub enum AuditEvent {
         layer_index: usize,
         timeout_secs: u64,
     },
+    /// Knowledge explored before planning
+    KnowledgeExplored {
+        timestamp: DateTime<Utc>,
+        query: String,
+        results_count: usize,
+        top_relevance: f64,
+    },
+    /// Quality gate passed
+    GatePassed {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        gate_name: String,
+        duration_ms: u64,
+    },
+    /// Quality gate failed
+    GateFailed {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        gate_name: String,
+        exit_code: i32,
+        errors: u32,
+        warnings: u32,
+    },
+    /// Semgrep finding recorded
+    SemgrepFinding {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        check_id: String,
+        file: String,
+        line: u32,
+        message: String,
+        severity: String,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.
@@ -670,5 +706,123 @@ mod tests {
         let cloned = log.clone();
         assert_eq!(cloned.tx_id(), log.tx_id());
         assert_eq!(cloned.len(), log.len());
+    }
+
+    #[tokio::test]
+    async fn test_knowledge_explored_serialization() {
+        let event = AuditEvent::KnowledgeExplored {
+            timestamp: Utc::now(),
+            query: "sparse inference".to_string(),
+            results_count: 7,
+            top_relevance: 0.92,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::KnowledgeExplored {
+                query,
+                results_count,
+                top_relevance,
+                ..
+            } => {
+                assert_eq!(query, "sparse inference");
+                assert_eq!(results_count, 7);
+                assert!((top_relevance - 0.92).abs() < f64::EPSILON);
+            }
+            _ => panic!("Expected KnowledgeExplored, got wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gate_passed_serialization() {
+        let event = AuditEvent::GatePassed {
+            timestamp: Utc::now(),
+            workflow_id: "wf-1".to_string(),
+            task_id: "task-1".to_string(),
+            gate_name: "clippy".to_string(),
+            duration_ms: 1200,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::GatePassed {
+                gate_name,
+                duration_ms,
+                ..
+            } => {
+                assert_eq!(gate_name, "clippy");
+                assert_eq!(duration_ms, 1200);
+            }
+            _ => panic!("Expected GatePassed, got wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gate_failed_serialization() {
+        let event = AuditEvent::GateFailed {
+            timestamp: Utc::now(),
+            workflow_id: "wf-1".to_string(),
+            task_id: "task-1".to_string(),
+            gate_name: "semgrep".to_string(),
+            exit_code: 1,
+            errors: 3,
+            warnings: 7,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::GateFailed {
+                gate_name,
+                exit_code,
+                errors,
+                warnings,
+                ..
+            } => {
+                assert_eq!(gate_name, "semgrep");
+                assert_eq!(exit_code, 1);
+                assert_eq!(errors, 3);
+                assert_eq!(warnings, 7);
+            }
+            _ => panic!("Expected GateFailed, got wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_semgrep_finding_audit_serialization() {
+        let event = AuditEvent::SemgrepFinding {
+            timestamp: Utc::now(),
+            workflow_id: "wf-1".to_string(),
+            task_id: "task-1".to_string(),
+            check_id: "llm-sql-injection".to_string(),
+            file: "src/navigator.py".to_string(),
+            line: 42,
+            message: "Potential SQL injection via string concatenation".to_string(),
+            severity: "ERROR".to_string(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::SemgrepFinding {
+                check_id,
+                file,
+                line,
+                severity,
+                ..
+            } => {
+                assert_eq!(check_id, "llm-sql-injection");
+                assert_eq!(file, "src/navigator.py");
+                assert_eq!(line, 42);
+                assert_eq!(severity, "ERROR");
+            }
+            _ => panic!("Expected SemgrepFinding, got wrong variant"),
+        }
     }
 }

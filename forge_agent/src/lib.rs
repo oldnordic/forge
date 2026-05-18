@@ -101,8 +101,9 @@ pub use audit::{AuditEvent, AuditLog};
 
 // Re-export workflow types
 pub use workflow::{
-    Dependency, TaskContext, TaskError, TaskId, TaskResult, ValidationReport, Workflow,
-    WorkflowError, WorkflowExecutor, WorkflowResult, WorkflowTask, WorkflowValidator,
+    Dependency, Gate, GateAction, GateLanguage, GateResult, GateRunner, TaskContext, TaskError,
+    TaskId, TaskResult, ValidationReport, Workflow, WorkflowError, WorkflowExecutor,
+    WorkflowResult, WorkflowTask, WorkflowValidator,
 };
 
 /// Result of applying policy constraints.

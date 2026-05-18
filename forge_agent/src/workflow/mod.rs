@@ -99,7 +99,14 @@ pub mod dag;
 pub mod deadlock;
 pub mod examples;
 pub mod executor;
+#[cfg(feature = "sqlite")]
+pub mod explorer;
+pub mod gate;
+#[cfg(feature = "sqlite")]
+pub mod plan;
 pub mod rollback;
+#[cfg(feature = "sqlite")]
+pub mod semgrep;
 pub mod state;
 pub mod task;
 pub mod tasks;
@@ -128,6 +135,9 @@ pub use examples::{
     PollingTask, TimeoutAndCancellationTask,
 };
 pub use executor::{WorkflowExecutor, WorkflowResult};
+pub use gate::{Gate, GateAction, GateLanguage, GateResult, GateRunner};
+#[cfg(feature = "sqlite")]
+pub use plan::{PlanEdgeKind, PlanGraph, PlanNodeKind};
 pub use rollback::{
     CompensationReport, ExecutableCompensation, RollbackEngine, RollbackError, RollbackReport,
     RollbackStrategy,
