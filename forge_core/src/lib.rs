@@ -111,7 +111,19 @@ impl Forge {
         backend: BackendKind,
     ) -> anyhow::Result<Self> {
         let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(path, backend).await?);
-        Ok(Forge { store })
+        let forge = Forge { store };
+
+        #[cfg(feature = "magellan")]
+        {
+            if forge.store.needs_indexing() {
+                tracing::info!("Graph empty — auto-indexing codebase with magellan");
+                if let Err(e) = forge.graph().index().await {
+                    tracing::warn!("Auto-indexing failed: {}", e);
+                }
+            }
+        }
+
+        Ok(forge)
     }
 
     /// Returns the backend kind currently in use.

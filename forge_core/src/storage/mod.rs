@@ -244,6 +244,27 @@ impl UnifiedGraphStore {
         self.db_path.exists()
     }
 
+    /// Returns true if the graph database has no indexed entities.
+    ///
+    /// Used by `Forge::open()` to decide whether to auto-trigger indexing.
+    /// Opens the sqlitegraph backend and checks `entity_ids()` count.
+    pub fn needs_indexing(&self) -> bool {
+        if !self.is_connected() {
+            return true;
+        }
+        let config = match self.backend_kind {
+            BackendKind::SQLite => GraphConfig::sqlite(),
+            BackendKind::NativeV3 => GraphConfig::native(),
+        };
+        match open_graph(&self.db_path, &config) {
+            Ok(backend) => match backend.entity_ids() {
+                Ok(ids) => ids.is_empty(),
+                Err(_) => true,
+            },
+            Err(_) => true,
+        }
+    }
+
     /// Insert a symbol into the graph.
     ///
     /// # Arguments

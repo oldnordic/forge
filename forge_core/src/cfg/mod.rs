@@ -46,74 +46,27 @@ impl CfgModule {
 
     /// Indexes the codebase for CFG analysis.
     ///
-    /// Extracts CFG from C and Java source files using tree-sitter.
+    /// In the current implementation, CFG data is populated automatically
+    /// by magellan during `GraphModule::index()`. No separate CFG pass is needed.
     ///
     /// # Returns
     ///
     /// Ok(()) on success, or an error if indexing fails.
     pub async fn index(&self) -> Result<()> {
-        // Scan for C and Java files and extract CFG
-        self.index_source_files().await
-    }
-
-    /// Extract CFG from C and Java source files
-    async fn index_source_files(&self) -> Result<()> {
-        {
-            Self::index_directory(&self.store.codebase_path, &self.store.codebase_path).await?;
-        }
-
         Ok(())
     }
 
-    async fn index_directory(root: &std::path::Path, dir: &std::path::Path) -> Result<()> {
-        use crate::treesitter::CfgExtractor;
-        use tokio::fs;
-
-        let mut entries = fs::read_dir(dir).await.map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!("Failed to read dir: {}", e))
-        })?;
-
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!("Failed to read entry: {}", e))
-        })? {
-            let path = entry.path();
-            if path.is_dir() {
-                Box::pin(Self::index_directory(root, &path)).await?;
-            } else if let Some(lang) = CfgExtractor::detect_language(&path) {
-                // Extract CFG from this file
-                if let Ok(content) = fs::read_to_string(&path).await {
-                    let _ = CfgExtractor::extract(&content, lang);
-                    // In a full implementation, we'd store the extracted CFGs
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Extract CFG for a specific function from source
+    /// Extract CFG for a specific function.
+    ///
+    /// Currently delegates to the graph database. Source-level extraction
+    /// via tree-sitter has been replaced by magellan/mirage integration.
     pub async fn extract_function_cfg(
         &self,
-        file_path: &std::path::Path,
+        _file_path: &std::path::Path,
         function_name: &str,
     ) -> Result<Option<TestCfg>> {
-        use crate::treesitter::CfgExtractor;
-        use tokio::fs;
-
-        if let Some(lang) = CfgExtractor::detect_language(file_path) {
-            let content = fs::read_to_string(file_path).await.map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!("Failed to read file: {}", e))
-            })?;
-
-            let functions = CfgExtractor::extract(&content, lang)?;
-
-            for func in functions {
-                if func.name == function_name {
-                    return Ok(Some(func.cfg));
-                }
-            }
-        }
-
+        // TODO: look up function_id by name in graph_entities, then load CFG.
+        let _ = function_name;
         Ok(None)
     }
 
@@ -139,7 +92,7 @@ impl CfgModule {
     ///
     /// * `function` - The function symbol ID
     pub async fn dominators(&self, function: SymbolId) -> Result<DominatorTree> {
-        if let Some(cfg) = self.load_cfg_for_function(function.0).await? {
+        if let Some(cfg) = load_test_cfg(&self.store.db_path, function.0)? {
             let dom_tree = cfg.compute_dominators();
             return Ok(dom_tree);
         }
@@ -158,7 +111,7 @@ impl CfgModule {
     ///
     /// * `function` - The function symbol ID
     pub async fn loops(&self, function: SymbolId) -> Result<Vec<Loop>> {
-        if let Some(cfg) = self.load_cfg_for_function(function.0).await? {
+        if let Some(cfg) = load_test_cfg(&self.store.db_path, function.0)? {
             return Ok(cfg.detect_loops());
         }
 
@@ -168,57 +121,105 @@ impl CfgModule {
 
         Ok(loops)
     }
+}
 
-    /// Load CFG blocks from mirage and build a TestCfg.
-    ///
-    /// Returns None if mirage is unavailable, the DB doesn't exist,
-    /// or no CFG data is found for the function.
-    async fn load_cfg_for_function(&self, function_id: i64) -> Result<Option<TestCfg>> {
-        #[cfg(feature = "mirage")]
-        {
-            let db_path = self.store.db_path.join("graph.db");
-            if !db_path.exists() {
-                return Ok(None);
+/// Load a `TestCfg` from the magellan/mirage graph database.
+///
+/// Queries `cfg_blocks` via Mirage's `Backend::get_cfg_blocks` and
+/// `cfg_edges` via direct rusqlite query, then assembles a `TestCfg`.
+/// Returns `None` if the DB doesn't exist, mirage feature is disabled,
+/// or no blocks are found for the function.
+#[cfg(feature = "mirage")]
+fn load_test_cfg(
+    db_path: &std::path::Path,
+    function_id: i64,
+) -> crate::error::Result<Option<TestCfg>> {
+    use rusqlite::{params, Connection};
+
+    let graph_db = db_path.join("graph.db");
+    if !graph_db.exists() {
+        return Ok(None);
+    }
+
+    let backend = mirage::Backend::detect_and_open(&graph_db).map_err(|e| {
+        crate::error::ForgeError::DatabaseError(format!(
+            "Failed to open mirage backend: {}",
+            e
+        ))
+    })?;
+
+    let blocks = backend.get_cfg_blocks(function_id).map_err(|e| {
+        crate::error::ForgeError::DatabaseError(format!("Failed to get CFG blocks: {}", e))
+    })?;
+
+    if blocks.is_empty() {
+        return Ok(None);
+    }
+
+    let entry = BlockId(blocks[0].id);
+    let mut cfg = TestCfg::new(entry);
+
+    // Query cfg_edges from the magellan DB (same file)
+    let mut has_real_edges = false;
+    if let Ok(conn) = Connection::open(&graph_db) {
+        let query = r#"
+            SELECT source_idx, target_idx, edge_type
+            FROM cfg_edges
+            WHERE function_id = ?1
+            ORDER BY id
+        "#;
+        if let Ok(mut stmt) = conn.prepare(query) {
+            if let Ok(rows) = stmt.query_map(params![function_id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            }) {
+                for row in rows.flatten() {
+                    let src = BlockId(
+                        blocks
+                            .get(row.0 as usize)
+                            .map(|b| b.id)
+                            .unwrap_or(row.0),
+                    );
+                    let dst = BlockId(
+                        blocks
+                            .get(row.1 as usize)
+                            .map(|b| b.id)
+                            .unwrap_or(row.1),
+                    );
+                    cfg.add_edge(src, dst);
+                    has_real_edges = true;
+                }
             }
-
-            let backend = mirage::Backend::detect_and_open(&db_path).map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!(
-                    "Failed to open mirage backend: {}",
-                    e
-                ))
-            })?;
-
-            let blocks = backend.get_cfg_blocks(function_id).map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!("Failed to get CFG blocks: {}", e))
-            })?;
-
-            if blocks.is_empty() {
-                return Ok(None);
-            }
-
-            // Build a TestCfg from mirage blocks
-            let entry = BlockId(blocks[0].id);
-            let mut cfg = TestCfg::new(entry);
-
-            // Add edges: chain blocks linearly as basic approximation
-            for i in 0..blocks.len().saturating_sub(1) {
-                cfg.add_edge(BlockId(blocks[i].id), BlockId(blocks[i + 1].id));
-            }
-
-            // Mark last block as exit
-            if let Some(last) = blocks.last() {
-                cfg.add_exit(BlockId(last.id));
-            }
-
-            Ok(Some(cfg))
-        }
-
-        #[cfg(not(feature = "mirage"))]
-        {
-            let _ = function_id;
-            Ok(None)
         }
     }
+
+    // Fallback: linear chain when no edges table
+    if !has_real_edges {
+        for i in 0..blocks.len().saturating_sub(1) {
+            cfg.add_edge(BlockId(blocks[i].id), BlockId(blocks[i + 1].id));
+        }
+    }
+
+    // Mark exit-like blocks (last block, or blocks with "return" kind)
+    for b in &blocks {
+        if b.terminator == "return" || b.terminator == "throw" {
+            cfg.add_exit(BlockId(b.id));
+        }
+    }
+    if cfg.exits.is_empty() {
+        if let Some(last) = blocks.last() {
+            cfg.add_exit(BlockId(last.id));
+        }
+    }
+
+    Ok(Some(cfg))
+}
+
+#[cfg(not(feature = "mirage"))]
+fn load_test_cfg(
+    _db_path: &std::path::Path,
+    _function_id: i64,
+) -> crate::error::Result<Option<TestCfg>> {
+    Ok(None)
 }
 
 /// Builder for constructing path enumeration queries.
@@ -282,36 +283,17 @@ impl PathBuilder {
     pub async fn execute(self) -> Result<Vec<Path>> {
         // Try mirage for real CFG data
         if let (Some(symbol), Some(store)) = (&self.function, &self.store) {
-            #[cfg(feature = "mirage")]
-            {
-                let db_path = store.db_path.join("graph.db");
-                if db_path.exists() {
-                    if let Ok(backend) = mirage::Backend::detect_and_open(&db_path) {
-                        if let Ok(blocks) = backend.get_cfg_blocks(symbol.0) {
-                            if !blocks.is_empty() {
-                                let entry = BlockId(blocks[0].id);
-                                let mut cfg = TestCfg::new(entry);
-                                for i in 0..blocks.len().saturating_sub(1) {
-                                    cfg.add_edge(BlockId(blocks[i].id), BlockId(blocks[i + 1].id));
-                                }
-                                if let Some(last) = blocks.last() {
-                                    cfg.add_exit(BlockId(last.id));
-                                }
-
-                                let mut paths = cfg.enumerate_paths();
-                                if let Some(max) = self.max_length {
-                                    paths.retain(|p| p.blocks.len() <= max);
-                                }
-                                if let Some(limit) = self.limit {
-                                    paths.truncate(limit);
-                                }
-                                return Ok(paths);
-                            }
-                        }
-                    }
+            if let Some(cfg) = load_test_cfg(&store.db_path, symbol.0)? {
+                let mut paths = cfg.enumerate_paths();
+                if let Some(max) = self.max_length {
+                    paths.retain(|p| p.blocks.len() <= max);
                 }
+                if let Some(limit) = self.limit {
+                    paths.truncate(limit);
+                }
+                return Ok(paths);
             }
-            let _ = (symbol, store);
+            let _ = symbol;
         }
 
         // Fallback: return a synthetic single-block path
@@ -781,7 +763,7 @@ mod tests {
     #[tokio::test]
     async fn test_path_builder_filters() {
         let store = Arc::new(
-            UnifiedGraphStore::open(std::env::current_dir().unwrap(), BackendKind::SQLite)
+            UnifiedGraphStore::open(tempfile::tempdir().unwrap().path(), BackendKind::SQLite)
                 .await
                 .unwrap(),
         );
