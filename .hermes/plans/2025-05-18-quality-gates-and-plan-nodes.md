@@ -85,7 +85,13 @@ pub struct KnowledgeExplorer {
 
 impl KnowledgeExplorer {
     /// Create explorer pointing to wiki DB.
-    pub fn new(wiki_db: PathBuf) -> Self;
+    /// Returns None if wiki DB doesn't exist — caller should degrade gracefully.
+    pub fn new(wiki_db: PathBuf) -> Option<Self>;
+
+    /// Create explorer in code-graph-only mode (no wiki).
+    /// Used when user has no wiki DB — all knowledge comes from
+    /// the project's own magellan DB.
+    pub fn code_only(project_db: PathBuf) -> Self;
 
     /// Set project DB for project-specific history.
     pub fn with_project_db(mut self, db: PathBuf) -> Self;
@@ -93,11 +99,13 @@ impl KnowledgeExplorer {
     /// Explore wiki for knowledge relevant to a query.
     /// Uses HNSW semantic search on the wiki graph, then
     /// traverses edges to find connected decisions and history.
+    /// No-ops in code_only mode (returns empty vec).
     pub async fn explore(&self, query: &ExploreQuery) -> anyhow::Result<Vec<DiscoveredKnowledge>>;
 
     /// Find project history — past decisions, dead ends, lessons.
     /// Queries the wiki for entities tagged with the project name
     /// and traverses created/performed_by edges for provenance.
+    /// Falls back to project's magellan DB if no wiki.
     pub async fn find_project_history(&self, project: &str) -> anyhow::Result<Vec<DiscoveredKnowledge>>;
 
     /// Find cross-project connections.
@@ -105,6 +113,15 @@ impl KnowledgeExplorer {
     /// in the current project's codebase.
     pub async fn find_connections(&self, symbols: &[String]) -> anyhow::Result<Vec<DiscoveredKnowledge>>;
 }
+
+/// NOTE: Installation flow (forge-py, not this crate) should:
+/// 1. Check if wiki DB exists at default path (~/.forge/wiki.db or user-specified)
+/// 2. If not, prompt: "Would you like to create a knowledge base? This helps
+///    forge learn from past decisions and find cross-project patterns."
+/// 3. If yes, initialize empty sqlitegraph DB with wiki schema
+/// 4. If no, proceed in code-only mode (no wiki exploration)
+/// This is a distribution concern, not a library concern — but the API
+/// must support both paths cleanly.
 ```
 
 **Implementation:**
@@ -128,6 +145,8 @@ impl KnowledgeExplorer {
 - test_find_connections_deduplicates
 - test_discovered_knowledge_serialization
 - test_knowledge_source_trait_impl
+- test_code_only_mode_returns_empty_explore
+- test_new_returns_none_when_no_db
 
 ---
 
