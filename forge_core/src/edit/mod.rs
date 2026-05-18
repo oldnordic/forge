@@ -78,25 +78,15 @@ impl EditModule {
     /// Patches a symbol with new content.
     ///
     /// Uses magellan to find the symbol's byte span, then splice to apply
-    /// the replacement with validation. Falls back to file-system scanning
-    /// when no database is available.
+    /// the replacement with validation. Requires graph.db to exist.
     pub async fn patch_symbol(&self, symbol: &str, replacement: &str) -> Result<EditResult> {
         let db_path = self.store.db_path.join("graph.db");
-
-        if db_path.exists() {
-            match self
-                .patch_symbol_via_db(symbol, replacement, &db_path)
-                .await
-            {
-                Ok(result) => Ok(result),
-                Err(ForgeError::SymbolNotFound(_)) => {
-                    self.patch_symbol_via_files(symbol, replacement).await
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            self.patch_symbol_via_files(symbol, replacement).await
+        if !db_path.exists() {
+            return Err(ForgeError::DatabaseError(
+                "graph.db not found; run forge.graph().index() first".to_string(),
+            ));
         }
+        self.patch_symbol_via_db(symbol, replacement, &db_path).await
     }
 
     /// Patch using magellan DB for precise symbol resolution.
@@ -149,15 +139,10 @@ impl EditModule {
 
                     #[cfg(not(feature = "splice"))]
                     {
-                        let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
-                            ForgeError::DatabaseError(format!("Failed to read file: {}", e))
-                        })?;
-                        let mut modified = content.clone();
-                        modified.replace_range(sym.byte_start..sym.byte_end, replacement);
-                        tokio::fs::write(&full_path, modified).await.map_err(|e| {
-                            ForgeError::DatabaseError(format!("Failed to write file: {}", e))
-                        })?;
-                        changed_files.push(PathBuf::from(&file_path));
+                        let _ = (full_path, file_path);
+                        return Err(ForgeError::DatabaseError(
+                            "splice feature not enabled".to_string(),
+                        ));
                     }
                 }
             }
