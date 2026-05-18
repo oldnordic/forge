@@ -689,13 +689,10 @@ impl PlanGraph {
             if triple.start_id == parent_id {
                 if let Ok(entity) = self.graph.get_entity(triple.end_id) {
                     if entity.kind == node_kind {
-                        let ts = entity.data.get("timestamp").and_then(|v| {
-                            if let Ok(dt) = serde_json::from_value::<DateTime<Utc>>(v.clone()) {
-                                Some(dt)
-                            } else {
-                                None
-                            }
-                        });
+                        let ts = entity
+                            .data
+                            .get("timestamp")
+                            .and_then(|v| serde_json::from_value::<DateTime<Utc>>(v.clone()).ok());
                         // Also try started_at / completed_at for subagent runs
                         let ts = ts.or_else(|| {
                             entity.data.get("started_at").and_then(|v| {
@@ -922,7 +919,7 @@ impl PlanGraph {
         // Find plans linked to this requirement (reverse of HAS_REQUIREMENT)
         let plan_pattern = sqlitegraph::PatternTriple::new(PlanEdgeKind::HasRequirement.as_str());
         let plans = self.graph.match_triples(&plan_pattern)?;
-        let mut plan_ids: Vec<i64> = plans
+        let plan_ids: Vec<i64> = plans
             .iter()
             .filter(|t| t.end_id == requirement_id)
             .map(|t| t.start_id)
@@ -1477,7 +1474,7 @@ mod tests {
         let mut pg = PlanGraph::open_in_memory()?;
         let req = pg.add_requirement("Req", "Desc")?;
         let plan_id = pg.add_plan("Plan", &[req])?;
-        let s = pg.add_section(plan_id, req, &make_section(1))?;
+        let _s = pg.add_section(plan_id, req, &make_section(1))?;
 
         let timeline = pg.timeline(plan_id)?;
         assert!(!timeline.is_empty());
@@ -1577,7 +1574,7 @@ mod tests {
         assert_eq!(run.deliverables[0].file_path, "src/auth.rs");
 
         // 5. Backward trace from deliverable
-        let deliv_id = run.run_id; // wrong, need actual deliverable id
+        let _deliv_id = run.run_id; // wrong, need actual deliverable id
         let deliv_nodes: Vec<_> = pg.children(
             run_id,
             PlanEdgeKind::Produced.as_str(),

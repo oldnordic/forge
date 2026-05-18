@@ -17,6 +17,7 @@ pub struct SemgrepFinding {
 }
 
 /// Runs semgrep with configurable rulesets.
+#[allow(dead_code)]
 pub struct SemgrepRunner {
     configs: Vec<String>,
     json_output: bool,

@@ -453,6 +453,7 @@ impl IncrementalIndexer {
     }
 
     /// Deletes a file from the index using magellan.
+    #[allow(unused_variables)]
     async fn delete_file(&self, path: &Path) -> anyhow::Result<()> {
         let db_path = self.store.db_path().join("graph.db");
         if !db_path.exists() {
