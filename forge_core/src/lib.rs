@@ -153,7 +153,11 @@ impl Forge {
     /// sqlitegraph native-v3 backend.
     #[cfg(feature = "native-v3")]
     pub fn knowledge(&self) -> anyhow::Result<knowledge::KnowledgeGraph> {
-        let graph_path = self.store.codebase_path.join(".magellan").join("knowledge.graph");
+        let graph_path = self
+            .store
+            .codebase_path
+            .join(".magellan")
+            .join("knowledge.graph");
         let db_path = self.store.db_path.clone();
 
         if let Some(parent) = graph_path.parent() {

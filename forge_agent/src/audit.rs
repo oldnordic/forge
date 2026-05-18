@@ -224,6 +224,23 @@ pub enum AuditEvent {
         message: String,
         severity: String,
     },
+    /// Subagent execution started
+    SubagentStarted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        run_id: String,
+        agent_name: String,
+    },
+    /// Subagent execution completed
+    SubagentCompleted {
+        timestamp: DateTime<Utc>,
+        workflow_id: String,
+        task_id: String,
+        run_id: String,
+        duration_ms: u64,
+        status: String,
+    },
 }
 
 /// Audit log for recording and persisting phase transitions.
@@ -823,6 +840,69 @@ mod tests {
                 assert_eq!(severity, "ERROR");
             }
             _ => panic!("Expected SemgrepFinding, got wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subagent_started_serialization() {
+        let event = AuditEvent::SubagentStarted {
+            timestamp: Utc::now(),
+            workflow_id: "wf-1".to_string(),
+            task_id: "task-1".to_string(),
+            run_id: "run-001".to_string(),
+            agent_name: "claude".to_string(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::SubagentStarted {
+                workflow_id,
+                task_id,
+                run_id,
+                agent_name,
+                ..
+            } => {
+                assert_eq!(workflow_id, "wf-1");
+                assert_eq!(task_id, "task-1");
+                assert_eq!(run_id, "run-001");
+                assert_eq!(agent_name, "claude");
+            }
+            _ => panic!("Expected SubagentStarted, got wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subagent_completed_serialization() {
+        let event = AuditEvent::SubagentCompleted {
+            timestamp: Utc::now(),
+            workflow_id: "wf-1".to_string(),
+            task_id: "task-1".to_string(),
+            run_id: "run-001".to_string(),
+            duration_ms: 1234,
+            status: "Completed".to_string(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            AuditEvent::SubagentCompleted {
+                workflow_id,
+                task_id,
+                run_id,
+                duration_ms,
+                status,
+                ..
+            } => {
+                assert_eq!(workflow_id, "wf-1");
+                assert_eq!(task_id, "task-1");
+                assert_eq!(run_id, "run-001");
+                assert_eq!(duration_ms, 1234);
+                assert_eq!(status, "Completed");
+            }
+            _ => panic!("Expected SubagentCompleted, got wrong variant"),
         }
     }
 }
