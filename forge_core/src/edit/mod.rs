@@ -157,7 +157,6 @@ impl EditModule {
 
         Ok(EditResult::success(changed_files))
     }
-
     #[cfg(not(feature = "magellan"))]
     async fn patch_symbol_via_db(
         &self,
@@ -170,64 +169,19 @@ impl EditModule {
         ))
     }
 
-    /// Patch by scanning files in the codebase directory recursively.
-    async fn patch_symbol_via_files(&self, symbol: &str, replacement: &str) -> Result<EditResult> {
-        let codebase = &self.store.codebase_path;
-        let mut changed_files = Vec::new();
-        let mut files = Vec::new();
-        collect_files_recursive(codebase, &mut files).await;
-
-        for path in files {
-            let content = match tokio::fs::read_to_string(&path).await {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            if let Some(span) = find_symbol_span(&content, symbol) {
-                let mut modified = content.as_bytes()[..span.0].to_vec();
-                modified.extend_from_slice(replacement.as_bytes());
-                modified.extend_from_slice(&content.as_bytes()[span.1..]);
-
-                tokio::fs::write(&path, modified).await.map_err(|e| {
-                    ForgeError::DatabaseError(format!("Failed to write file: {}", e))
-                })?;
-
-                changed_files.push(path.strip_prefix(codebase).unwrap_or(&path).to_path_buf());
-            }
-        }
-
-        if changed_files.is_empty() {
-            return Err(ForgeError::SymbolNotFound(format!(
-                "Symbol '{}' not found",
-                symbol
-            )));
-        }
-
-        Ok(EditResult::success(changed_files))
-    }
-
     /// Renames a symbol and updates all references.
-    ///
+
     /// Uses magellan to find all references to the symbol, then splice
     /// to apply span-safe replacements. Falls back to word-boundary
     /// replacement when no database is available.
     pub async fn rename_symbol(&self, old_name: &str, new_name: &str) -> Result<EditResult> {
         let db_path = self.store.db_path.join("graph.db");
-
-        if db_path.exists() {
-            match self
-                .rename_symbol_via_db(old_name, new_name, &db_path)
-                .await
-            {
-                Ok(result) => Ok(result),
-                Err(ForgeError::SymbolNotFound(_)) => {
-                    self.rename_symbol_via_files(old_name, new_name).await
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            self.rename_symbol_via_files(old_name, new_name).await
+        if !db_path.exists() {
+            return Err(ForgeError::DatabaseError(
+                "graph.db not found; run forge.graph().index() first".to_string(),
+            ));
         }
+        self.rename_symbol_via_db(old_name, new_name, &db_path).await
     }
 
     /// Rename using magellan DB for precise reference resolution.
@@ -298,20 +252,9 @@ impl EditModule {
 
         #[cfg(not(feature = "splice"))]
         {
-            let by_file = splice::graph::rename::group_references_by_file(&all_refs);
-            for (file_path, _refs) in by_file {
-                let full_path = self.store.codebase_path.join(&file_path);
-                let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
-                    ForgeError::DatabaseError(format!("Failed to read file: {}", e))
-                })?;
-                let modified = simple_word_replace(&content, old_name, new_name);
-                if modified != content {
-                    tokio::fs::write(&full_path, modified).await.map_err(|e| {
-                        ForgeError::DatabaseError(format!("Failed to write file: {}", e))
-                    })?;
-                    changed_files.push(file_path.into());
-                }
-            }
+            return Err(ForgeError::DatabaseError(
+                "splice feature not enabled".to_string(),
+            ));
         }
 
         if changed_files.is_empty() {
@@ -335,49 +278,9 @@ impl EditModule {
             "magellan feature not enabled".to_string(),
         ))
     }
-
-    /// Rename by scanning files recursively and doing word-boundary replacement.
-    async fn rename_symbol_via_files(&self, old_name: &str, new_name: &str) -> Result<EditResult> {
-        let codebase = &self.store.codebase_path;
-        let mut changed_files = Vec::new();
-        let mut found_any = false;
-        let mut files = Vec::new();
-        collect_files_recursive(codebase, &mut files).await;
-
-        for path in files {
-            let content = match tokio::fs::read_to_string(&path).await {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            if !content.contains(old_name) {
-                continue;
-            }
-
-            if find_symbol_span(&content, old_name).is_some() {
-                found_any = true;
-            }
-
-            let modified = simple_word_replace(&content, old_name, new_name);
-            if modified != content {
-                tokio::fs::write(&path, modified).await.map_err(|e| {
-                    ForgeError::DatabaseError(format!("Failed to write file: {}", e))
-                })?;
-                changed_files.push(path.strip_prefix(codebase).unwrap_or(&path).to_path_buf());
-            }
-        }
-
-        if !found_any {
-            return Err(ForgeError::SymbolNotFound(format!(
-                "Symbol '{}' not found",
-                old_name
-            )));
-        }
-
-        Ok(EditResult::success(changed_files))
-    }
 }
 
+#[cfg(test)]
 /// Recursively collect all files under `dir`, skipping build artifacts.
 async fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
@@ -401,6 +304,7 @@ async fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(test)]
 /// Find the byte span of a symbol definition in source code.
 ///
 /// Looks for patterns like `fn name`, `struct name`, `enum name`, etc.
@@ -438,6 +342,7 @@ fn find_symbol_span(content: &str, symbol: &str) -> Option<(usize, usize)> {
     None
 }
 
+#[cfg(test)]
 /// Find the end byte offset of a definition starting at `start`.
 fn find_definition_end(content: &str, start: usize) -> usize {
     let rest = &content[start..];
@@ -467,6 +372,7 @@ fn find_definition_end(content: &str, start: usize) -> usize {
     content.len()
 }
 
+#[cfg(test)]
 /// Word-boundary replacement preserving non-word characters around matches.
 fn simple_word_replace(content: &str, old: &str, new: &str) -> String {
     let mut result = String::new();
