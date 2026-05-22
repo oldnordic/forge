@@ -32,7 +32,7 @@ impl GraphModule {
         &self.store
     }
 
-    /// Finds symbols by name.
+    /// Finds symbols by name (exact match).
     ///
     /// # Arguments
     ///
@@ -40,81 +40,44 @@ impl GraphModule {
     ///
     /// # Returns
     ///
-    /// A vector of matching symbols
+    /// A vector of matching symbols, or empty if the graph DB does not exist.
     pub async fn find_symbol(&self, name: &str) -> Result<Vec<Symbol>> {
-        #[cfg(feature = "magellan")]
-        {
-            use magellan::CodeGraph;
+        use magellan::CodeGraph;
 
-            let codebase_path = &self.store.codebase_path;
-            let db_path = codebase_path.join(".forge").join("graph.db");
-
-            // Open the magellan graph
-            let mut graph = CodeGraph::open(&db_path).map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!(
-                    "Failed to open magellan graph: {}",
-                    e
-                ))
-            })?;
-
-            // Query all symbols and filter by name
-            // For now, we scan all files and their symbols
-            let mut results = Vec::new();
-            let file_nodes = graph.all_file_nodes().map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e))
-            })?;
-
-            for (file_path, _file_node) in file_nodes {
-                let symbols = graph.symbols_in_file(&file_path).map_err(|e| {
-                    crate::error::ForgeError::DatabaseError(format!("Failed to get symbols: {}", e))
-                })?;
-
-                for sym in symbols {
-                    if let Some(ref sym_name) = sym.name {
-                        if sym_name.contains(name) {
-                            use crate::types::SymbolKind;
-                            let kind = match sym.kind {
-                                magellan::SymbolKind::Function => SymbolKind::Function,
-                                magellan::SymbolKind::Method => SymbolKind::Method,
-                                magellan::SymbolKind::Class => SymbolKind::Struct,
-                                magellan::SymbolKind::Interface => SymbolKind::Trait,
-                                magellan::SymbolKind::Enum => SymbolKind::Enum,
-                                magellan::SymbolKind::Module => SymbolKind::Module,
-                                magellan::SymbolKind::TypeAlias => SymbolKind::TypeAlias,
-                                magellan::SymbolKind::Union => SymbolKind::Enum,
-                                magellan::SymbolKind::Namespace => SymbolKind::Module,
-                                magellan::SymbolKind::Unknown => SymbolKind::Function,
-                            };
-
-                            results.push(Symbol {
-                                id: SymbolId(0), // magellan uses different ID system
-                                name: Arc::from(sym_name.clone()),
-                                fully_qualified_name: Arc::from(
-                                    sym.fqn.clone().unwrap_or_else(|| sym_name.clone()),
-                                ),
-                                kind,
-                                language: map_magellan_language(&sym.file_path),
-                                location: crate::types::Location {
-                                    file_path: sym.file_path.clone(),
-                                    byte_start: sym.byte_start as u32,
-                                    byte_end: sym.byte_end as u32,
-                                    line_number: sym.start_line,
-                                },
-                                parent_id: None,
-                                metadata: serde_json::Value::Null,
-                            });
-                        }
-                    }
-                }
-            }
-
-            Ok(results)
+        let db_path = &self.store.db_path;
+        if !db_path.exists() {
+            return Ok(Vec::new());
         }
 
-        #[cfg(not(feature = "magellan"))]
-        {
-            self.store.query_symbols(name).await
-        }
+        let graph = CodeGraph::open(db_path).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to open magellan graph: {}",
+                e
+            ))
+        })?;
+
+        let results = graph.search_symbols_by_name(name).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Symbol search failed: {}", e))
+        })?;
+
+        Ok(results
+            .into_iter()
+            .map(|r| Symbol {
+                id: SymbolId(r.entity_id),
+                name: Arc::from(r.name.clone()),
+                fully_qualified_name: Arc::from(r.name.clone()),
+                kind: parse_symbol_kind_str(&r.kind),
+                language: map_magellan_language(std::path::Path::new(&r.file_path)),
+                location: crate::types::Location {
+                    file_path: std::path::PathBuf::from(&r.file_path),
+                    byte_start: r.byte_start as u32,
+                    byte_end: r.byte_end as u32,
+                    line_number: 0,
+                },
+                parent_id: None,
+                metadata: serde_json::Value::Null,
+            })
+            .collect())
     }
 
     /// Finds a symbol by its stable ID.
@@ -461,8 +424,20 @@ impl GraphModule {
     }
 }
 
-/// Map file extension to forge Language
-#[cfg(feature = "magellan")]
+fn parse_symbol_kind_str(kind: &str) -> crate::types::SymbolKind {
+    use crate::types::SymbolKind;
+    match kind {
+        "fn" | "function" => SymbolKind::Function,
+        "method" => SymbolKind::Method,
+        "struct" | "class" => SymbolKind::Struct,
+        "trait" | "interface" => SymbolKind::Trait,
+        "enum" => SymbolKind::Enum,
+        "module" | "namespace" => SymbolKind::Module,
+        "type_alias" | "type" => SymbolKind::TypeAlias,
+        _ => SymbolKind::Function,
+    }
+}
+
 fn map_magellan_language(file_path: &std::path::Path) -> crate::types::Language {
     use crate::types::Language;
 
@@ -482,31 +457,29 @@ fn map_magellan_language(file_path: &std::path::Path) -> crate::types::Language 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::BackendKind;
+
+    async fn test_forge(dir: &std::path::Path) -> crate::Forge {
+        crate::ForgeBuilder::new()
+            .path(dir)
+            .db_path(dir.join("test-graph.db"))
+            .build()
+            .await
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn test_graph_module_creation() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await
-                .unwrap(),
-        );
-
-        let module = GraphModule::new(Arc::clone(&store));
-        assert_eq!(module.store.db_path(), store.db_path());
+        let forge = test_forge(temp_dir.path()).await;
+        let module = forge.graph();
+        assert_eq!(module.store().db_path, temp_dir.path().join("test-graph.db"));
     }
 
     #[tokio::test]
     async fn test_find_symbol_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await
-                .unwrap(),
-        );
-
-        let module = GraphModule::new(store);
+        let forge = test_forge(temp_dir.path()).await;
+        let module = forge.graph();
         let symbols = module.find_symbol("nonexistent").await.unwrap();
         assert_eq!(symbols.len(), 0);
     }
@@ -514,13 +487,8 @@ mod tests {
     #[tokio::test]
     async fn test_find_symbol_by_id_not_found() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await
-                .unwrap(),
-        );
-
-        let module = GraphModule::new(store);
+        let forge = test_forge(temp_dir.path()).await;
+        let module = forge.graph();
         let result = module.find_symbol_by_id(SymbolId(999)).await;
         assert!(result.is_err());
     }
@@ -528,13 +496,8 @@ mod tests {
     #[tokio::test]
     async fn test_callers_of_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            UnifiedGraphStore::open(temp_dir.path(), BackendKind::SQLite)
-                .await
-                .unwrap(),
-        );
-
-        let module = GraphModule::new(store);
+        let forge = test_forge(temp_dir.path()).await;
+        let module = forge.graph();
         let callers = module.callers_of("nonexistent").await.unwrap();
         assert_eq!(callers.len(), 0);
     }
