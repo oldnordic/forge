@@ -188,6 +188,8 @@ impl Forge {
 pub struct ForgeBuilder {
     path: Option<std::path::PathBuf>,
     backend_kind: Option<BackendKind>,
+    db_path: Option<std::path::PathBuf>,
+    db_dir: Option<std::path::PathBuf>,
 }
 
 impl ForgeBuilder {
@@ -212,12 +214,41 @@ impl ForgeBuilder {
         }
     }
 
+    /// Sets an explicit database path, overriding the default ~/.magellan/<stem>.db.
+    pub fn db_path(self, path: std::path::PathBuf) -> Self {
+        Self {
+            db_path: Some(path),
+            ..self
+        }
+    }
+
+    /// Sets the database directory; stem is still derived from the project root.
+    pub fn db_dir(self, dir: std::path::PathBuf) -> Self {
+        Self {
+            db_dir: Some(dir),
+            ..self
+        }
+    }
+
     /// Builds a `Forge` instance with configured options.
     pub async fn build(self) -> anyhow::Result<Forge> {
         let path = self.path.ok_or_else(|| anyhow!("path is required"))?;
+        let backend = self.backend_kind.unwrap_or_default();
+
+        let resolved_db = if let Some(explicit) = self.db_path {
+            explicit
+        } else if let Some(dir) = self.db_dir {
+            let stem = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("graph");
+            dir.join(format!("{}.db", stem))
+        } else {
+            storage::default_db_path(&path)
+        };
 
         let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(&path, self.backend_kind.unwrap_or_default()).await?,
+            storage::UnifiedGraphStore::open_with_path(&path, &resolved_db, backend).await?,
         );
 
         Ok(Forge { store })
@@ -393,5 +424,39 @@ mod tests {
 
         let kg = kg.unwrap();
         assert!(kg.graph_path().exists());
+    }
+
+    #[tokio::test]
+    async fn test_forge_builder_db_path_override() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let custom_db = temp_dir.path().join("custom.db");
+
+        let forge = ForgeBuilder::new()
+            .path(temp_dir.path())
+            .db_path(custom_db.clone())
+            .build()
+            .await
+            .unwrap();
+
+        assert_eq!(forge.store.db_path, custom_db);
+    }
+
+    #[tokio::test]
+    async fn test_forge_builder_db_dir_override() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_dir = temp_dir.path().join("custom_dir");
+        std::fs::create_dir_all(&db_dir).unwrap();
+
+        let project_dir = temp_dir.path().join("my-project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let forge = ForgeBuilder::new()
+            .path(&project_dir)
+            .db_dir(db_dir.clone())
+            .build()
+            .await
+            .unwrap();
+
+        assert_eq!(forge.store.db_path, db_dir.join("my-project.db"));
     }
 }
