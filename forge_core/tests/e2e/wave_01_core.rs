@@ -43,15 +43,18 @@ async fn e2e_forge_creates_directory_structure() {
     std::fs::create_dir(&project_path).unwrap();
 
     // Initialize Forge
-    let _ = Forge::open(&project_path).await.unwrap();
+    let forge = Forge::open(&project_path).await.unwrap();
 
-    // Check .forge directory exists
-    let forge_dir = project_path.join(".forge");
-    assert!(forge_dir.exists(), ".forge directory should be created");
-
-    // Check graph.db exists
-    let graph_db = forge_dir.join("graph.db");
-    assert!(graph_db.exists(), "graph.db should be created");
+    // DB lives at ~/.magellan/<project>.db
+    let db = forge.codebase_path()
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|stem| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            std::path::PathBuf::from(home).join(".magellan").join(format!("{}.db", stem))
+        })
+        .unwrap();
+    assert!(db.exists(), "~/.magellan/<project>.db should be created");
 }
 
 /// E2E Test 4: Forge reopens existing database

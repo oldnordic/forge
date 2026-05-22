@@ -164,6 +164,12 @@ impl UnifiedGraphStore {
     /// A `UnifiedGraphStore` instance or an error if initialization fails
     pub async fn open(codebase_path: impl AsRef<Path>, backend_kind: BackendKind) -> Result<Self> {
         let codebase = codebase_path.as_ref();
+        if !codebase.exists() {
+            return Err(ForgeError::DatabaseError(format!(
+                "Codebase path does not exist: {}",
+                codebase.display()
+            )));
+        }
         let db_path = default_db_path(codebase);
 
         // Create parent directory if it doesn't exist
@@ -678,7 +684,7 @@ mod tests {
 
         assert_eq!(store.backend_kind(), BackendKind::SQLite);
         assert!(store.db_path().to_string_lossy().contains(".magellan"));
-        assert!(store.db_path().extension().map_or(false, |e| e == "db"));
+        assert!(store.db_path().extension().is_some_and(|e| e == "db"));
         assert!(store.is_connected());
     }
 
@@ -692,7 +698,7 @@ mod tests {
 
         assert_eq!(store.backend_kind(), BackendKind::NativeV3);
         assert!(store.db_path().to_string_lossy().contains(".magellan"));
-        assert!(store.db_path().extension().map_or(false, |e| e == "db"));
+        assert!(store.db_path().extension().is_some_and(|e| e == "db"));
         assert!(store.is_connected());
     }
 
