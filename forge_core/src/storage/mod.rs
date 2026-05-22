@@ -179,14 +179,36 @@ impl UnifiedGraphStore {
             })?;
         }
 
-        // Open the graph (this validates the database works)
+        // NativeV3 uses its own file so it doesn't overwrite the magellan SQLite DB.
+        // db_path always stays at ~/.magellan/<stem>.db (SQLite, for magellan).
+        let sqlitegraph_path = match backend_kind {
+            BackendKind::SQLite => db_path.clone(),
+            BackendKind::NativeV3 => {
+                let stem = codebase
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("graph");
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                std::path::PathBuf::from(home)
+                    .join(".magellan")
+                    .join(format!("{}.v3", stem))
+            }
+        };
         let config = match backend_kind {
             BackendKind::SQLite => GraphConfig::sqlite(),
             BackendKind::NativeV3 => GraphConfig::native(),
         };
 
-        let _graph = open_graph(&db_path, &config)
+        let _graph = open_graph(&sqlitegraph_path, &config)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open database: {}", e)))?;
+
+        // For NativeV3, also initialise the SQLite magellan DB at db_path so
+        // is_connected() and graph() operations (which always use db_path) work.
+        if matches!(backend_kind, BackendKind::NativeV3) {
+            let _ = open_graph(&db_path, &GraphConfig::sqlite()).map_err(|e| {
+                ForgeError::DatabaseError(format!("Failed to init magellan SQLite DB: {}", e))
+            })?;
+        }
 
         Ok(UnifiedGraphStore {
             codebase_path: codebase.to_path_buf(),

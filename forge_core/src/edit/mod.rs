@@ -80,13 +80,14 @@ impl EditModule {
     /// Uses magellan to find the symbol's byte span, then splice to apply
     /// the replacement with validation. Requires graph.db to exist.
     pub async fn patch_symbol(&self, symbol: &str, replacement: &str) -> Result<EditResult> {
-        let db_path = self.store.db_path.join("graph.db");
+        let db_path = self.store.db_path.clone();
         if !db_path.exists() {
             return Err(ForgeError::DatabaseError(
-                "graph.db not found; run forge.graph().index() first".to_string(),
+                "graph DB not found; run forge.graph().index() first".to_string(),
             ));
         }
-        self.patch_symbol_via_db(symbol, replacement, &db_path).await
+        self.patch_symbol_via_db(symbol, replacement, &db_path)
+            .await
     }
 
     /// Patch using magellan DB for precise symbol resolution.
@@ -170,18 +171,17 @@ impl EditModule {
     }
 
     /// Renames a symbol and updates all references.
-
     /// Uses magellan to find all references to the symbol, then splice
-    /// to apply span-safe replacements. Falls back to word-boundary
-    /// replacement when no database is available.
+    /// to apply span-safe replacements.
     pub async fn rename_symbol(&self, old_name: &str, new_name: &str) -> Result<EditResult> {
-        let db_path = self.store.db_path.join("graph.db");
+        let db_path = self.store.db_path.clone();
         if !db_path.exists() {
             return Err(ForgeError::DatabaseError(
-                "graph.db not found; run forge.graph().index() first".to_string(),
+                "graph DB not found; run forge.graph().index() first".to_string(),
             ));
         }
-        self.rename_symbol_via_db(old_name, new_name, &db_path).await
+        self.rename_symbol_via_db(old_name, new_name, &db_path)
+            .await
     }
 
     /// Rename using magellan DB for precise reference resolution.
@@ -195,28 +195,61 @@ impl EditModule {
         let mut graph = magellan::CodeGraph::open(db_path)
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
 
-        let mut all_refs: Vec<magellan::references::ReferenceFact> = Vec::new();
+        // Use magellan only to discover which files are affected.
+        // callers_of_symbol returns call_expression byte ranges (includes `()`), not
+        // just the identifier token — so we must NOT use those spans for replacement.
+        // Instead, collect affected file paths here and re-scan with identifier_spans.
+        let mut affected_files: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
+
+        if let Ok(defs) = graph.search_symbols_by_name(old_name) {
+            for sym in &defs {
+                affected_files.insert(std::path::PathBuf::from(&sym.file_path));
+            }
+        }
+
         let file_nodes = graph
             .all_file_nodes()
             .map_err(|e| ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e)))?;
 
-        for (file_path, _file_node) in file_nodes {
-            if let Ok(Some(symbol_id)) = graph.symbol_id_by_name(&file_path, old_name) {
-                if let Ok(refs) = graph.references_to_symbol(symbol_id) {
-                    all_refs.extend(refs);
+        for file_path in file_nodes.keys() {
+            if let Ok(call_facts) = graph.callers_of_symbol(file_path, old_name) {
+                if !call_facts.is_empty() {
+                    affected_files.insert(std::path::PathBuf::from(file_path));
                 }
             }
-            if let Ok(call_facts) = graph.callers_of_symbol(&file_path, old_name) {
-                for fact in call_facts {
+            if let Ok(Some(symbol_id)) = graph.symbol_id_by_name(file_path, old_name) {
+                if let Ok(refs) = graph.references_to_symbol(symbol_id) {
+                    for r in refs {
+                        affected_files.insert(r.file_path.clone());
+                    }
+                }
+            }
+        }
+
+        if affected_files.is_empty() {
+            return Err(ForgeError::SymbolNotFound(format!(
+                "Symbol '{}' not found",
+                old_name
+            )));
+        }
+
+        // For each affected file, use identifier_spans to get exact identifier token
+        // positions (word-boundary matches only — avoids touching `get_old_name` etc.).
+        let mut all_refs: Vec<magellan::references::ReferenceFact> = Vec::new();
+        for rel_path in &affected_files {
+            let full_path = self.store.codebase_path.join(rel_path);
+            if let Ok(content) = std::fs::read(&full_path) {
+                for (start, end) in identifier_spans(&content, old_name) {
                     all_refs.push(magellan::references::ReferenceFact {
-                        file_path: fact.file_path,
-                        referenced_symbol: fact.callee,
-                        byte_start: fact.byte_start,
-                        byte_end: fact.byte_end,
-                        start_line: fact.start_line,
-                        start_col: fact.start_col,
-                        end_line: fact.end_line,
-                        end_col: fact.end_col,
+                        file_path: rel_path.clone(),
+                        referenced_symbol: old_name.to_string(),
+                        byte_start: start,
+                        byte_end: end,
+                        start_line: 0,
+                        start_col: 0,
+                        end_line: 0,
+                        end_col: 0,
                     });
                 }
             }
@@ -234,10 +267,10 @@ impl EditModule {
         #[cfg(feature = "splice")]
         {
             let by_file = splice::graph::rename::group_references_by_file(&all_refs);
-            for (file_path, _refs) in by_file {
+            for (file_path, refs) in by_file {
                 let full_path = self.store.codebase_path.join(&file_path);
                 match splice::graph::rename::apply_replacements_in_file(
-                    &full_path, old_name, new_name, &all_refs,
+                    &full_path, old_name, new_name, &refs,
                 ) {
                     Ok(count) if count > 0 => {
                         changed_files.push(file_path);
@@ -280,28 +313,30 @@ impl EditModule {
     }
 }
 
-#[cfg(test)]
-/// Recursively collect all files under `dir`, skipping build artifacts.
-async fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
-        return;
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if matches!(
-                    name,
-                    "target" | ".git" | ".forge" | ".magellan" | "node_modules"
-                ) {
-                    continue;
-                }
-            }
-            Box::pin(collect_files_recursive(&path, files)).await;
-        } else if path.is_file() {
-            files.push(path);
-        }
+fn identifier_spans(content: &[u8], name: &str) -> Vec<(usize, usize)> {
+    let name_bytes = name.as_bytes();
+    let name_len = name_bytes.len();
+    let content_len = content.len();
+    let mut spans = Vec::new();
+    if name_len == 0 || content_len < name_len {
+        return spans;
     }
+    let mut i = 0;
+    while i + name_len <= content_len {
+        if &content[i..i + name_len] == name_bytes {
+            let before_ok = i == 0 || !is_ident_char(content[i - 1]);
+            let after_ok = i + name_len == content_len || !is_ident_char(content[i + name_len]);
+            if before_ok && after_ok {
+                spans.push((i, i + name_len));
+            }
+        }
+        i += 1;
+    }
+    spans
+}
+
+fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]

@@ -115,7 +115,7 @@ async fn test_backend_consistency() {
 #[tokio::test]
 async fn test_database_persistence_sqlite() {
     let temp = create_test_repo().await;
-    let db_path = temp.path().join(".forge").join("graph.db");
+    let db_path = forge_core::storage::default_db_path(temp.path());
 
     // Create initial database
     {
@@ -145,7 +145,7 @@ async fn test_database_persistence_sqlite() {
 #[tokio::test]
 async fn test_database_persistence_native_v3() {
     let temp = create_test_repo().await;
-    let db_path = temp.path().join(".forge").join("graph.v3");
+    let db_path = forge_core::storage::default_db_path(temp.path());
 
     // Create initial database
     {
