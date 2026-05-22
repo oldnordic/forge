@@ -40,6 +40,22 @@ pub use sqlitegraph::backend::{EdgeSpec, NodeSpec};
 pub use sqlitegraph::config::{open_graph, BackendKind as SqliteGraphBackendKind, GraphConfig};
 pub use sqlitegraph::graph::{GraphEntity, SqliteGraph};
 
+/// Resolves the default magellan database path for a project root.
+///
+/// Returns `~/.magellan/<stem>.db` where `<stem>` is the last component
+/// of `project_root`. Falls back to `~/.magellan/graph.db` if the stem
+/// cannot be determined.
+pub fn default_db_path(project_root: &std::path::Path) -> std::path::PathBuf {
+    let stem = project_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("graph");
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    std::path::PathBuf::from(home)
+        .join(".magellan")
+        .join(format!("{}.db", stem))
+}
+
 /// Backend kind selection for UnifiedGraphStore.
 ///
 /// Users choose which backend to use based on their requirements.
@@ -815,5 +831,20 @@ mod tests {
         assert!(debug_str.contains("codebase_path: \"/test\""));
         assert!(debug_str.contains("db_path: \"/test/graph.db\""));
         assert!(debug_str.contains("backend_kind: SQLite"));
+    }
+
+    #[test]
+    fn test_default_db_path_uses_home_dot_magellan() {
+        let project = std::path::Path::new("/home/user/Projects/my-cool-project");
+        let db = default_db_path(project);
+        assert!(db.to_string_lossy().contains(".magellan"));
+        assert!(db.to_string_lossy().ends_with("my-cool-project.db"));
+    }
+
+    #[test]
+    fn test_default_db_path_fallback_stem() {
+        let project = std::path::Path::new("/");
+        let db = default_db_path(project);
+        assert!(db.to_string_lossy().ends_with(".magellan/graph.db"));
     }
 }
