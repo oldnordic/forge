@@ -164,9 +164,7 @@ impl UnifiedGraphStore {
     /// A `UnifiedGraphStore` instance or an error if initialization fails
     pub async fn open(codebase_path: impl AsRef<Path>, backend_kind: BackendKind) -> Result<Self> {
         let codebase = codebase_path.as_ref();
-        let db_path = codebase
-            .join(".forge")
-            .join(backend_kind.default_filename());
+        let db_path = default_db_path(codebase);
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
@@ -670,7 +668,7 @@ mod tests {
         assert_eq!(BackendKind::NativeV3.to_string(), "NativeV3");
     }
 
-    // Test that opening a SQLite store creates database file
+    // Test that opening a SQLite store creates database file under ~/.magellan/
     #[tokio::test]
     async fn test_open_sqlite_creates_database() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -679,11 +677,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.backend_kind(), BackendKind::SQLite);
-        assert!(store.db_path().ends_with("graph.db"));
+        assert!(store.db_path().to_string_lossy().contains(".magellan"));
+        assert!(store.db_path().extension().map_or(false, |e| e == "db"));
         assert!(store.is_connected());
     }
 
-    // Test that opening a Native V3 store creates database file
+    // Test that opening a Native V3 store creates database file under ~/.magellan/
     #[tokio::test]
     async fn test_open_native_v3_creates_database() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -692,7 +691,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.backend_kind(), BackendKind::NativeV3);
-        assert!(store.db_path().ends_with("graph.v3"));
+        assert!(store.db_path().to_string_lossy().contains(".magellan"));
+        assert!(store.db_path().extension().map_or(false, |e| e == "db"));
         assert!(store.is_connected());
     }
 
