@@ -3,14 +3,22 @@
 //! This module provides access to code graph for querying symbols,
 //! finding references, and running graph algorithms.
 
-pub mod queries;
-
 use crate::error::Result;
 use crate::storage::UnifiedGraphStore;
 use crate::types::{Cycle, Reference, ReferenceKind, Symbol, SymbolId};
-use queries::GraphQueryEngine;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+
+/// Impacted symbol from k-hop impact analysis.
+#[derive(Debug, Clone)]
+pub struct ImpactedSymbol {
+    pub symbol_id: i64,
+    pub name: String,
+    pub kind: String,
+    pub file_path: String,
+    pub hop_distance: u32,
+    pub edge_type: String,
+}
 
 /// Graph module for symbol and reference queries.
 ///
@@ -93,7 +101,7 @@ impl GraphModule {
         self.store.get_symbol(id).await
     }
 
-    /// Finds all callers of a symbol.
+    /// Finds all callers of a symbol by name.
     ///
     /// # Arguments
     ///
@@ -101,133 +109,98 @@ impl GraphModule {
     ///
     /// # Returns
     ///
-    /// A vector of references that call this symbol
+    /// A vector of call-references to this symbol, or empty if the graph DB does not exist.
     pub async fn callers_of(&self, name: &str) -> Result<Vec<Reference>> {
-        #[cfg(feature = "magellan")]
-        {
-            let db_path = self.store.db_path.join("graph.db");
-            if db_path.exists() {
-                let mut graph = magellan::CodeGraph::open(&db_path).map_err(|e| {
-                    crate::error::ForgeError::DatabaseError(format!(
-                        "Failed to open magellan graph: {}",
-                        e
-                    ))
-                })?;
+        use magellan::CodeGraph;
 
-                let mut callers = Vec::new();
-                let file_nodes = graph.all_file_nodes().map_err(|e| {
-                    crate::error::ForgeError::DatabaseError(format!(
-                        "Failed to get file nodes: {}",
-                        e
-                    ))
-                })?;
+        let db_path = &self.store.db_path;
+        if !db_path.exists() {
+            return Ok(Vec::new());
+        }
 
-                for (file_path, _file_node) in file_nodes {
-                    if let Ok(call_facts) = graph.callers_of_symbol(&file_path, name) {
-                        for fact in call_facts {
-                            callers.push(Reference {
-                                from: SymbolId(0),
-                                to: SymbolId(0),
-                                from_name: Some(fact.caller.clone()),
-                                to_name: Some(fact.callee.clone()),
-                                kind: ReferenceKind::Call,
-                                location: crate::types::Location {
-                                    file_path: fact.file_path.clone(),
-                                    byte_start: fact.byte_start as u32,
-                                    byte_end: fact.byte_end as u32,
-                                    line_number: fact.start_line,
-                                },
-                            });
-                        }
-                    }
+        let mut graph = CodeGraph::open(db_path).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to open magellan graph: {}",
+                e
+            ))
+        })?;
+
+        let file_paths: Vec<String> = graph
+            .all_file_nodes_readonly()
+            .map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e))
+            })?
+            .into_keys()
+            .collect();
+
+        let mut callers = Vec::new();
+        for file_path in file_paths {
+            if let Ok(call_facts) = graph.callers_of_symbol(&file_path, name) {
+                for fact in call_facts {
+                    callers.push(Reference {
+                        from: SymbolId(0),
+                        to: SymbolId(0),
+                        from_name: Some(fact.caller.clone()),
+                        to_name: Some(fact.callee.clone()),
+                        kind: ReferenceKind::Call,
+                        location: crate::types::Location {
+                            file_path: fact.file_path.clone(),
+                            byte_start: fact.byte_start as u32,
+                            byte_end: fact.byte_end as u32,
+                            line_number: fact.start_line,
+                        },
+                    });
                 }
-
-                return Ok(callers);
             }
         }
 
-        // Fallback: use GraphQueryEngine on sqlitegraph DB
-        let db_path = self.store.db_path.join("graph.db");
-        if db_path.exists() {
-            let engine = GraphQueryEngine::new(&db_path);
-            return engine.find_callers(name);
-        }
-
-        Ok(Vec::new())
+        Ok(callers)
     }
 
-    /// Finds all references to a symbol.
+    /// Finds all cross-file references to a symbol by FQN.
     ///
     /// # Arguments
     ///
-    /// * `name` - The symbol name
+    /// * `name` - The symbol fully-qualified name
     ///
     /// # Returns
     ///
-    /// A vector of all references (calls, uses, type refs).
-    /// Uses magellan graph queries for accurate cross-file reference resolution.
+    /// A vector of all cross-file references, or empty if the graph DB does not exist.
     pub async fn references(&self, name: &str) -> Result<Vec<Reference>> {
-        #[cfg(feature = "magellan")]
-        {
-            let db_path = self.store.db_path.join("graph.db");
-            if db_path.exists() {
-                let mut graph = magellan::CodeGraph::open(&db_path).map_err(|e| {
-                    crate::error::ForgeError::DatabaseError(format!(
-                        "Failed to open magellan graph: {}",
-                        e
-                    ))
-                })?;
+        use magellan::{cross_file_references_to, CodeGraph};
 
-                let mut refs = Vec::new();
-                let file_nodes = graph.all_file_nodes().map_err(|e| {
-                    crate::error::ForgeError::DatabaseError(format!(
-                        "Failed to get file nodes: {}",
-                        e
-                    ))
-                })?;
-
-                for (file_path, _file_node) in file_nodes {
-                    if let Ok(Some(id)) = graph.symbol_id_by_name(&file_path, name) {
-                        if let Ok(ref_facts) = graph.references_to_symbol(id) {
-                            for fact in ref_facts {
-                                refs.push(Reference {
-                                    from: SymbolId(0),
-                                    to: SymbolId(id),
-                                    from_name: None,
-                                    to_name: Some(fact.referenced_symbol.clone()),
-                                    kind: ReferenceKind::TypeReference,
-                                    location: crate::types::Location {
-                                        file_path: fact.file_path.clone(),
-                                        byte_start: fact.byte_start as u32,
-                                        byte_end: fact.byte_end as u32,
-                                        line_number: fact.start_line,
-                                    },
-                                });
-                            }
-                        }
-                    }
-                }
-
-                return Ok(refs);
-            }
+        let db_path = &self.store.db_path;
+        if !db_path.exists() {
+            return Ok(Vec::new());
         }
 
-        // Fallback: use GraphQueryEngine on sqlitegraph DB
-        let db_path = self.store.db_path.join("graph.db");
-        if db_path.exists() {
-            let engine = GraphQueryEngine::new(&db_path);
-            let mut refs = engine.find_references(name)?;
+        let graph = CodeGraph::open(db_path).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to open magellan graph: {}",
+                e
+            ))
+        })?;
 
-            let mut seen = std::collections::HashSet::new();
-            refs.retain(|r| {
-                let key = (r.location.file_path.clone(), r.location.line_number);
-                seen.insert(key)
-            });
+        let cross_refs = cross_file_references_to(&graph, name).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Reference query failed: {}", e))
+        })?;
 
-            return Ok(refs);
-        }
-
-        Ok(Vec::new())
+        Ok(cross_refs
+            .into_iter()
+            .map(|r| Reference {
+                from: SymbolId(0),
+                to: SymbolId(0),
+                from_name: Some(r.from_symbol_id.clone()),
+                to_name: Some(r.to_symbol_id.clone()),
+                kind: ReferenceKind::TypeReference,
+                location: crate::types::Location {
+                    file_path: std::path::PathBuf::from(&r.file_path),
+                    byte_start: r.byte_start as u32,
+                    byte_end: r.byte_end as u32,
+                    line_number: r.line_number,
+                },
+            })
+            .collect())
     }
 
     /// Finds all symbols reachable from a given symbol.
@@ -277,19 +250,49 @@ impl GraphModule {
         Ok(reachable)
     }
 
-    /// Detects cycles in the call graph.
+    /// Detects cycles in the call graph using SCC condensation.
     ///
-    /// Uses DFS-based cycle detection to find all strongly connected
-    /// components (cycles) in the call graph.
+    /// Supernodes with more than one member represent strongly connected
+    /// components (mutual recursion / call cycles).
     ///
     /// # Returns
     ///
-    /// A vector of detected cycles
+    /// A vector of detected cycles, or empty if the graph DB does not exist.
     pub async fn cycles(&self) -> Result<Vec<Cycle>> {
-        // For now, return empty as we need full graph traversal
-        // This will be implemented when we integrate sqlitegraph cycles API
-        // or implement Tarjan's SCC algorithm ourselves
-        Ok(Vec::new())
+        use magellan::CodeGraph;
+
+        let db_path = &self.store.db_path;
+        if !db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let graph = CodeGraph::open(db_path).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to open magellan graph: {}",
+                e
+            ))
+        })?;
+
+        let condensation = graph.condense_call_graph().map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Cycle detection failed: {}", e))
+        })?;
+
+        let cycles = condensation
+            .graph
+            .supernodes
+            .into_iter()
+            .filter(|sn| sn.members.len() > 1)
+            .map(|sn| Cycle {
+                members: sn
+                    .members
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| SymbolId(sn.id * 1000 + i as i64))
+                    .collect(),
+            })
+            .collect();
+
+        Ok(cycles)
     }
 
     /// Returns the number of symbols in the graph.
@@ -309,21 +312,71 @@ impl GraphModule {
     ///
     /// # Returns
     ///
-    /// A vector of impacted symbols with their hop distance from the target
+    /// A vector of impacted symbols with their hop distance from the target,
+    /// or empty if the graph DB does not exist.
     pub async fn impact_analysis(
         &self,
         symbol_name: &str,
         max_hops: Option<u32>,
-    ) -> Result<Vec<queries::ImpactedSymbol>> {
-        let db_path = self.store.db_path.join("graph.db");
+    ) -> Result<Vec<ImpactedSymbol>> {
+        use sqlitegraph::{
+            backend::BackendDirection, open_graph, snapshot::SnapshotId, GraphConfig,
+        };
 
+        let db_path = &self.store.db_path;
         if !db_path.exists() {
             return Ok(Vec::new());
         }
 
-        let engine = GraphQueryEngine::new(&db_path);
+        let config = GraphConfig::sqlite();
+        let backend = open_graph(db_path, &config)
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
+
+        let snapshot = SnapshotId::current();
+        let start_id = {
+            let ids = backend.entity_ids().map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!("Failed to list entities: {}", e))
+            })?;
+            let mut found = None;
+            for id in ids {
+                if let Ok(node) = backend.get_node(snapshot, id) {
+                    if node.name == symbol_name {
+                        found = Some(id);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(id) => id,
+                None => return Ok(Vec::new()),
+            }
+        };
+
         let hops = max_hops.unwrap_or(2);
-        engine.find_impacted_symbols(symbol_name, hops)
+        let impacted_ids = backend
+            .k_hop(snapshot, start_id, hops, BackendDirection::Outgoing)
+            .map_err(|e| {
+                crate::error::ForgeError::DatabaseError(format!("k-hop query failed: {}", e))
+            })?;
+
+        let mut results = Vec::new();
+        for id in impacted_ids {
+            if id == start_id {
+                continue;
+            }
+            if let Ok(node) = backend.get_node(snapshot, id) {
+                results.push(ImpactedSymbol {
+                    symbol_id: id,
+                    name: node.name,
+                    kind: node.kind,
+                    file_path: node.file_path.unwrap_or_default(),
+                    hop_distance: 1,
+                    edge_type: "transitive".to_string(),
+                });
+            }
+        }
+
+        Ok(results)
     }
 
     /// Indexes the codebase using magellan.
@@ -338,49 +391,33 @@ impl GraphModule {
     ///
     /// Ok(()) on success, or an error if indexing fails.
     pub async fn index(&self) -> Result<()> {
-        #[cfg(feature = "magellan")]
-        {
-            use magellan::CodeGraph;
-            use std::path::Path;
+        use magellan::CodeGraph;
+        use std::path::Path;
 
-            let codebase_path = &self.store.codebase_path;
-            // Magellan only supports SQLite, so we always use the SQLite db path
-            let db_path = codebase_path.join(".forge").join("graph.db");
+        let codebase_path = &self.store.codebase_path;
+        let db_path = &self.store.db_path;
 
-            // Open or create the magellan code graph
-            let mut graph = CodeGraph::open(&db_path).map_err(|e| {
+        let mut graph = CodeGraph::open(db_path).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!(
+                "Failed to open magellan graph: {}",
+                e
+            ))
+        })?;
+
+        let count = graph
+            .scan_directory(Path::new(codebase_path), None)
+            .map_err(|e| {
                 crate::error::ForgeError::DatabaseError(format!(
-                    "Failed to open magellan graph: {}",
+                    "Failed to scan directory: {}",
                     e
                 ))
             })?;
 
-            // Scan the directory and index all files
-            let count = graph
-                .scan_directory(Path::new(codebase_path), None)
-                .map_err(|e| {
-                    crate::error::ForgeError::DatabaseError(format!(
-                        "Failed to scan directory: {}",
-                        e
-                    ))
-                })?;
+        tracing::info!("Indexed {} symbols from {}", count, codebase_path.display());
 
-            tracing::info!("Indexed {} symbols from {}", count, codebase_path.display());
-
-            // Also index references and calls for each Rust file recursively
-            Self::index_references_recursive(&mut graph, codebase_path, codebase_path).await?;
-
-            Ok(())
-        }
-
-        #[cfg(not(feature = "magellan"))]
-        {
-            tracing::warn!("magellan feature not enabled, skipping indexing");
-            Ok(())
-        }
+        Self::index_references_recursive(&mut graph, codebase_path, codebase_path).await
     }
 
-    #[cfg(feature = "magellan")]
     async fn index_references_recursive(
         graph: &mut magellan::CodeGraph,
         codebase_path: &std::path::Path,

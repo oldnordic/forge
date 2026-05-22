@@ -611,7 +611,7 @@ impl AnalysisModule {
         &self,
         symbol_name: &str,
         depth: u32,
-    ) -> Result<Vec<crate::graph::queries::ImpactedSymbol>> {
+    ) -> Result<Vec<crate::graph::ImpactedSymbol>> {
         self.graph.impact_analysis(symbol_name, Some(depth)).await
     }
 
