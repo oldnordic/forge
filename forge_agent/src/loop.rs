@@ -67,6 +67,10 @@ pub struct AgentLoop {
     discovery_store: Option<Arc<dyn DiscoveryStore>>,
     /// Optional LLM provider for intelligent phases
     llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+    /// Maximum verify→fix retry attempts before giving up
+    max_fix_attempts: u32,
+    /// Cached observation from Phase 1 for use in fix loop re-planning
+    last_observation: Option<crate::observe::Observation>,
 }
 
 impl AgentLoop {
@@ -84,6 +88,8 @@ impl AgentLoop {
             audit_log: AuditLog::new(),
             discovery_store: None,
             llm: None,
+            max_fix_attempts: 3,
+            last_observation: None,
         }
     }
 
@@ -96,6 +102,12 @@ impl AgentLoop {
     /// Sets the LLM provider for intelligent phase execution.
     pub fn with_llm(mut self, provider: Arc<dyn crate::llm::LlmProvider>) -> Self {
         self.llm = Some(provider);
+        self
+    }
+
+    /// Sets the maximum number of verify→fix retry attempts (default: 3).
+    pub fn with_max_fix_attempts(mut self, n: u32) -> Self {
+        self.max_fix_attempts = n;
         self
     }
 
@@ -131,7 +143,7 @@ impl AgentLoop {
         };
 
         // Phase 3: Plan
-        let plan = match self.plan_phase(constrained).await {
+        let mut plan = match self.plan_phase(constrained.clone()).await {
             Ok(plan) => plan,
             Err(e) => {
                 self.record_rollback(&e).await;
@@ -139,23 +151,87 @@ impl AgentLoop {
             }
         };
 
-        // Phase 4: Mutate
-        let mutation_result = match self.mutate_phase(plan).await {
-            Ok(result) => result,
-            Err(e) => {
+        // Phases 4 + 5 with verify→fix retry loop
+        let mut attempt = 0u32;
+        let verification = loop {
+            // Phase 4: Mutate
+            let mutation_result = match self.mutate_phase(plan).await {
+                Ok(r) => r,
+                Err(e) => {
+                    self.record_rollback(&e).await;
+                    return Err(e);
+                }
+            };
+
+            // Phase 5: Verify
+            let verification = match self.verify_phase(mutation_result).await {
+                Ok(v) => v,
+                Err(e) => {
+                    self.record_rollback(&e).await;
+                    return Err(e);
+                }
+            };
+
+            if verification.passed || attempt >= self.max_fix_attempts {
+                break verification;
+            }
+
+            // Verification failed — ask LLM for a fix plan
+            attempt += 1;
+            tracing::info!(
+                attempt,
+                max = self.max_fix_attempts,
+                errors = verification.diagnostics.len(),
+                "verification failed, generating fix plan"
+            );
+
+            let fix_observation = self
+                .last_observation
+                .clone()
+                .unwrap_or_else(|| constrained.observation.clone());
+
+            let mut planner = crate::planner::Planner::new();
+            if let Some(ref llm) = self.llm {
+                planner = planner.with_llm(llm.clone());
+            }
+            let fix_steps = planner
+                .generate_fix_steps(&fix_observation, &verification.diagnostics)
+                .await
+                .unwrap_or_default();
+
+            if fix_steps.is_empty() {
+                let e = crate::AgentError::VerificationFailed(format!(
+                    "verification failed after {} attempt(s), no fix steps available",
+                    attempt
+                ));
                 self.record_rollback(&e).await;
                 return Err(e);
             }
+
+            let impact = planner
+                .estimate_impact(&fix_steps)
+                .await
+                .unwrap_or_else(|_| crate::planner::ImpactEstimate {
+                    affected_files: vec![],
+                    complexity: 0,
+                });
+            plan = crate::ExecutionPlan {
+                steps: fix_steps,
+                estimated_impact: impact,
+                rollback_plan: vec![],
+            };
         };
 
-        // Phase 5: Verify
-        let verification = match self.verify_phase(mutation_result).await {
-            Ok(verification) => verification,
-            Err(e) => {
-                self.record_rollback(&e).await;
-                return Err(e);
-            }
-        };
+        // Guard: do not commit if verification still failed after all retries
+        if !verification.passed {
+            let e = crate::AgentError::VerificationFailed(format!(
+                "verification failed after {} fix attempt(s): {}",
+                attempt,
+                verification.diagnostics.join("; ")
+            ));
+            self.record_rollback(&e).await;
+            return Err(e);
+        }
 
         // Phase 6: Commit
         let commit_result = match self.commit_phase(verification).await {
@@ -198,6 +274,7 @@ impl AgentLoop {
             .await
             .map_err(|e| crate::AgentError::ObservationFailed(e.to_string()))?;
 
+        self.last_observation = Some(observation.clone());
         Ok(observation)
     }
 
@@ -433,8 +510,9 @@ impl AgentLoop {
 
         // Create committer
         let committer = crate::commit::Committer::new();
+        let message = format!("forge: apply changes ({} files)", files.len());
         let commit_report = committer
-            .finalize(std::path::Path::new(""), &files)
+            .finalize(&self.codebase_path, &files, &message)
             .await
             .map_err(|e| crate::AgentError::CommitFailed(e.to_string()))?;
 
@@ -677,7 +755,6 @@ mod tests {
 
         let result = agent_loop.run("test query").await;
 
-        // Result type check - either Ok with LoopResult or Err
         match result {
             Ok(loop_result) => {
                 assert!(!loop_result.transaction_id.is_empty());
@@ -685,8 +762,50 @@ mod tests {
             }
             Err(_) => {
                 // Error is expected for empty temp directory
-                // (verification, cargo check, or other phase failure)
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_retry_loop_respects_max_attempts() {
+        use crate::llm::MockProvider;
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+
+        // Empty plan → no mutation → verify will fail (cargo check on empty dir)
+        let llm = Arc::new(MockProvider::new("[]"));
+        let mut agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_llm(llm)
+            .with_max_fix_attempts(2);
+
+        let result = agent_loop.run("test retry").await;
+
+        // Must fail — not silently commit with broken code
+        match result {
+            Err(e) => {
+                let msg = e.to_string().to_lowercase();
+                assert!(
+                    msg.contains("verification") || msg.contains("verify"),
+                    "unexpected error: {e}"
+                );
+            }
+            Ok(r) => {
+                // Only acceptable if verification actually passed
+                assert!(
+                    r.audit_events
+                        .iter()
+                        .any(|e| matches!(e, AuditEvent::Verify { passed: true, .. })),
+                    "committed despite failed verification"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_with_max_fix_attempts_builder() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let agent_loop = AgentLoop::new(Arc::new(forge)).with_max_fix_attempts(5);
+        assert_eq!(agent_loop.max_fix_attempts, 5);
     }
 }

@@ -44,6 +44,12 @@ pub mod workflow;
 
 // LLM provider module
 pub mod llm;
+#[cfg(feature = "llm-anthropic")]
+pub use llm::AnthropicProvider;
+#[cfg(feature = "llm-ollama")]
+pub use llm::OllamaProvider;
+#[cfg(feature = "llm-openai")]
+pub use llm::OpenAiProvider;
 
 // Envoy coordination module
 #[cfg(feature = "envoy")]
@@ -51,6 +57,10 @@ pub mod envoy;
 
 // Context composition module
 pub mod context;
+
+// Code generation from natural language descriptions
+pub mod generate;
+pub use generate::{GeneratedCode, Generator};
 
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
@@ -233,11 +243,11 @@ impl Agent {
 
     /// Connects to envoy and registers this agent. Returns the agent ID.
     #[cfg(feature = "envoy")]
-    pub async fn connect_envoy(&self) -> std::result::Result<String, envoy::EnvoyError> {
+    pub async fn connect_envoy(&self) -> std::result::Result<String, String> {
         let client = self
             .envoy
             .as_ref()
-            .ok_or(envoy::EnvoyError::NotConfigured)?;
+            .ok_or_else(|| "envoy not configured".to_string())?;
         client.register().await
     }
 
@@ -403,7 +413,10 @@ impl Agent {
             })
             .collect();
 
-        let commit_report = committer.finalize(&self.codebase_path, &files).await?;
+        let message = format!("forge: apply changes ({} files)", files.len());
+        let commit_report = committer
+            .finalize(&self.codebase_path, &files, &message)
+            .await?;
 
         Ok(CommitResult {
             transaction_id: commit_report.transaction_id,

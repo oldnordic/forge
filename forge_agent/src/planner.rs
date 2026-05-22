@@ -61,6 +61,50 @@ impl Planner {
         self.generate_steps_regex(observation).await
     }
 
+    /// Generate fix steps using error context from a failed verification.
+    /// Falls back to empty plan if LLM unavailable or response unparseable.
+    pub async fn generate_fix_steps(
+        &self,
+        observation: &super::observe::Observation,
+        errors: &[String],
+    ) -> Result<Vec<PlanStep>> {
+        let Some(ref llm) = self.llm else {
+            return Ok(Vec::new());
+        };
+
+        let error_text = errors.join("\n");
+        let symbol_list: Vec<String> = observation
+            .symbols
+            .iter()
+            .map(|s| format!("{} (id:{})", s.name, s.id.0))
+            .collect();
+
+        let prompt = format!(
+            "Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}",
+            observation.query,
+            symbol_list.join(", "),
+            error_text
+        );
+
+        let system = "You are a Rust fix planner. Given a code query, relevant symbols, \
+and compilation/verification errors, generate fix steps as a JSON array.\n\n\
+Available operations:\n\
+- {\"operation\":\"inspect\",\"symbol_name\":\"...\",\"symbol_id\":N}\n\
+- {\"operation\":\"rename\",\"old\":\"...\",\"new\":\"...\",\"file\":\"...\"}\n\
+- {\"operation\":\"delete\",\"name\":\"...\",\"file\":\"...\"}\n\
+- {\"operation\":\"create\",\"path\":\"...\",\"content\":\"...\"}\n\
+- {\"operation\":\"modify\",\"file\":\"...\",\"start\":N,\"end\":N,\"replacement\":\"...\"}\n\n\
+Output ONLY a JSON array. No explanation.";
+
+        match llm.complete(&prompt, Some(system)).await {
+            Ok(resp) => Ok(parse_llm_steps(&resp).unwrap_or_default()),
+            Err(e) => {
+                tracing::warn!("LLM fix generation failed: {e}");
+                Ok(Vec::new())
+            }
+        }
+    }
+
     /// Generate steps using LLM. Returns Err if LLM call fails or response
     /// is unparseable.
     async fn generate_steps_with_llm(
