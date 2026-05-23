@@ -15,6 +15,11 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct Planner {
     llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+    context_prefix: Option<String>,
+    /// Steps already attempted this session — used by `fix_once` to avoid repeats.
+    attempted: Vec<PlanStep>,
+    /// Optional generator for enriching `Create` step content with real code.
+    generator: Option<Arc<crate::generate::Generator>>,
 }
 
 impl Default for Planner {
@@ -26,12 +31,29 @@ impl Default for Planner {
 impl Planner {
     /// Creates a new planner.
     pub fn new() -> Self {
-        Self { llm: None }
+        Self {
+            llm: None,
+            context_prefix: None,
+            attempted: Vec::new(),
+            generator: None,
+        }
     }
 
     /// Sets the LLM provider for intelligent step generation.
     pub fn with_llm(mut self, provider: Arc<dyn crate::llm::LlmProvider>) -> Self {
         self.llm = Some(provider);
+        self
+    }
+
+    /// Sets the codebase context prefix injected into LLM prompts.
+    pub fn with_context(mut self, ctx: &crate::context::AgentContext) -> Self {
+        self.context_prefix = Some(ctx.context_prefix());
+        self
+    }
+
+    /// Sets the code generator used to enrich `Create` step content.
+    pub fn with_generator(mut self, gen: Arc<crate::generate::Generator>) -> Self {
+        self.generator = Some(gen);
         self
     }
 
@@ -45,20 +67,41 @@ impl Planner {
         observation: &super::observe::Observation,
     ) -> Result<Vec<PlanStep>> {
         // Try LLM first if available
-        if let Some(ref llm) = self.llm {
+        let mut steps = if let Some(ref llm) = self.llm {
             match self
                 .generate_steps_with_llm(llm.as_ref(), observation)
                 .await
             {
-                Ok(steps) => return Ok(steps),
+                Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("LLM step generation failed, falling back to regex: {e}");
+                    self.generate_steps_regex(observation).await?
+                }
+            }
+        } else {
+            self.generate_steps_regex(observation).await?
+        };
+
+        // Enrich Create steps with real generated code when a Generator is configured
+        if let Some(ref gen) = self.generator {
+            for step in &mut steps {
+                if let PlanOperation::Create {
+                    ref mut content, ..
+                } = step.operation
+                {
+                    match gen.generate(&step.description).await {
+                        Ok(gc) => *content = gc.content,
+                        Err(e) => {
+                            tracing::warn!(
+                                "Generator failed for Create step, keeping original content: {e}"
+                            );
+                        }
+                    }
                 }
             }
         }
 
-        // Regex fallback
-        self.generate_steps_regex(observation).await
+        Ok(steps)
     }
 
     /// Generate fix steps using error context from a failed verification.
@@ -90,8 +133,14 @@ impl Planner {
             format!("\nAlready tried (do not repeat): {}", ops.join("; "))
         };
 
+        let prefix = self
+            .context_prefix
+            .as_deref()
+            .map(|p| format!("{}\n", p))
+            .unwrap_or_default();
         let prompt = format!(
-            "Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}{}",
+            "{}Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}{}",
+            prefix,
             observation.query,
             symbol_list.join(", "),
             error_text,
@@ -124,6 +173,22 @@ Output ONLY a JSON array. No explanation.";
         }
     }
 
+    /// Generate fix steps for one retry attempt, using internal history to deduplicate.
+    ///
+    /// Unlike `generate_fix_steps`, the caller does not manage the attempt history —
+    /// the Planner tracks it internally and filters duplicates automatically.
+    pub async fn fix_once(
+        &mut self,
+        observation: &super::observe::Observation,
+        errors: &[String],
+    ) -> Result<Vec<PlanStep>> {
+        let steps = self
+            .generate_fix_steps(observation, errors, &self.attempted.clone())
+            .await?;
+        self.attempted.extend(steps.clone());
+        Ok(steps)
+    }
+
     /// Generate steps using LLM. Returns Err if LLM call fails or response
     /// is unparseable.
     async fn generate_steps_with_llm(
@@ -142,8 +207,14 @@ Output ONLY a JSON array. No explanation.";
             .map(|s| format!("{} (id:{})", s.name, s.id.0))
             .collect();
 
+        let prefix = self
+            .context_prefix
+            .as_deref()
+            .map(|p| format!("{}\n", p))
+            .unwrap_or_default();
         let prompt = format!(
-            "Query: {}\nSummary: {}\nSymbols: [{}]",
+            "{}Query: {}\nSummary: {}\nSymbols: [{}]",
+            prefix,
             observation.query,
             summary_text,
             symbol_list.join(", ")
@@ -999,5 +1070,127 @@ mod tests {
             "remaining step should be the Create, got: {:?}",
             result[0].operation
         );
+    }
+
+    // ── INT-11: Planner retry memoization ───────────────────────────────
+
+    #[tokio::test]
+    async fn test_planner_memoizes_attempted_operations() {
+        use crate::llm::MockProvider;
+        // LLM returns an Inspect step
+        let mock = Arc::new(MockProvider::new(
+            r#"[{"operation":"inspect","symbol_name":"foo","symbol_id":1}]"#,
+        ));
+        let mut planner = Planner::new().with_llm(mock);
+        let obs = crate::observe::Observation {
+            query: "fix it".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+
+        // First call: should return the step
+        let first = planner.fix_once(&obs, &["err".to_string()]).await.unwrap();
+        assert_eq!(first.len(), 1);
+
+        // Second call: LLM returns same step — planner should filter it as already tried
+        let second = planner.fix_once(&obs, &["err".to_string()]).await.unwrap();
+        assert!(
+            second.is_empty(),
+            "second call should deduplicate already-attempted operations"
+        );
+    }
+
+    // ── INT-3: AgentContext prefix in LLM prompts ────────────────────────
+
+    #[tokio::test]
+    async fn test_planner_context_prefix_in_generate_steps() {
+        use crate::llm::CapturingMockProvider;
+        let mock = Arc::new(CapturingMockProvider::new(
+            r#"[{"operation":"inspect","symbol_name":"foo","symbol_id":1}]"#,
+        ));
+        let ctx = crate::context::AgentContext::from_path(std::path::Path::new("/tmp/test-proj"));
+        let planner = Planner::new().with_context(&ctx).with_llm(mock.clone());
+
+        let obs = crate::observe::Observation {
+            query: "find the bug".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let _ = planner.generate_steps(&obs).await.unwrap();
+
+        let captured = mock.last_prompt.lock().unwrap().clone().unwrap_or_default();
+        assert!(
+            captured.contains("[Project:"),
+            "prompt should contain context prefix, got: {captured:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_planner_context_prefix_in_generate_fix_steps() {
+        use crate::llm::CapturingMockProvider;
+        let mock = Arc::new(CapturingMockProvider::new(
+            r#"[{"operation":"inspect","symbol_name":"bar","symbol_id":2}]"#,
+        ));
+        let ctx = crate::context::AgentContext::from_path(std::path::Path::new("/tmp/test-proj"));
+        let planner = Planner::new().with_context(&ctx).with_llm(mock.clone());
+
+        let obs = crate::observe::Observation {
+            query: "fix compile error".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let _ = planner
+            .generate_fix_steps(&obs, &["error: mismatched types".to_string()], &[])
+            .await
+            .unwrap();
+
+        let captured = mock.last_prompt.lock().unwrap().clone().unwrap_or_default();
+        assert!(
+            captured.contains("[Project:"),
+            "fix prompt should contain context prefix, got: {captured:?}"
+        );
+    }
+
+    // ── INT-10: CodeGenerator enriches Create steps ──────────────────────
+
+    #[tokio::test]
+    async fn test_planner_enriches_create_step_via_generator() {
+        use crate::generate::Generator;
+        use crate::llm::MockProvider;
+
+        // Planning LLM returns a Create step with bare description as content
+        let planning_llm = Arc::new(MockProvider::new(
+            r#"[{"operation":"create","path":"src/auth.rs","content":"authentication handler"}]"#,
+        ));
+        // Generator LLM returns actual Rust code
+        let gen_llm = Arc::new(MockProvider::new(
+            "fn authenticate(token: &str) -> bool { true }",
+        ));
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let forge = forge_core::Forge::open(temp_dir.path()).await.unwrap();
+        let generator = Arc::new(Generator::new(Arc::new(forge), gen_llm));
+
+        let planner = Planner::new()
+            .with_llm(planning_llm)
+            .with_generator(generator);
+
+        let obs = crate::observe::Observation {
+            query: "add authentication".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+
+        let steps = planner.generate_steps(&obs).await.unwrap();
+        assert_eq!(steps.len(), 1);
+
+        if let PlanOperation::Create { content, .. } = &steps[0].operation {
+            assert!(
+                content.contains("fn authenticate"),
+                "content should be generated code, got: {content:?}"
+            );
+        } else {
+            panic!("expected Create step, got: {:?}", steps[0].operation);
+        }
     }
 }

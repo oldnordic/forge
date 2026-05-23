@@ -58,10 +58,7 @@ impl GraphModule {
         }
 
         let graph = CodeGraph::open(db_path).map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!(
-                "Failed to open magellan graph: {}",
-                e
-            ))
+            crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
         let results = graph.search_symbols_by_name(name).map_err(|e| {
@@ -70,20 +67,26 @@ impl GraphModule {
 
         Ok(results
             .into_iter()
-            .map(|r| Symbol {
-                id: SymbolId(r.entity_id),
-                name: Arc::from(r.name.clone()),
-                fully_qualified_name: Arc::from(r.name.clone()),
-                kind: parse_symbol_kind_str(&r.kind),
-                language: map_magellan_language(std::path::Path::new(&r.file_path)),
-                location: crate::types::Location {
-                    file_path: std::path::PathBuf::from(&r.file_path),
-                    byte_start: r.byte_start as u32,
-                    byte_end: r.byte_end as u32,
-                    line_number: 0,
-                },
-                parent_id: None,
-                metadata: serde_json::Value::Null,
+            .map(|r| {
+                let file_path = std::path::PathBuf::from(&r.file_path);
+                let line_number = std::fs::read(&file_path)
+                    .map(|content| byte_offset_to_line_number(&content, r.byte_start))
+                    .unwrap_or(0);
+                Symbol {
+                    id: SymbolId(r.entity_id),
+                    name: Arc::from(r.name.clone()),
+                    fully_qualified_name: Arc::from(r.name.clone()),
+                    kind: parse_symbol_kind_str(&r.kind),
+                    language: map_magellan_language(&file_path),
+                    location: crate::types::Location {
+                        file_path,
+                        byte_start: r.byte_start as u32,
+                        byte_end: r.byte_end as u32,
+                        line_number,
+                    },
+                    parent_id: None,
+                    metadata: serde_json::Value::Null,
+                }
             })
             .collect())
     }
@@ -119,10 +122,7 @@ impl GraphModule {
         }
 
         let mut graph = CodeGraph::open(db_path).map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!(
-                "Failed to open magellan graph: {}",
-                e
-            ))
+            crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
         let file_paths: Vec<String> = graph
@@ -175,10 +175,7 @@ impl GraphModule {
         }
 
         let graph = CodeGraph::open(db_path).map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!(
-                "Failed to open magellan graph: {}",
-                e
-            ))
+            crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
         let cross_refs = cross_file_references_to(&graph, name).map_err(|e| {
@@ -267,10 +264,7 @@ impl GraphModule {
         }
 
         let graph = CodeGraph::open(db_path).map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!(
-                "Failed to open magellan graph: {}",
-                e
-            ))
+            crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
         let condensation = graph.condense_call_graph().map_err(|e| {
@@ -329,8 +323,9 @@ impl GraphModule {
         }
 
         let config = GraphConfig::sqlite();
-        let backend = open_graph(db_path, &config)
-            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
+        let backend = open_graph(db_path, &config).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Failed to open graph: {}", e))
+        })?;
 
         let snapshot = SnapshotId::current();
         let start_id = {
@@ -398,22 +393,18 @@ impl GraphModule {
         let db_path = &self.store.db_path;
 
         let mut graph = CodeGraph::open(db_path).map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!(
-                "Failed to open magellan graph: {}",
-                e
-            ))
+            crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
         let count = graph
             .scan_directory(Path::new(codebase_path), None)
             .map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!(
-                    "Failed to scan directory: {}",
-                    e
-                ))
+                crate::error::ForgeError::DatabaseError(format!("Failed to scan directory: {}", e))
             })?;
 
         tracing::info!("Indexed {} symbols from {}", count, codebase_path.display());
+
+        let _ = graph.rebuild_fts5();
 
         Self::index_references_recursive(&mut graph, codebase_path, codebase_path).await
     }
@@ -491,6 +482,15 @@ fn map_magellan_language(file_path: &std::path::Path) -> crate::types::Language 
     }
 }
 
+/// Returns the 1-indexed line number for a byte offset within file content.
+///
+/// Counts `\n` bytes before `byte_offset` and adds 1. If `byte_offset` exceeds
+/// the content length, returns the last line number.
+pub(crate) fn byte_offset_to_line_number(content: &[u8], byte_offset: usize) -> usize {
+    let clamped = byte_offset.min(content.len());
+    content[..clamped].iter().filter(|&&b| b == b'\n').count() + 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,7 +509,10 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let forge = test_forge(temp_dir.path()).await;
         let module = forge.graph();
-        assert_eq!(module.store().db_path, temp_dir.path().join("test-graph.db"));
+        assert_eq!(
+            module.store().db_path,
+            temp_dir.path().join("test-graph.db")
+        );
     }
 
     #[tokio::test]
@@ -537,5 +540,37 @@ mod tests {
         let module = forge.graph();
         let callers = module.callers_of("nonexistent").await.unwrap();
         assert_eq!(callers.len(), 0);
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_number_first_line() {
+        let content = b"fn foo() {}\nfn bar() {}\n";
+        assert_eq!(byte_offset_to_line_number(content, 0), 1);
+        assert_eq!(byte_offset_to_line_number(content, 5), 1);
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_number_second_line() {
+        let content = b"fn foo() {}\nfn bar() {}\n";
+        // byte 12 is start of "fn bar" (after the \n at byte 11)
+        assert_eq!(byte_offset_to_line_number(content, 12), 2);
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_number_third_line() {
+        let content = b"line1\nline2\nline3\n";
+        assert_eq!(byte_offset_to_line_number(content, 12), 3);
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_number_clamps_to_end() {
+        // Content without trailing newline: "abc\ndef" — 1 newline, so last line is 2
+        let content = b"abc\ndef";
+        assert_eq!(byte_offset_to_line_number(content, 9999), 2);
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_number_empty_content() {
+        assert_eq!(byte_offset_to_line_number(b"", 0), 1);
     }
 }

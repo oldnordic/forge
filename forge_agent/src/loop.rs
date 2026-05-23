@@ -203,7 +203,13 @@ impl AgentLoop {
 
         // Phases 4 + 5 with verify→fix retry loop
         let mut attempt = 0u32;
-        let mut attempted_steps: Vec<crate::planner::PlanStep> = Vec::new();
+        let mut fix_planner = {
+            let mut p = crate::planner::Planner::new().with_context(&self.context);
+            if let Some(ref llm) = self.llm {
+                p = p.with_llm(llm.clone());
+            }
+            p
+        };
         let verification = loop {
             // Phase 4: Mutate
             let mutation_result = match self.mutate_phase(plan).await {
@@ -262,16 +268,8 @@ impl AgentLoop {
                 .clone()
                 .unwrap_or_else(|| constrained.observation.clone());
 
-            let mut planner = crate::planner::Planner::new();
-            if let Some(ref llm) = self.llm {
-                planner = planner.with_llm(llm.clone());
-            }
-            let fix_steps = planner
-                .generate_fix_steps(
-                    &fix_observation,
-                    &verification.diagnostics,
-                    &attempted_steps,
-                )
+            let fix_steps = fix_planner
+                .fix_once(&fix_observation, &verification.diagnostics)
                 .await
                 .unwrap_or_default();
 
@@ -284,14 +282,13 @@ impl AgentLoop {
                 return Err(e);
             }
 
-            let impact = planner
+            let impact = fix_planner
                 .estimate_impact(&fix_steps)
                 .await
                 .unwrap_or_else(|_| crate::planner::ImpactEstimate {
                     affected_files: vec![],
                     complexity: 0,
                 });
-            attempted_steps.extend(fix_steps.iter().cloned());
             plan = crate::ExecutionPlan {
                 steps: fix_steps,
                 estimated_impact: impact,
@@ -425,9 +422,11 @@ impl AgentLoop {
         constrained: ConstrainedPlan,
     ) -> Result<ExecutionPlan, crate::AgentError> {
         // Create planner
-        let mut planner = crate::planner::Planner::new();
+        let mut planner = crate::planner::Planner::new().with_context(&self.context);
         if let Some(ref llm) = self.llm {
-            planner = planner.with_llm(llm.clone());
+            planner = planner.with_llm(llm.clone()).with_generator(Arc::new(
+                crate::generate::Generator::new(self.forge.clone(), llm.clone()),
+            ));
         }
 
         // Generate steps from observation
