@@ -19,7 +19,7 @@ path = "src/cli.rs"
 default = ["sqlite"]
 
 # Storage backends (inherited from forge_core)
-sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge-core/sqlite"]
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge-core/sqlite", "forge-core/tools"]
 full = ["sqlite"]
 
 # LLM providers
@@ -33,8 +33,9 @@ envoy = ["dep:reqwest"]
 
 [dependencies]
 forge-core = { version = "0.2.2", path = "../forge_core", default-features = false }
+forge-reasoning = { path = "../forge-reasoning" }
 forge-runtime = { version = "0.1", path = "../forge_runtime" }
-sqlitegraph = { version = "2.2.4", default-features = false, optional = true }
+sqlitegraph = { version = "3.0.2", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

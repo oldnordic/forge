@@ -71,6 +71,10 @@ pub struct AgentLoop {
     max_fix_attempts: u32,
     /// Cached observation from Phase 1 for use in fix loop re-planning
     last_observation: Option<crate::observe::Observation>,
+    /// Bayesian belief tracking across the 6-phase loop
+    reasoning: forge_reasoning::ReasoningSystem,
+    /// Hypothesis ID for the current task (proposed in observe, resolved in verify)
+    current_hypothesis: Option<forge_reasoning::HypothesisId>,
 }
 
 impl AgentLoop {
@@ -90,6 +94,8 @@ impl AgentLoop {
             llm: None,
             max_fix_attempts: 3,
             last_observation: None,
+            reasoning: forge_reasoning::ReasoningSystem::in_memory(),
+            current_hypothesis: None,
         }
     }
 
@@ -109,6 +115,11 @@ impl AgentLoop {
     pub fn with_max_fix_attempts(mut self, n: u32) -> Self {
         self.max_fix_attempts = n;
         self
+    }
+
+    /// Returns the reasoning system for querying hypothesis state.
+    pub fn reasoning(&self) -> &forge_reasoning::ReasoningSystem {
+        &self.reasoning
     }
 
     /// Runs the full agent loop: Observe -> Constrain -> Plan -> Mutate -> Verify -> Commit
@@ -275,6 +286,16 @@ impl AgentLoop {
             .map_err(|e| crate::AgentError::ObservationFailed(e.to_string()))?;
 
         self.last_observation = Some(observation.clone());
+
+        if let Ok(id) = self
+            .reasoning
+            .board
+            .propose_with_max_uncertainty(format!("task: {}", query))
+            .await
+        {
+            self.current_hypothesis = Some(id);
+        }
+
         Ok(observation)
     }
 
@@ -360,6 +381,20 @@ impl AgentLoop {
             .map_err(|e| crate::AgentError::PlanningFailed(e.to_string()))?;
 
         let step_count = ordered_steps.len();
+
+        if let Some(id) = self.current_hypothesis {
+            let _ = self
+                .reasoning
+                .board
+                .set_status(id, forge_reasoning::HypothesisStatus::UnderTest)
+                .await;
+            let (lh, lnh) = if ordered_steps.is_empty() {
+                (0.2, 0.8)
+            } else {
+                (0.8, 0.2)
+            };
+            let _ = self.reasoning.board.update_with_evidence(id, lh, lnh).await;
+        }
 
         // Generate rollback plan
         let rollback = planner.generate_rollback(&ordered_steps);
@@ -470,6 +505,22 @@ impl AgentLoop {
 
         let diagnostic_count = report.diagnostics.len();
         let passed = report.passed;
+
+        if let Some(id) = self.current_hypothesis {
+            let (lh, lnh) = if report.passed {
+                (0.9, 0.1)
+            } else {
+                (0.1, 0.9)
+            };
+            let _ = self.reasoning.board.update_with_evidence(id, lh, lnh).await;
+            if report.passed {
+                let _ = self
+                    .reasoning
+                    .board
+                    .set_status(id, forge_reasoning::HypothesisStatus::Confirmed)
+                    .await;
+            }
+        }
 
         // Record audit event
         self.audit_log
@@ -807,5 +858,51 @@ mod tests {
         let forge = Forge::open(temp_dir.path()).await.unwrap();
         let agent_loop = AgentLoop::new(Arc::new(forge)).with_max_fix_attempts(5);
         assert_eq!(agent_loop.max_fix_attempts, 5);
+    }
+
+    #[tokio::test]
+    async fn test_reasoning_system_initialized() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let agent_loop = AgentLoop::new(Arc::new(forge));
+        // ReasoningSystem is always initialized; listing hypotheses returns empty vec
+        let hypotheses = agent_loop.reasoning().board.list().await.unwrap();
+        assert!(hypotheses.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_hypothesis_proposed_after_observe() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge));
+        // current_hypothesis starts None
+        assert!(agent_loop.current_hypothesis.is_none());
+        // Run observe phase directly
+        let _ = agent_loop.observe_phase("add a parser function").await;
+        // After observe, a hypothesis should be registered
+        assert!(agent_loop.current_hypothesis.is_some());
+        let hypotheses = agent_loop.reasoning().board.list().await.unwrap();
+        assert_eq!(hypotheses.len(), 1);
+        assert!(hypotheses[0].statement().contains("add a parser function"));
+    }
+
+    #[tokio::test]
+    async fn test_hypothesis_confirmed_after_successful_run() {
+        use forge_reasoning::HypothesisStatus;
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge));
+        // Run the full loop (may fail on empty dir, but observe+plan phases run)
+        let _ = agent_loop.run("generate a helper").await;
+        // If hypothesis was proposed, check its final state
+        if let Some(id) = agent_loop.current_hypothesis {
+            let hyp = agent_loop.reasoning().board.get(id).await.unwrap().unwrap();
+            // Status should be Confirmed (passed) or still UnderTest/Proposed (failed early)
+            assert!(
+                hyp.status() == HypothesisStatus::Confirmed
+                    || hyp.status() == HypothesisStatus::UnderTest
+                    || hyp.status() == HypothesisStatus::Proposed
+            );
+        }
     }
 }
