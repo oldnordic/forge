@@ -19,6 +19,7 @@ use crate::errors::Result;
 use std::sync::Arc;
 
 /// Main API for hypothesis management
+#[derive(Clone)]
 pub struct HypothesisBoard {
     storage: Arc<dyn HypothesisStorage>,
 }

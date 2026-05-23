@@ -583,19 +583,46 @@ impl AgentLoop {
                 .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?
         };
 
-        if let Some(id) = self.current_hypothesis {
-            let (lh, lnh) = if report.passed {
-                (0.9, 0.1)
+        // Use VerificationRunner to attach structured evidence to the hypothesis board.
+        // This replaces the manual update_with_evidence call with runner-managed evidence.
+        if let Some(hyp_id) = self.current_hypothesis {
+            let runner =
+                forge_reasoning::VerificationRunner::new(Arc::new(self.reasoning.board.clone()), 1);
+
+            let check_cmd = format!(
+                "cargo check --manifest-path={}/Cargo.toml --message-format=short 2>&1",
+                self.codebase_path.display()
+            );
+            let (on_pass, on_fail) = if report.passed {
+                (
+                    Some(forge_reasoning::verification::check::PassAction::SetStatus(
+                        forge_reasoning::HypothesisStatus::Confirmed,
+                    )),
+                    None,
+                )
             } else {
-                (0.1, 0.9)
+                (
+                    None,
+                    Some(forge_reasoning::verification::check::FailAction::SetStatus(
+                        forge_reasoning::HypothesisStatus::Rejected,
+                    )),
+                )
             };
-            let _ = self.reasoning.board.update_with_evidence(id, lh, lnh).await;
-            if report.passed {
-                let _ = self
-                    .reasoning
-                    .board
-                    .set_status(id, forge_reasoning::HypothesisStatus::Confirmed)
-                    .await;
+
+            if let Ok(check_id) = runner
+                .register_check(
+                    "cargo-check".to_string(),
+                    hyp_id,
+                    forge_reasoning::verification::check::VerificationCommand::ShellCommand(
+                        check_cmd,
+                    ),
+                    std::time::Duration::from_secs(60),
+                    on_pass,
+                    on_fail,
+                )
+                .await
+            {
+                runner.execute_checks(vec![check_id]).await;
             }
         }
 
@@ -1042,9 +1069,11 @@ mod tests {
         // If hypothesis was proposed, check its final state
         if let Some(id) = agent_loop.current_hypothesis {
             let hyp = agent_loop.reasoning().board.get(id).await.unwrap().unwrap();
-            // Status should be Confirmed (passed) or still UnderTest/Proposed (failed early)
+            // Status should be Confirmed (passed), Rejected (runner set on failure),
+            // or still UnderTest/Proposed (failed before verification)
             assert!(
                 hyp.status() == HypothesisStatus::Confirmed
+                    || hyp.status() == HypothesisStatus::Rejected
                     || hyp.status() == HypothesisStatus::UnderTest
                     || hyp.status() == HypothesisStatus::Proposed
             );
@@ -1321,5 +1350,45 @@ mod tests {
                 "confidence {conf} should be below bail threshold after repeated failures"
             );
         }
+    }
+
+    // ── INT-1: VerificationRunner attaches structured evidence ───────────
+
+    #[tokio::test]
+    async fn test_verify_phase_attaches_structured_evidence_via_runner() {
+        // After verify_phase, the hypothesis board should have Experiment evidence
+        // attached by VerificationRunner (not just a Bayesian confidence update).
+        let temp = TempDir::new().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+
+        let mut agent_loop = AgentLoop::new(Arc::new(forge)).with_max_fix_attempts(1);
+
+        // Propose a hypothesis so verify_phase has one to attach evidence to
+        let hyp_id = agent_loop
+            .reasoning
+            .board
+            .propose_with_max_uncertainty("test hypothesis")
+            .await
+            .unwrap();
+        agent_loop.current_hypothesis = Some(hyp_id);
+
+        // Run verify_phase on an empty dir (will fail cargo check, but still runs runner)
+        let mutation = crate::MutationResult {
+            modified_files: vec![],
+            diffs: vec![],
+        };
+        let _ = agent_loop.verify_phase(mutation).await;
+
+        // The board MUST have Experiment evidence attached (via VerificationRunner)
+        let evidence = agent_loop
+            .reasoning
+            .board
+            .list_evidence(hyp_id)
+            .await
+            .unwrap();
+        assert!(
+            !evidence.is_empty(),
+            "verify_phase must attach structured evidence via VerificationRunner"
+        );
     }
 }
