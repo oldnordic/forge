@@ -713,26 +713,13 @@ impl RollbackEngine {
     /// # Returns
     ///
     /// Compensation coverage report
-    pub fn validate_compensation_coverage(&self, workflow: &Workflow) -> CompensationReport {
-        let total_tasks = workflow.task_count();
-        let with_compensation = Vec::new();
-        let mut without_compensation = Vec::new();
-
-        // Note: We can't check actual compensation without the task instances
-        // This is a placeholder that will be enhanced when we redesign TaskNode
-        // to store compensation metadata
-        for task_id in workflow.task_ids() {
-            // For now, assume all tasks need compensation (conservative)
-            without_compensation.push(task_id);
-        }
-
-        let coverage = CompensationReport::calculate(with_compensation.len(), total_tasks);
-
-        CompensationReport {
-            tasks_with_compensation: with_compensation,
-            tasks_without_compensation: without_compensation,
-            coverage_percentage: coverage,
-        }
+    pub fn validate_compensation_coverage(
+        &self,
+        workflow: &Workflow,
+        registry: &CompensationRegistry,
+    ) -> CompensationReport {
+        let task_ids = workflow.task_ids();
+        registry.validate_coverage(&task_ids)
     }
 }
 
@@ -1298,13 +1285,19 @@ mod tests {
 
         workflow.add_dependency("a", "b").unwrap();
 
-        let engine = RollbackEngine::new();
-        let report = engine.validate_compensation_coverage(&workflow);
+        let mut registry = CompensationRegistry::new();
+        registry.register(TaskId::new("a"), ToolCompensation::skip("undo a"));
 
-        // All tasks are marked as without compensation (placeholder logic)
-        assert_eq!(report.tasks_without_compensation.len(), 2);
-        assert_eq!(report.tasks_with_compensation.len(), 0);
-        assert_eq!(report.coverage_percentage, 0.0);
+        let engine = RollbackEngine::new();
+        let report = engine.validate_compensation_coverage(&workflow, &registry);
+
+        assert_eq!(report.tasks_with_compensation.len(), 1);
+        assert!(report.tasks_with_compensation.contains(&TaskId::new("a")));
+        assert_eq!(report.tasks_without_compensation.len(), 1);
+        assert!(report
+            .tasks_without_compensation
+            .contains(&TaskId::new("b")));
+        assert!((report.coverage_percentage - 0.5).abs() < 0.001);
     }
 
     #[test]
