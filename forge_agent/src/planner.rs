@@ -67,6 +67,7 @@ impl Planner {
         &self,
         observation: &super::observe::Observation,
         errors: &[String],
+        previous_steps: &[PlanStep],
     ) -> Result<Vec<PlanStep>> {
         let Some(ref llm) = self.llm else {
             return Ok(Vec::new());
@@ -79,11 +80,22 @@ impl Planner {
             .map(|s| format!("{} (id:{})", s.name, s.id.0))
             .collect();
 
+        let prev_text = if previous_steps.is_empty() {
+            String::new()
+        } else {
+            let ops: Vec<String> = previous_steps
+                .iter()
+                .map(|s| format!("{:?}", s.operation))
+                .collect();
+            format!("\nAlready tried (do not repeat): {}", ops.join("; "))
+        };
+
         let prompt = format!(
-            "Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}",
+            "Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}{}",
             observation.query,
             symbol_list.join(", "),
-            error_text
+            error_text,
+            prev_text
         );
 
         let system = "You are a Rust fix planner. Given a code query, relevant symbols, \
@@ -839,5 +851,49 @@ mod tests {
         let steps = planner.generate_steps(&observation).await.unwrap();
         // No symbols matched, regex produces Inspect with no targets → empty
         assert!(steps.is_empty());
+    }
+
+    // ── Task 2: attempt history ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_generate_fix_steps_accepts_previous_steps() {
+        use crate::llm::MockProvider;
+        let llm = Arc::new(MockProvider::new(
+            r#"[{"operation":"inspect","symbol_name":"foo","symbol_id":1}]"#,
+        ));
+        let planner = Planner::new().with_llm(llm);
+        let obs = crate::observe::Observation {
+            query: "fix the error".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let prev = vec![PlanStep {
+            description: "Previous attempt".to_string(),
+            operation: PlanOperation::Create {
+                path: "src/foo.rs".to_string(),
+                content: "fn foo() {}".to_string(),
+            },
+        }];
+        // Should compile and run — previous_steps accepted without error
+        let result = planner
+            .generate_fix_steps(&obs, &["compile error".to_string()], &prev)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_generate_fix_steps_empty_previous_no_error() {
+        use crate::llm::MockProvider;
+        let llm = Arc::new(MockProvider::new("[]"));
+        let planner = Planner::new().with_llm(llm);
+        let obs = crate::observe::Observation {
+            query: "fix".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let result = planner
+            .generate_fix_steps(&obs, &["error".to_string()], &[])
+            .await;
+        assert!(result.is_ok());
     }
 }

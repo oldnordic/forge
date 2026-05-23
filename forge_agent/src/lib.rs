@@ -195,6 +195,8 @@ pub struct Agent {
     /// Optional envoy client for multi-agent coordination
     #[cfg(feature = "envoy")]
     pub(crate) envoy: Option<std::sync::Arc<envoy::EnvoyClient>>,
+    /// Policies enforced during the constraint phase
+    policies: Vec<policy::Policy>,
 }
 
 impl Agent {
@@ -225,12 +227,19 @@ impl Agent {
             llm: None,
             #[cfg(feature = "envoy")]
             envoy,
+            policies: Vec::new(),
         })
     }
 
     /// Sets the LLM provider for semantic operations.
     pub fn with_llm(mut self, provider: std::sync::Arc<dyn llm::LlmProvider>) -> Self {
         self.llm = Some(provider);
+        self
+    }
+
+    /// Sets the policies enforced during the constraint phase.
+    pub fn with_policies(mut self, policies: Vec<policy::Policy>) -> Self {
+        self.policies = policies;
         self
     }
 
@@ -462,6 +471,10 @@ impl Agent {
         // Pass LLM provider to agent loop if configured
         if let Some(ref llm) = self.llm {
             agent_loop = agent_loop.with_llm(llm.clone());
+        }
+
+        if !self.policies.is_empty() {
+            agent_loop = agent_loop.with_policies(self.policies.clone());
         }
 
         agent_loop.run(query).await

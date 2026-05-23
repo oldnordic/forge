@@ -32,6 +32,8 @@ pub struct Observer {
     llm: Option<Arc<dyn crate::llm::LlmProvider>>,
     /// Optional knowledge source for cached discoveries
     knowledge_source: Option<Arc<dyn KnowledgeSource>>,
+    /// Codebase context prefix injected into LLM prompts
+    pub(crate) context_prefix: Option<String>,
 }
 
 impl Observer {
@@ -42,6 +44,7 @@ impl Observer {
             cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             llm: None,
             knowledge_source: None,
+            context_prefix: None,
         }
     }
 
@@ -54,6 +57,12 @@ impl Observer {
     /// Sets the knowledge source for cached discovery queries.
     pub fn with_knowledge_source(mut self, source: Arc<dyn KnowledgeSource>) -> Self {
         self.knowledge_source = Some(source);
+        self
+    }
+
+    /// Sets the codebase context prefix injected into LLM prompts.
+    pub fn with_context(mut self, ctx: &crate::context::AgentContext) -> Self {
+        self.context_prefix = Some(ctx.context_prefix());
         self
     }
 
@@ -189,9 +198,14 @@ impl Observer {
             .collect();
         let symbol_list = symbol_info.join("\n");
 
+        let prefix = self
+            .context_prefix
+            .as_deref()
+            .map(|p| format!("{}\n", p))
+            .unwrap_or_default();
         let prompt = format!(
-            "Query: {}\n\nSymbols found:\n{}\n\nSummarize what these symbols reveal about the query.",
-            query, symbol_list
+            "{}Query: {}\n\nSymbols found:\n{}\n\nSummarize what these symbols reveal about the query.",
+            prefix, query, symbol_list
         );
 
         let system = "You are a code intelligence assistant. Given a query and a list of symbols found, summarize what's relevant to the query in 2-3 sentences. Focus on: what the symbols do, how they relate, and what context is important.";
@@ -504,6 +518,25 @@ mod tests {
         assert!(
             obs.summary.is_none(),
             "summary should be None when no LLM configured"
+        );
+    }
+
+    // ── Task 3: AgentContext wiring ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_observer_with_context_sets_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let ctx = crate::context::AgentContext::from_path(temp_dir.path());
+        let observer = Observer::new(forge).with_context(&ctx);
+        assert!(
+            observer.context_prefix.is_some(),
+            "context_prefix should be set after with_context"
+        );
+        let prefix = observer.context_prefix.as_deref().unwrap_or("");
+        assert!(
+            prefix.contains("rust"),
+            "prefix should contain language: got {prefix}"
         );
     }
 }

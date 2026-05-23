@@ -75,6 +75,10 @@ pub struct AgentLoop {
     reasoning: forge_reasoning::ReasoningSystem,
     /// Hypothesis ID for the current task (proposed in observe, resolved in verify)
     current_hypothesis: Option<forge_reasoning::HypothesisId>,
+    /// Policies enforced during the constraint phase
+    policies: Vec<crate::policy::Policy>,
+    /// Codebase-level context for enriching LLM prompts
+    context: crate::context::AgentContext,
 }
 
 impl AgentLoop {
@@ -85,6 +89,7 @@ impl AgentLoop {
     /// * `forge` - The Forge SDK instance for graph queries
     pub fn new(forge: Arc<Forge>) -> Self {
         let codebase_path = forge.codebase_path().to_path_buf();
+        let context = crate::context::AgentContext::from_path(&codebase_path);
         Self {
             forge,
             codebase_path,
@@ -96,6 +101,8 @@ impl AgentLoop {
             last_observation: None,
             reasoning: forge_reasoning::ReasoningSystem::in_memory(),
             current_hypothesis: None,
+            policies: Vec::new(),
+            context,
         }
     }
 
@@ -117,6 +124,12 @@ impl AgentLoop {
         self
     }
 
+    /// Sets the policies enforced during the constraint phase.
+    pub fn with_policies(mut self, policies: Vec<crate::policy::Policy>) -> Self {
+        self.policies = policies;
+        self
+    }
+
     /// Returns the reasoning system for querying hypothesis state.
     pub fn reasoning(&self) -> &forge_reasoning::ReasoningSystem {
         &self.reasoning
@@ -132,6 +145,12 @@ impl AgentLoop {
     ///
     /// Returns `LoopResult` with commit data on success, or error on phase failure.
     pub async fn run(&mut self, query: &str) -> Result<LoopResult, crate::AgentError> {
+        let result = self.run_inner(query).await;
+        self.store_hypothesis_outcome(query, result.is_ok()).await;
+        result
+    }
+
+    async fn run_inner(&mut self, query: &str) -> Result<LoopResult, crate::AgentError> {
         // Phase 1: Observe
         let observation = match self.observe_phase(query).await {
             Ok(obs) => obs,
@@ -164,6 +183,7 @@ impl AgentLoop {
 
         // Phases 4 + 5 with verify→fix retry loop
         let mut attempt = 0u32;
+        let mut attempted_steps: Vec<crate::planner::PlanStep> = Vec::new();
         let verification = loop {
             // Phase 4: Mutate
             let mutation_result = match self.mutate_phase(plan).await {
@@ -206,7 +226,11 @@ impl AgentLoop {
                 planner = planner.with_llm(llm.clone());
             }
             let fix_steps = planner
-                .generate_fix_steps(&fix_observation, &verification.diagnostics)
+                .generate_fix_steps(
+                    &fix_observation,
+                    &verification.diagnostics,
+                    &attempted_steps,
+                )
                 .await
                 .unwrap_or_default();
 
@@ -226,6 +250,7 @@ impl AgentLoop {
                     affected_files: vec![],
                     complexity: 0,
                 });
+            attempted_steps.extend(fix_steps.iter().cloned());
             plan = crate::ExecutionPlan {
                 steps: fix_steps,
                 estimated_impact: impact,
@@ -253,7 +278,6 @@ impl AgentLoop {
             }
         };
 
-        // Success - return loop result
         Ok(LoopResult {
             transaction_id: commit_result.transaction_id,
             modified_files: commit_result.files_committed,
@@ -264,7 +288,8 @@ impl AgentLoop {
     /// Observation phase - gather context from the graph.
     async fn observe_phase(&mut self, query: &str) -> Result<Observation, crate::AgentError> {
         // Use Observer to gather context
-        let mut observer = crate::observe::Observer::new((*self.forge).clone());
+        let mut observer =
+            crate::observe::Observer::new((*self.forge).clone()).with_context(&self.context);
         if let Some(ref llm) = self.llm {
             observer = observer.with_llm(llm.clone());
         }
@@ -312,7 +337,7 @@ impl AgentLoop {
             modified: format!("query: {}", observation.query),
             changes: Vec::new(),
         };
-        let policies = Vec::new();
+        let policies = self.policies.clone();
 
         let report = validator
             .validate(&diff, &policies)
@@ -592,6 +617,33 @@ impl AgentLoop {
     }
 
     /// Stores observed symbols as atheneum discoveries (fire-and-forget).
+    async fn store_hypothesis_outcome(&self, query: &str, succeeded: bool) {
+        let Some(ref store) = self.discovery_store else {
+            return;
+        };
+        let Some(id) = self.current_hypothesis else {
+            return;
+        };
+        let hyp = self.reasoning.board.get(id).await.ok().flatten();
+        let confidence = hyp
+            .as_ref()
+            .map(|h| h.current_confidence().get())
+            .unwrap_or(0.5);
+        let status = hyp.map(|h| format!("{:?}", h.status()));
+        store
+            .store(
+                "HypothesisOutcome",
+                query,
+                serde_json::json!({
+                    "hypothesis_id": id.to_string(),
+                    "succeeded": succeeded,
+                    "final_confidence": confidence,
+                    "status": status,
+                }),
+            )
+            .await;
+    }
+
     async fn store_observation_discoveries(&self, observation: &Observation) {
         if let Some(ref store) = self.discovery_store {
             for symbol in &observation.symbols {
@@ -902,6 +954,71 @@ mod tests {
                 hyp.status() == HypothesisStatus::Confirmed
                     || hyp.status() == HypothesisStatus::UnderTest
                     || hyp.status() == HypothesisStatus::Proposed
+            );
+        }
+    }
+
+    // ── Task 4: reasoning persistence ────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_hypothesis_outcome_stored_on_run() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let store = Arc::new(MockDiscoveryStore::new());
+        let mut agent_loop = AgentLoop::new(Arc::new(forge)).with_discovery_store(store.clone());
+        let _ = agent_loop.run("generate helper").await;
+        let discoveries = store.discoveries();
+        let outcome = discoveries
+            .iter()
+            .find(|(dtype, _, _)| dtype == "HypothesisOutcome");
+        assert!(
+            outcome.is_some(),
+            "HypothesisOutcome should be stored; got: {:?}",
+            discoveries.iter().map(|(t, _, _)| t).collect::<Vec<_>>()
+        );
+        let (_, target, meta) = outcome.unwrap();
+        assert_eq!(target.as_str(), "generate helper");
+        assert!(
+            meta.get("succeeded").is_some(),
+            "meta must have 'succeeded'"
+        );
+        assert!(
+            meta.get("final_confidence").is_some(),
+            "meta must have 'final_confidence'"
+        );
+    }
+
+    // ── Task 1: policy threading ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_with_policies_builder_stores_policies() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_policies(vec![crate::policy::Policy::NoUnsafeInPublicAPI]);
+        assert_eq!(agent_loop.policies.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_constrain_phase_records_policy_count() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge)).with_policies(vec![
+            crate::policy::Policy::NoUnsafeInPublicAPI,
+            crate::policy::Policy::PreserveTests,
+        ]);
+        // Run the full loop (verification will fail on empty dir, but constrain runs)
+        let _ = agent_loop.run("test query").await;
+        // Find the Constrain audit event and verify policy_count == 2
+        let events = agent_loop.audit_log().clone().into_events();
+        let constrain_event = events
+            .iter()
+            .find(|e| matches!(e, AuditEvent::Constrain { .. }));
+        assert!(constrain_event.is_some(), "Constrain event not recorded");
+        if let Some(AuditEvent::Constrain { policy_count, .. }) = constrain_event {
+            assert_eq!(
+                *policy_count, 2,
+                "policy_count should be 2, got {policy_count}"
             );
         }
     }
