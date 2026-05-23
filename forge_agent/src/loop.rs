@@ -135,6 +135,22 @@ impl AgentLoop {
         &self.reasoning
     }
 
+    /// Executes a workflow using this loop's Forge SDK instance.
+    ///
+    /// Wraps `WorkflowExecutor` and injects the loop's `Forge` into every
+    /// `TaskContext`, making tasks like `AgentLoopTask` and `GraphQueryTask`
+    /// functional within the workflow.
+    pub async fn run_workflow(
+        &self,
+        workflow: crate::workflow::Workflow,
+    ) -> Result<crate::workflow::WorkflowResult, crate::AgentError> {
+        crate::workflow::WorkflowExecutor::new(workflow)
+            .with_forge(Arc::clone(&self.forge))
+            .execute()
+            .await
+            .map_err(|e| crate::AgentError::WorkflowFailed(e.to_string()))
+    }
+
     /// Runs the full agent loop: Observe -> Constrain -> Plan -> Mutate -> Verify -> Commit
     ///
     /// # Arguments
@@ -727,6 +743,7 @@ impl AgentLoop {
             crate::AgentError::VerificationFailed(_) => "Verify",
             crate::AgentError::CommitFailed(_) => "Commit",
             crate::AgentError::ForgeError(_) => "Forge",
+            crate::AgentError::WorkflowFailed(_) => "Workflow",
         };
 
         // Record rollback event
@@ -1196,6 +1213,54 @@ mod tests {
         assert!(
             result.files_committed.contains(&modified_file),
             "commit_phase must derive committed files from transaction snapshots, not diagnostics"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_agent_loop_run_workflow_passes_forge() {
+        use crate::workflow::dag::Workflow;
+        use crate::workflow::task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
+        use async_trait::async_trait;
+
+        struct ForgeCheckTask;
+
+        #[async_trait]
+        impl WorkflowTask for ForgeCheckTask {
+            async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+                if context.forge.is_some() {
+                    Ok(TaskResult::Success)
+                } else {
+                    Err(TaskError::ExecutionFailed(
+                        "no forge in context".to_string(),
+                    ))
+                }
+            }
+
+            fn id(&self) -> TaskId {
+                TaskId::new("forge-check")
+            }
+
+            fn name(&self) -> &str {
+                "ForgeCheckTask"
+            }
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let agent_loop = AgentLoop::new(Arc::new(forge));
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(ForgeCheckTask));
+
+        let result = agent_loop.run_workflow(workflow).await;
+        assert!(
+            result.is_ok(),
+            "run_workflow should succeed when forge is wired: {:?}",
+            result.err()
+        );
+        assert!(
+            result.unwrap().success,
+            "workflow result should report success"
         );
     }
 }

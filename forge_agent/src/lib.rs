@@ -92,6 +92,10 @@ pub enum AgentError {
     /// Error from Forge SDK
     #[error("Forge error: {0}")]
     ForgeError(#[from] forge_core::ForgeError),
+
+    /// Workflow execution failed
+    #[error("Workflow failed: {0}")]
+    WorkflowFailed(String),
 }
 
 /// Result type for agent operations.

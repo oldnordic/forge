@@ -18,6 +18,7 @@ use crate::workflow::task::{TaskContext, TaskId, TaskResult};
 use crate::workflow::timeout::{TimeoutConfig, TimeoutError};
 use crate::workflow::tools::ToolRegistry;
 use chrono::Utc;
+use forge_core::Forge;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -122,6 +123,8 @@ pub struct WorkflowExecutor {
     pub(in crate::workflow) tool_registry: Option<Arc<ToolRegistry>>,
     /// Optional deadlock timeout for layer execution (default 5 minutes)
     pub(in crate::workflow) deadlock_timeout: Option<std::time::Duration>,
+    /// Optional Forge SDK instance to inject into TaskContext
+    forge: Option<Arc<Forge>>,
 }
 
 impl WorkflowExecutor {
@@ -153,7 +156,17 @@ impl WorkflowExecutor {
             timeout_config: None,
             tool_registry: None,
             deadlock_timeout: Some(std::time::Duration::from_secs(300)), // Default 5 minutes
+            forge: None,
         }
+    }
+
+    /// Sets the Forge SDK instance for this executor.
+    ///
+    /// When set, each `TaskContext` will have `forge` populated so tasks like
+    /// `AgentLoopTask` and `GraphQueryTask` can access the graph.
+    pub fn with_forge(mut self, forge: Arc<Forge>) -> Self {
+        self.forge = Some(forge);
+        self
     }
 
     /// Sets the rollback strategy for this executor.
@@ -1131,6 +1144,11 @@ impl WorkflowExecutor {
 
         // Add audit log for task-level event recording (clone for task use)
         context = context.with_audit_log(self.audit_log.clone());
+
+        // Inject Forge SDK if this executor has one
+        if let Some(ref f) = self.forge {
+            context = context.with_forge((**f).clone());
+        }
 
         // Execute the task with timeout if configured
         let execution_result = if let Some(timeout_duration) = context.task_timeout {
@@ -3275,5 +3293,48 @@ mod tests {
 
         // Verify the timeout is None
         assert!(executor.deadlock_timeout.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_executor_with_forge_passes_context() {
+        use crate::workflow::task::TaskError;
+        use forge_core::Forge;
+        use tempfile::TempDir;
+
+        struct ForgeCheckTask;
+
+        #[async_trait]
+        impl WorkflowTask for ForgeCheckTask {
+            async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+                if context.forge.is_some() {
+                    Ok(TaskResult::Success)
+                } else {
+                    Err(TaskError::ExecutionFailed(
+                        "no forge in context".to_string(),
+                    ))
+                }
+            }
+
+            fn id(&self) -> TaskId {
+                TaskId::new("forge-check")
+            }
+
+            fn name(&self) -> &str {
+                "ForgeCheckTask"
+            }
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(ForgeCheckTask));
+
+        let mut executor = WorkflowExecutor::new(workflow).with_forge(Arc::new(forge));
+        let result = executor.execute().await.unwrap();
+        assert!(
+            result.success,
+            "task should succeed when forge is in context"
+        );
     }
 }
