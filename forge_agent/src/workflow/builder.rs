@@ -257,6 +257,23 @@ impl WorkflowBuilder {
         Ok(workflow)
     }
 
+    /// Builds a `WorkflowExecutor` with the forge instance wired into every `TaskContext`.
+    ///
+    /// Equivalent to `build()` followed by `WorkflowExecutor::new(workflow).with_forge(f)`
+    /// when a forge was supplied via `with_auto_detect`. Without forge the executor runs
+    /// normally (tasks that require forge will fail themselves).
+    pub fn build_executor(
+        self,
+    ) -> Result<crate::workflow::executor::WorkflowExecutor, WorkflowError> {
+        let forge = self.forge.clone();
+        let workflow = self.build()?;
+        let mut executor = crate::workflow::executor::WorkflowExecutor::new(workflow);
+        if let Some(f) = forge {
+            executor = executor.with_forge(f);
+        }
+        Ok(executor)
+    }
+
     /// Creates a sequential workflow from a list of tasks.
     ///
     /// Tasks are executed in the order provided, with each task
@@ -495,5 +512,43 @@ mod tests {
             .unwrap();
 
         assert_eq!(workflow.task_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_build_executor_passes_forge_to_context() {
+        use crate::workflow::task::TaskId as TId;
+        use crate::workflow::task::{TaskContext, TaskError, TaskResult, WorkflowTask};
+        use async_trait::async_trait;
+        use forge_core::Forge;
+
+        struct ForgeCheckTask;
+        #[async_trait]
+        impl WorkflowTask for ForgeCheckTask {
+            async fn execute(&self, ctx: &TaskContext) -> Result<TaskResult, TaskError> {
+                if ctx.forge.is_some() {
+                    Ok(TaskResult::Success)
+                } else {
+                    Err(TaskError::ExecutionFailed("no forge".to_string()))
+                }
+            }
+            fn id(&self) -> TId {
+                TId::new("forge-check")
+            }
+            fn name(&self) -> &str {
+                "ForgeCheckTask"
+            }
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+
+        let mut executor = WorkflowBuilder::new()
+            .with_auto_detect(&forge)
+            .add_task(Box::new(ForgeCheckTask))
+            .build_executor()
+            .unwrap();
+
+        let result = executor.execute().await.unwrap();
+        assert!(result.success, "task must receive forge in context");
     }
 }
