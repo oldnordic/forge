@@ -2004,13 +2004,16 @@ mod tests {
         assert!(result.rollback_report.is_some());
         let rollback_report = result.rollback_report.unwrap();
 
-        // With actual task execution, the failed task "b" doesn't register a compensation,
-        // so it goes to skipped_tasks. Task "a" succeeded and registered compensation,
-        // but isn't in the rollback set (which includes failed task + dependents).
-        // TODO: The rollback logic traverses outgoing edges (dependents) instead of
-        // incoming edges (prerequisites), which is backwards for Saga compensation.
-        assert_eq!(rollback_report.rolled_back_tasks.len(), 0);
-        assert_eq!(rollback_report.skipped_tasks.len(), 2); // "b" (failed, no comp) and "c" (not executed, no comp)
+        // Saga compensation: rollback set = {a (completed), b (failed)}.
+        // c (never executed) is downstream and is NOT in the rollback set.
+        // "a" completed with WithCompensation → rolled back.
+        // "b" failed (no WithCompensation) → skipped.
+        assert_eq!(rollback_report.rolled_back_tasks.len(), 1);
+        assert!(rollback_report
+            .rolled_back_tasks
+            .contains(&TaskId::new("a")));
+        assert_eq!(rollback_report.skipped_tasks.len(), 1);
+        assert!(rollback_report.skipped_tasks.contains(&TaskId::new("b")));
 
         // Verify audit events include rollback
         let events = executor.audit_log().replay();
@@ -2089,9 +2092,18 @@ mod tests {
         assert!(result.rollback_report.is_some());
         let rollback_report = result.rollback_report.unwrap();
 
-        // With AllDependent, "d" is in rollback set (failed task has no dependents)
-        // Since "d" failed, it didn't register compensation, so it's skipped
-        assert_eq!(rollback_report.rolled_back_tasks.len(), 0);
+        // Saga compensation: rollback set = {a, b, c, d} (all predecessors of d plus d itself).
+        // d failed (no compensation) → skipped. a, b, c completed with WithCompensation → rolled back.
+        assert_eq!(rollback_report.rolled_back_tasks.len(), 3);
+        assert!(rollback_report
+            .rolled_back_tasks
+            .contains(&TaskId::new("a")));
+        assert!(rollback_report
+            .rolled_back_tasks
+            .contains(&TaskId::new("b")));
+        assert!(rollback_report
+            .rolled_back_tasks
+            .contains(&TaskId::new("c")));
         assert_eq!(rollback_report.skipped_tasks.len(), 1);
         assert!(rollback_report.skipped_tasks.contains(&TaskId::new("d")));
 

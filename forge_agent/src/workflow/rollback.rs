@@ -531,27 +531,27 @@ impl RollbackEngine {
                 Ok(vec![failed_task.clone()])
             }
             RollbackStrategy::AllDependent => {
-                // Find all nodes reachable from failed task in reverse graph
-                let dependent_set = self.find_dependent_tasks(workflow, failed_idx)?;
+                // Find all prerequisite nodes (already-completed predecessors) plus the failed task
+                let predecessor_set = self.find_prerequisite_tasks(workflow, failed_idx)?;
                 // Sort in reverse execution order
-                self.reverse_execution_order(workflow, dependent_set)
+                self.reverse_execution_order(workflow, predecessor_set)
             }
             RollbackStrategy::Custom => {
                 // Custom strategy not yet implemented
                 // For now, treat as AllDependent
-                let dependent_set = self.find_dependent_tasks(workflow, failed_idx)?;
-                self.reverse_execution_order(workflow, dependent_set)
+                let predecessor_set = self.find_prerequisite_tasks(workflow, failed_idx)?;
+                self.reverse_execution_order(workflow, predecessor_set)
             }
         }
     }
 
-    /// Finds all tasks dependent on the failed task using forward traversal.
+    /// Finds the failed task and all its transitive prerequisites (Saga compensation set).
     ///
-    /// Traverses the graph following edges from the failed task to find
-    /// all nodes that depend on it (directly or transitively).
+    /// Traverses the graph following edges in the incoming direction — from the failed
+    /// task back toward tasks that already completed and must be compensated.
     ///
-    /// In the DAG a -> b, edge direction is "a executes before b",
-    /// so b depends on a. If a fails, we traverse forward to find b.
+    /// In the DAG a -> b, edge direction is "a executes before b". If b fails,
+    /// Saga must compensate a (already ran). Traversing Incoming from b reaches a.
     ///
     /// # Arguments
     ///
@@ -560,34 +560,30 @@ impl RollbackEngine {
     ///
     /// # Returns
     ///
-    /// Set of TaskIds that depend on the failed task
-    fn find_dependent_tasks(
+    /// Set containing the failed task and all transitive predecessors
+    pub(crate) fn find_prerequisite_tasks(
         &self,
         workflow: &Workflow,
         failed_idx: NodeIndex,
     ) -> Result<HashSet<TaskId>, RollbackError> {
-        let mut dependent_set = HashSet::new();
+        let mut predecessor_set = HashSet::new();
         let mut visited = HashSet::new();
         let mut stack = VecDeque::new();
 
-        // Start from failed task, traverse forward edges (outgoing direction)
-        // to find all tasks that depend on the failed task
+        // Start from failed task, traverse incoming edges to find all predecessors
         stack.push_back(failed_idx);
         visited.insert(failed_idx);
 
         while let Some(current_idx) = stack.pop_front() {
-            // Get node weight to extract TaskId
             if let Some(node) = workflow.graph.node_weight(current_idx) {
                 let task_id = node.id().clone();
-                dependent_set.insert(task_id);
+                predecessor_set.insert(task_id);
             }
 
-            // Find all nodes that depend on current node
-            // Edges go FROM prerequisite TO dependent
-            // So Outgoing neighbors are the dependents
+            // Edges go FROM prerequisite TO dependent; Incoming neighbors are prerequisites
             for neighbor in workflow
                 .graph
-                .neighbors_directed(current_idx, Direction::Outgoing)
+                .neighbors_directed(current_idx, Direction::Incoming)
             {
                 if !visited.contains(&neighbor) {
                     visited.insert(neighbor);
@@ -596,7 +592,7 @@ impl RollbackEngine {
             }
         }
 
-        Ok(dependent_set)
+        Ok(predecessor_set)
     }
 
     /// Sorts tasks in reverse execution order (for correct rollback).
@@ -1116,7 +1112,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_dependent_tasks() {
+    fn test_find_prerequisite_tasks() {
         let mut workflow = Workflow::new();
 
         // Create diamond DAG: a -> b, a -> c, b -> d, c -> d
@@ -1133,13 +1129,16 @@ mod tests {
         let engine = RollbackEngine::new();
         let failed_idx = *workflow.task_map.get(&TaskId::new("d")).unwrap();
 
-        // Find dependents of d (should be none in forward direction)
-        let dependents = engine.find_dependent_tasks(&workflow, failed_idx).unwrap();
+        // When d fails, Saga must compensate all predecessors: a, b, c, and d itself
+        let predecessors = engine
+            .find_prerequisite_tasks(&workflow, failed_idx)
+            .unwrap();
 
-        // d has no dependents, only dependencies
-        // So rollback set should only contain d itself
-        assert_eq!(dependents.len(), 1);
-        assert!(dependents.contains(&TaskId::new("d")));
+        assert_eq!(predecessors.len(), 4);
+        assert!(predecessors.contains(&TaskId::new("a")));
+        assert!(predecessors.contains(&TaskId::new("b")));
+        assert!(predecessors.contains(&TaskId::new("c")));
+        assert!(predecessors.contains(&TaskId::new("d")));
     }
 
     #[test]
@@ -1159,14 +1158,16 @@ mod tests {
 
         let engine = RollbackEngine::new();
 
-        // When d fails, only d should be rolled back (no dependents)
+        // When d fails, Saga compensation covers all predecessors: a, b, c, d
         let rollback_set = engine
             .find_rollback_set(&workflow, &TaskId::new("d"), RollbackStrategy::AllDependent)
             .unwrap();
 
-        // Only d is rolled back (it has no dependents)
-        assert_eq!(rollback_set.len(), 1);
+        assert_eq!(rollback_set.len(), 4);
+        // d is first in rollback order (most recently executed)
         assert_eq!(rollback_set[0], TaskId::new("d"));
+        // a is last (earliest executed)
+        assert_eq!(rollback_set[rollback_set.len() - 1], TaskId::new("a"));
     }
 
     #[test]
@@ -1184,15 +1185,19 @@ mod tests {
         let engine = RollbackEngine::new();
         let failed_idx = *workflow.task_map.get(&TaskId::new("c")).unwrap();
 
-        let dependents = engine.find_dependent_tasks(&workflow, failed_idx).unwrap();
+        let predecessors = engine
+            .find_prerequisite_tasks(&workflow, failed_idx)
+            .unwrap();
         let rollback_order = engine
-            .reverse_execution_order(&workflow, dependents)
+            .reverse_execution_order(&workflow, predecessors)
             .unwrap();
 
         // Execution order: a, b, c
-        // Rollback order should be reverse: c
-        assert_eq!(rollback_order.len(), 1);
+        // Rollback order (Saga compensation): c, b, a
+        assert_eq!(rollback_order.len(), 3);
         assert_eq!(rollback_order[0], TaskId::new("c"));
+        assert_eq!(rollback_order[1], TaskId::new("b"));
+        assert_eq!(rollback_order[2], TaskId::new("a"));
     }
 
     #[tokio::test]
@@ -1341,5 +1346,38 @@ mod tests {
         assert_eq!(report.tasks_without_compensation.len(), 2);
         assert_eq!(report.tasks_with_compensation.len(), 0);
         assert_eq!(report.coverage_percentage, 0.0);
+    }
+
+    #[test]
+    fn test_saga_compensation_traverses_predecessors() {
+        // Chain: a -> b -> c  (a must complete before b; b must complete before c)
+        // When b fails, Saga compensation must roll back a (already completed).
+        // c was never executed so it must NOT be in the rollback set.
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("a", "Task A")));
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("b", "Task B")));
+        workflow.add_task(Box::new(MockTaskWithCompensation::new("c", "Task C")));
+        workflow.add_dependency("a", "b").unwrap();
+        workflow.add_dependency("b", "c").unwrap();
+
+        let engine = RollbackEngine::new();
+        let failed_idx = *workflow.task_map.get(&TaskId::new("b")).unwrap();
+        let predecessors = engine
+            .find_prerequisite_tasks(&workflow, failed_idx)
+            .unwrap();
+
+        // b and a (its predecessor) must be in the set; c must NOT be
+        assert!(
+            predecessors.contains(&TaskId::new("b")),
+            "failed task must be included"
+        );
+        assert!(
+            predecessors.contains(&TaskId::new("a")),
+            "a completed before b — must be rolled back"
+        );
+        assert!(
+            !predecessors.contains(&TaskId::new("c")),
+            "c never ran — must not be in rollback set"
+        );
     }
 }

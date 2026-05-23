@@ -528,9 +528,6 @@ impl AgentLoop {
                 .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?
         };
 
-        let diagnostic_count = report.diagnostics.len();
-        let passed = report.passed;
-
         if let Some(id) = self.current_hypothesis {
             let (lh, lnh) = if report.passed {
                 (0.9, 0.1)
@@ -547,23 +544,33 @@ impl AgentLoop {
             }
         }
 
+        let policy_violations = self
+            .verify_policies_on_mutations()
+            .await
+            .unwrap_or_default();
+        let final_passed = report.passed && policy_violations.is_empty();
+        let final_diagnostic_count = report.diagnostics.len() + policy_violations.len();
+
         // Record audit event
         self.audit_log
             .record(AuditEvent::Verify {
                 timestamp: Utc::now(),
-                passed,
-                diagnostic_count,
+                passed: final_passed,
+                diagnostic_count: final_diagnostic_count,
             })
             .await
             .map_err(|e| crate::AgentError::VerificationFailed(e.to_string()))?;
 
+        let mut all_diagnostics: Vec<String> = report
+            .diagnostics
+            .iter()
+            .map(|d| d.message.clone())
+            .collect();
+        all_diagnostics.extend(policy_violations);
+
         Ok(VerificationResult {
-            passed: report.passed,
-            diagnostics: report
-                .diagnostics
-                .iter()
-                .map(|d| d.message.clone())
-                .collect(),
+            passed: final_passed,
+            diagnostics: all_diagnostics,
             suggestions: report.suggestions,
         })
     }
@@ -614,6 +621,38 @@ impl AgentLoop {
             transaction_id: commit_report.transaction_id,
             files_committed: commit_report.files_committed,
         })
+    }
+
+    /// Checks every file modified in the current transaction against the configured
+    /// policies.  Returns violation messages; empty means no violations.
+    pub(crate) async fn verify_policies_on_mutations(
+        &self,
+    ) -> Result<Vec<String>, crate::AgentError> {
+        let Some(ref txn) = self.transaction else {
+            return Ok(Vec::new());
+        };
+        if self.policies.is_empty() {
+            return Ok(Vec::new());
+        }
+        let validator = crate::policy::PolicyValidator::new((*self.forge).clone());
+        let mut violations = Vec::new();
+        for snapshot in txn.snapshots() {
+            let modified = tokio::fs::read_to_string(&snapshot.path)
+                .await
+                .unwrap_or_default();
+            let diff = crate::policy::Diff {
+                file_path: snapshot.path.clone(),
+                original: snapshot.original_content.clone(),
+                modified,
+                changes: Vec::new(),
+            };
+            let report = validator
+                .validate(&diff, &self.policies)
+                .await
+                .map_err(|e| crate::AgentError::PolicyViolation(e.to_string()))?;
+            violations.extend(report.violations.iter().map(|v| v.message.clone()));
+        }
+        Ok(violations)
     }
 
     /// Stores observed symbols as atheneum discoveries (fire-and-forget).
@@ -1021,5 +1060,55 @@ mod tests {
                 "policy_count should be 2, got {policy_count}"
             );
         }
+    }
+
+    // ── Critical gap 2: policy enforcement on real mutations ─────────────────
+
+    #[tokio::test]
+    async fn test_policy_catches_unsafe_in_created_file() {
+        use crate::transaction::Transaction;
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_policies(vec![crate::policy::Policy::NoUnsafeInPublicAPI]);
+
+        // Simulate what mutate_phase does: snapshot the file (doesn't exist yet),
+        // then write unsafe content.
+        let unsafe_file = temp_dir.path().join("danger.rs");
+        let mut txn = Transaction::begin().await.unwrap();
+        txn.snapshot_file(&unsafe_file).await.unwrap();
+        tokio::fs::write(&unsafe_file, "pub unsafe fn danger() {}")
+            .await
+            .unwrap();
+        agent_loop.transaction = Some(txn);
+
+        let violations = agent_loop.verify_policies_on_mutations().await.unwrap();
+        assert!(
+            !violations.is_empty(),
+            "NoUnsafeInPublicAPI should catch `pub unsafe fn`"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_policy_passes_safe_file() {
+        use crate::transaction::Transaction;
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_policies(vec![crate::policy::Policy::NoUnsafeInPublicAPI]);
+
+        let safe_file = temp_dir.path().join("safe.rs");
+        let mut txn = Transaction::begin().await.unwrap();
+        txn.snapshot_file(&safe_file).await.unwrap();
+        tokio::fs::write(&safe_file, "pub fn safe() {}")
+            .await
+            .unwrap();
+        agent_loop.transaction = Some(txn);
+
+        let violations = agent_loop.verify_policies_on_mutations().await.unwrap();
+        assert!(
+            violations.is_empty(),
+            "safe file should produce no violations"
+        );
     }
 }

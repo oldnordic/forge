@@ -61,27 +61,53 @@ impl GateRunner {
         Self { gates }
     }
 
-    /// Run all gates, returning results in execution order.
-    /// Short-circuits on first Block failure.
-    pub fn run(&self) -> Vec<GateResult> {
+    /// Run all gates in the given working directory, returning results in priority order.
+    /// Short-circuits on the first `Block` failure.
+    pub fn run(&self, working_dir: &std::path::Path) -> Vec<GateResult> {
         let mut results = Vec::new();
         for gate in &self.gates {
-            // Placeholder — actual execution shells out to the tool
-            let result = GateResult {
-                gate_name: gate.name.clone(),
-                passed: true,
-                exit_code: 0,
-                stdout: String::new(),
-                structured_output: None,
-                errors: 0,
-                warnings: 0,
-                duration_ms: 0,
+            let start = std::time::Instant::now();
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&gate.tool)
+                .current_dir(working_dir)
+                .output();
+
+            let result = match output {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    let combined = format!("{stdout}{stderr}");
+                    let errors = combined.lines().filter(|l| l.contains("error:")).count() as u32;
+                    let warnings =
+                        combined.lines().filter(|l| l.contains("warning:")).count() as u32;
+                    let passed = out.status.success();
+                    GateResult {
+                        gate_name: gate.name.clone(),
+                        passed,
+                        exit_code: out.status.code().unwrap_or(-1),
+                        stdout,
+                        structured_output: None,
+                        errors,
+                        warnings,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    }
+                }
+                Err(e) => GateResult {
+                    gate_name: gate.name.clone(),
+                    passed: false,
+                    exit_code: -1,
+                    stdout: format!("failed to spawn command: {e}"),
+                    structured_output: None,
+                    errors: 1,
+                    warnings: 0,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
             };
+
+            let should_block = !result.passed && gate.on_fail == GateAction::Block;
             results.push(result);
-            // Short-circuit on Block failure
-            if !results.last().map(|r| r.passed).unwrap_or(true)
-                && gate.on_fail == GateAction::Block
-            {
+            if should_block {
                 break;
             }
         }
@@ -92,22 +118,12 @@ impl GateRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     fn make_gate(name: &str, priority: u32, on_fail: GateAction) -> Gate {
         Gate {
             name: name.to_string(),
             tool: "test-tool".to_string(),
-            language: GateLanguage::Rust,
-            priority,
-            on_fail,
-            config: None,
-        }
-    }
-
-    fn make_failing_gate(name: &str, priority: u32, on_fail: GateAction) -> Gate {
-        Gate {
-            name: name.to_string(),
-            tool: "failing-tool".to_string(),
             language: GateLanguage::Rust,
             priority,
             on_fail,
@@ -128,73 +144,94 @@ mod tests {
     }
 
     #[test]
-    fn test_short_circuit_on_block() {
+    fn test_gate_runner_executes_real_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let gate = Gate {
+            name: "echo".into(),
+            tool: "echo hello".into(),
+            language: GateLanguage::Rust,
+            priority: 0,
+            on_fail: GateAction::Warn,
+            config: None,
+        };
+        let runner = GateRunner::new(vec![gate]);
+        let results = runner.run(temp_dir.path());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].passed, "echo should exit 0");
+        assert_eq!(results[0].exit_code, 0);
+        let _ = results[0].duration_ms; // field is present and set
+    }
+
+    #[test]
+    fn test_gate_runner_detects_failure() {
+        let temp_dir = TempDir::new().unwrap();
+        let gate = Gate {
+            name: "fail".into(),
+            tool: "sh -c 'exit 1'".into(),
+            language: GateLanguage::Rust,
+            priority: 0,
+            on_fail: GateAction::Warn,
+            config: None,
+        };
+        let runner = GateRunner::new(vec![gate]);
+        let results = runner.run(temp_dir.path());
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].passed, "exit 1 should fail");
+        assert_ne!(results[0].exit_code, 0);
+    }
+
+    #[test]
+    fn test_gate_runner_short_circuits_on_block_failure() {
+        let temp_dir = TempDir::new().unwrap();
         let gates = vec![
-            make_failing_gate("fail-block", 10, GateAction::Block),
-            make_gate("should-not-run", 20, GateAction::Warn),
+            Gate {
+                name: "fail-block".into(),
+                tool: "sh -c 'exit 1'".into(),
+                language: GateLanguage::Rust,
+                priority: 10,
+                on_fail: GateAction::Block,
+                config: None,
+            },
+            Gate {
+                name: "should-not-run".into(),
+                tool: "echo ok".into(),
+                language: GateLanguage::Rust,
+                priority: 20,
+                on_fail: GateAction::Warn,
+                config: None,
+            },
         ];
         let runner = GateRunner::new(gates);
-
-        // Override run to simulate a failing block gate
-        // We need a custom approach since the placeholder always passes.
-        // Let's directly test the logic with manually constructed results.
-        let mut results = Vec::new();
-        for gate in &runner.gates {
-            let passed = gate.tool != "failing-tool";
-            let result = GateResult {
-                gate_name: gate.name.clone(),
-                passed,
-                exit_code: if passed { 0 } else { 1 },
-                stdout: String::new(),
-                structured_output: None,
-                errors: if passed { 0 } else { 1 },
-                warnings: 0,
-                duration_ms: 0,
-            };
-            results.push(result);
-            if !results.last().map(|r| r.passed).unwrap_or(true)
-                && gate.on_fail == GateAction::Block
-            {
-                break;
-            }
-        }
-
-        assert_eq!(results.len(), 1);
+        let results = runner.run(temp_dir.path());
+        assert_eq!(results.len(), 1, "should stop after Block failure");
         assert_eq!(results[0].gate_name, "fail-block");
         assert!(!results[0].passed);
     }
 
     #[test]
-    fn test_warn_does_not_block() {
+    fn test_gate_runner_warn_does_not_block() {
+        let temp_dir = TempDir::new().unwrap();
         let gates = vec![
-            make_failing_gate("fail-warn", 10, GateAction::Warn),
-            make_gate("should-run", 20, GateAction::Block),
+            Gate {
+                name: "fail-warn".into(),
+                tool: "sh -c 'exit 1'".into(),
+                language: GateLanguage::Rust,
+                priority: 10,
+                on_fail: GateAction::Warn,
+                config: None,
+            },
+            Gate {
+                name: "should-run".into(),
+                tool: "echo ok".into(),
+                language: GateLanguage::Rust,
+                priority: 20,
+                on_fail: GateAction::Block,
+                config: None,
+            },
         ];
         let runner = GateRunner::new(gates);
-
-        // Simulate the run logic with a warn gate that fails
-        let mut results = Vec::new();
-        for gate in &runner.gates {
-            let passed = gate.tool != "failing-tool";
-            let result = GateResult {
-                gate_name: gate.name.clone(),
-                passed,
-                exit_code: if passed { 0 } else { 1 },
-                stdout: String::new(),
-                structured_output: None,
-                errors: if passed { 0 } else { 1 },
-                warnings: 0,
-                duration_ms: 0,
-            };
-            results.push(result);
-            if !results.last().map(|r| r.passed).unwrap_or(true)
-                && gate.on_fail == GateAction::Block
-            {
-                break;
-            }
-        }
-
-        assert_eq!(results.len(), 2);
+        let results = runner.run(temp_dir.path());
+        assert_eq!(results.len(), 2, "Warn should not block");
         assert!(!results[0].passed);
         assert!(results[1].passed);
     }
