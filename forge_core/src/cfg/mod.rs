@@ -65,9 +65,23 @@ impl CfgModule {
         _file_path: &std::path::Path,
         function_name: &str,
     ) -> Result<Option<TestCfg>> {
-        // TODO: look up function_id by name in graph_entities, then load CFG.
-        let _ = function_name;
-        Ok(None)
+        if !self.store.db_path.exists() {
+            return Ok(None);
+        }
+        let conn = rusqlite::Connection::open(&self.store.db_path)
+            .map_err(|e| crate::error::ForgeError::DatabaseError(format!("Open db: {}", e)))?;
+        let entity_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM graph_entities WHERE name = ?1
+                 AND kind IN ('fn', 'function') LIMIT 1",
+                rusqlite::params![function_name],
+                |row| row.get(0),
+            )
+            .ok();
+        match entity_id {
+            Some(id) => load_test_cfg(&self.store.db_path, id),
+            None => Ok(None),
+        }
     }
 
     /// Creates a new path enumeration builder.
@@ -127,30 +141,27 @@ impl CfgModule {
 ///
 /// Queries `cfg_blocks` via Mirage's `Backend::get_cfg_blocks` and
 /// `cfg_edges` via direct rusqlite query, then assembles a `TestCfg`.
-/// Returns `None` if the DB doesn't exist, mirage feature is disabled,
-/// or no blocks are found for the function.
-#[cfg(feature = "mirage")]
+/// Returns `None` if the DB doesn't exist or no blocks are found for the function.
 fn load_test_cfg(
     db_path: &std::path::Path,
     function_id: i64,
 ) -> crate::error::Result<Option<TestCfg>> {
     use rusqlite::{params, Connection};
 
-    let graph_db = db_path.join("graph.db");
+    let graph_db = db_path;
     if !graph_db.exists() {
         return Ok(None);
     }
 
-    let backend = mirage::Backend::detect_and_open(&graph_db).map_err(|e| {
-        crate::error::ForgeError::DatabaseError(format!(
-            "Failed to open mirage backend: {}",
-            e
-        ))
-    })?;
+    let backend = match mirage::Backend::detect_and_open(graph_db) {
+        Ok(b) => b,
+        Err(_) => return Ok(None),
+    };
 
-    let blocks = backend.get_cfg_blocks(function_id).map_err(|e| {
-        crate::error::ForgeError::DatabaseError(format!("Failed to get CFG blocks: {}", e))
-    })?;
+    let blocks = match backend.get_cfg_blocks(function_id) {
+        Ok(b) => b,
+        Err(_) => return Ok(None),
+    };
 
     if blocks.is_empty() {
         return Ok(None);
@@ -161,7 +172,7 @@ fn load_test_cfg(
 
     // Query cfg_edges from the magellan DB (same file)
     let mut has_real_edges = false;
-    if let Ok(conn) = Connection::open(&graph_db) {
+    if let Ok(conn) = Connection::open(graph_db) {
         let query = r#"
             SELECT source_idx, target_idx, edge_type
             FROM cfg_edges
@@ -173,18 +184,8 @@ fn load_test_cfg(
                 Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
             }) {
                 for row in rows.flatten() {
-                    let src = BlockId(
-                        blocks
-                            .get(row.0 as usize)
-                            .map(|b| b.id)
-                            .unwrap_or(row.0),
-                    );
-                    let dst = BlockId(
-                        blocks
-                            .get(row.1 as usize)
-                            .map(|b| b.id)
-                            .unwrap_or(row.1),
-                    );
+                    let src = BlockId(blocks.get(row.0 as usize).map(|b| b.id).unwrap_or(row.0));
+                    let dst = BlockId(blocks.get(row.1 as usize).map(|b| b.id).unwrap_or(row.1));
                     cfg.add_edge(src, dst);
                     has_real_edges = true;
                 }
@@ -212,14 +213,6 @@ fn load_test_cfg(
     }
 
     Ok(Some(cfg))
-}
-
-#[cfg(not(feature = "mirage"))]
-fn load_test_cfg(
-    _db_path: &std::path::Path,
-    _function_id: i64,
-) -> crate::error::Result<Option<TestCfg>> {
-    Ok(None)
 }
 
 /// Builder for constructing path enumeration queries.
@@ -1053,5 +1046,78 @@ mod tests {
         let loops = cfg.detect_loops();
 
         assert_eq!(loops.len(), 0);
+    }
+
+    fn make_cfg_fixture_db(db_path: &std::path::Path, fn_name: &str) -> i64 {
+        use crate::storage::{open_graph, GraphConfig, NodeSpec};
+        let config = GraphConfig::sqlite();
+        let backend = open_graph(db_path, &config).unwrap();
+        let node = NodeSpec {
+            kind: "fn".to_string(),
+            name: fn_name.to_string(),
+            file_path: Some("src/lib.rs".to_string()),
+            data: serde_json::Value::Null,
+        };
+        let entity_id = backend.insert_node(node).unwrap();
+        drop(backend);
+
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS cfg_blocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                function_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                terminator TEXT NOT NULL,
+                byte_start INTEGER,
+                byte_end INTEGER,
+                start_line INTEGER,
+                start_col INTEGER,
+                end_line INTEGER,
+                end_col INTEGER,
+                coord_x INTEGER DEFAULT 0,
+                coord_y INTEGER DEFAULT 0,
+                coord_z INTEGER DEFAULT 0,
+                cfg_condition TEXT
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cfg_blocks
+                (function_id, kind, terminator, byte_start, byte_end,
+                 start_line, start_col, end_line, end_col)
+             VALUES (?1, 'entry', 'return', 0, 50, 1, 0, 5, 0)",
+            rusqlite::params![entity_id],
+        )
+        .unwrap();
+        entity_id
+    }
+
+    #[tokio::test]
+    async fn test_extract_function_cfg_finds_fn_entity() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("cfg_test.db");
+
+        make_cfg_fixture_db(&db_path, "compute_flow");
+
+        let store = Arc::new(
+            crate::storage::UnifiedGraphStore::open_with_path(
+                dir.path(),
+                &db_path,
+                BackendKind::SQLite,
+            )
+            .await
+            .unwrap(),
+        );
+        let module = CfgModule::new(store);
+
+        let result = module
+            .extract_function_cfg(std::path::Path::new("src/lib.rs"), "compute_flow")
+            .await
+            .unwrap();
+
+        assert!(
+            result.is_some(),
+            "should return Some(cfg) when function entity and CFG blocks exist"
+        );
     }
 }

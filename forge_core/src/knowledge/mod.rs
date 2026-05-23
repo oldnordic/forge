@@ -456,10 +456,24 @@ impl KnowledgeGraph {
     }
 
     /// Resolves a keyword to a graph node_id via FTS5.
-    ///
-    /// Placeholder for Phase 2 — requires reading Magellan's symbols_fts table.
-    pub fn resolve_fts5(&self, _keyword: &str) -> Result<Option<i64>> {
-        Ok(None)
+    pub fn resolve_fts5(&self, keyword: &str) -> Result<Option<i64>> {
+        if !self.db_path.exists() {
+            return Ok(None);
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+        let pattern = format!("{}*", keyword);
+        let magellan_id: Option<i64> = conn
+            .query_row(
+                "SELECT rowid FROM symbol_fts WHERE symbol_fts MATCH ?1 LIMIT 1",
+                rusqlite::params![pattern],
+                |row| row.get(0),
+            )
+            .ok();
+        match magellan_id {
+            Some(mid) => self.resolve_fts5_by_magellan_id(mid),
+            None => Ok(None),
+        }
     }
 
     /// Populates the bridge table with a node mapping.
@@ -1092,5 +1106,61 @@ mod tests {
         let callers = kg.callers_of(sym_id, 1).unwrap();
         assert_eq!(callers.len(), 1);
         assert_eq!(callers[0].name, "caller");
+    }
+
+    fn setup_fts5_db(db_path: &std::path::Path, fn_name: &str) -> i64 {
+        use sqlitegraph::config::{open_graph, GraphConfig};
+        let config = GraphConfig::sqlite();
+        let backend = open_graph(db_path, &config).unwrap();
+        let node = sqlitegraph::backend::NodeSpec {
+            kind: "fn".to_string(),
+            name: fn_name.to_string(),
+            file_path: None,
+            data: serde_json::Value::Null,
+        };
+        let entity_id = backend.insert_node(node).unwrap();
+        drop(backend);
+
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts
+             USING fts5(name, content='graph_entities', content_rowid='id');
+             INSERT INTO symbol_fts(symbol_fts) VALUES('rebuild');",
+        )
+        .unwrap();
+        entity_id
+    }
+
+    #[test]
+    fn test_resolve_fts5_finds_indexed_symbol() {
+        let temp = tempfile::tempdir().unwrap();
+        let graph_path = temp.path().join("kg.graph");
+        let db_path = temp.path().join("magellan.db");
+
+        let magellan_id = setup_fts5_db(&db_path, "unique_resolve_target");
+        let kg = KnowledgeGraph::open(&graph_path, &db_path).unwrap();
+
+        let sym_id = kg
+            .add_symbol(
+                "unique_resolve_target",
+                "Function",
+                "crate::unique_resolve_target",
+                "src/lib.rs",
+                1,
+                0,
+                10,
+                "Rust",
+                None,
+            )
+            .unwrap();
+        kg.insert_bridge_entry(sym_id, magellan_id, "kg.graph")
+            .unwrap();
+
+        let result = kg.resolve_fts5("unique_resolve_target").unwrap();
+        assert!(
+            result.is_some(),
+            "resolve_fts5 should find node via FTS5 index and bridge"
+        );
+        assert_eq!(result, Some(sym_id));
     }
 }

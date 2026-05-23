@@ -316,14 +316,40 @@ impl UnifiedGraphStore {
     /// # Returns
     ///
     /// The assigned symbol ID
-    pub async fn insert_symbol(&self, _symbol: &Symbol) -> Result<SymbolId> {
-        // Note: Since SqliteGraph uses interior mutability and is not Send/Sync,
-        // we need to open a new graph connection for each operation in async context.
-        // In a production implementation, you would use a connection pool or
-        // a dedicated sync thread for graph operations.
+    pub async fn insert_symbol(&self, symbol: &Symbol) -> Result<SymbolId> {
+        let config = match self.backend_kind {
+            BackendKind::SQLite => GraphConfig::sqlite(),
+            BackendKind::NativeV3 => GraphConfig::native(),
+        };
+        let backend = open_graph(&self.db_path, &config)
+            .map_err(|e| ForgeError::DatabaseError(format!("Failed to open graph: {}", e)))?;
 
-        // Placeholder implementation - returns a dummy ID
-        Ok(SymbolId(1))
+        let kind = match symbol.kind {
+            SymbolKind::Function | SymbolKind::Method => "fn",
+            SymbolKind::Struct => "struct",
+            SymbolKind::Enum => "enum",
+            SymbolKind::Trait => "trait",
+            SymbolKind::Impl => "impl",
+            SymbolKind::Module => "module",
+            SymbolKind::TypeAlias => "type",
+            SymbolKind::Constant | SymbolKind::Static => "const",
+            SymbolKind::Parameter | SymbolKind::LocalVariable | SymbolKind::Field => "variable",
+            SymbolKind::Macro => "macro",
+            SymbolKind::Use => "use",
+        };
+
+        let node = NodeSpec {
+            kind: kind.to_string(),
+            name: symbol.name.to_string(),
+            file_path: Some(symbol.location.file_path.to_string_lossy().into_owned()),
+            data: symbol.metadata.clone(),
+        };
+
+        let id = backend
+            .insert_node(node)
+            .map_err(|e| ForgeError::DatabaseError(format!("Insert node failed: {}", e)))?;
+
+        Ok(SymbolId(id))
     }
 
     /// Insert a reference between symbols.
@@ -361,58 +387,43 @@ impl UnifiedGraphStore {
     ///
     /// List of matching symbols
     pub async fn query_symbols(&self, name: &str) -> Result<Vec<Symbol>> {
-        // Placeholder - search through codebase files directly
-        self.search_codebase_files(name).await
-    }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
 
-    /// Search codebase files for symbols matching a pattern.
-    async fn search_codebase_files(&self, pattern: &str) -> Result<Vec<Symbol>> {
-        use tokio::fs;
+        let pattern = format!("%{}%", name);
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, kind, name, file_path FROM graph_entities WHERE name LIKE ?1 LIMIT 50",
+            )
+            .map_err(|e| ForgeError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
-        let mut symbols = Vec::new();
-        let mut entries = fs::read_dir(&self.codebase_path)
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read codebase: {}", e)))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| ForgeError::DatabaseError(format!("Failed to read entry: {}", e)))?
-        {
-            let path = entry.path();
-            if path.extension().map(|e| e == "rs").unwrap_or(false) {
-                if let Ok(content) = fs::read_to_string(&path).await {
-                    for (line_num, line) in content.lines().enumerate() {
-                        if line.contains(pattern) {
-                            // Extract potential symbol name
-                            let name = line
-                                .split_whitespace()
-                                .find(|w| w.contains(pattern))
-                                .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'))
-                                .unwrap_or(pattern)
-                                .to_string();
-
-                            symbols.push(Symbol {
-                                id: SymbolId(symbols.len() as i64 + 1),
-                                name: Arc::from(name.clone()),
-                                fully_qualified_name: Arc::from(name.clone()),
-                                kind: SymbolKind::Function,
-                                language: Language::Rust,
-                                location: Location {
-                                    file_path: path.clone(),
-                                    byte_start: 0,
-                                    byte_end: line.len() as u32,
-                                    line_number: line_num + 1,
-                                },
-                                parent_id: None,
-                                metadata: serde_json::Value::Null,
-                            });
-                            break; // Only first match per file for now
-                        }
-                    }
-                }
-            }
-        }
+        let symbols = stmt
+            .query_map(rusqlite::params![pattern], |row| {
+                let id: i64 = row.get(0)?;
+                let sym_name: String = row.get(2)?;
+                let file_path: Option<String> = row.get(3)?;
+                Ok((id, sym_name, file_path))
+            })
+            .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?
+            .flatten()
+            .map(|(id, sym_name, file_path)| Symbol {
+                id: SymbolId(id),
+                name: Arc::from(sym_name.as_str()),
+                fully_qualified_name: Arc::from(sym_name.as_str()),
+                kind: SymbolKind::Function,
+                language: Language::Rust,
+                location: Location {
+                    file_path: file_path
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("")),
+                    byte_start: 0,
+                    byte_end: 0,
+                    line_number: 0,
+                },
+                parent_id: None,
+                metadata: serde_json::Value::Null,
+            })
+            .collect();
 
         Ok(symbols)
     }
@@ -435,8 +446,17 @@ impl UnifiedGraphStore {
     /// # Arguments
     ///
     /// * `id` - The symbol ID to check
-    pub async fn symbol_exists(&self, _id: SymbolId) -> Result<bool> {
-        Ok(false)
+    pub async fn symbol_exists(&self, id: SymbolId) -> Result<bool> {
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+        let exists: i64 = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM graph_entities WHERE id = ?1)",
+                rusqlite::params![id.0],
+                |row| row.get(0),
+            )
+            .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?;
+        Ok(exists > 0)
     }
 
     /// Query references for a specific symbol.
@@ -874,5 +894,61 @@ mod tests {
         let project = std::path::Path::new("/");
         let db = default_db_path(project);
         assert!(db.to_string_lossy().ends_with(".magellan/graph.db"));
+    }
+
+    fn make_symbol(name: &str) -> Symbol {
+        Symbol {
+            id: SymbolId(0),
+            name: Arc::from(name),
+            fully_qualified_name: Arc::from(name),
+            kind: SymbolKind::Function,
+            language: Language::Rust,
+            location: Location {
+                file_path: PathBuf::from("src/lib.rs"),
+                byte_start: 0,
+                byte_end: 10,
+                line_number: 1,
+            },
+            parent_id: None,
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    async fn isolated_store() -> (UnifiedGraphStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = UnifiedGraphStore::open_with_path(dir.path(), &db_path, BackendKind::SQLite)
+            .await
+            .unwrap();
+        (store, dir)
+    }
+
+    #[tokio::test]
+    async fn test_insert_symbol_unique_ids() {
+        let (store, _dir) = isolated_store().await;
+        let id1 = store.insert_symbol(&make_symbol("alpha_fn")).await.unwrap();
+        let id2 = store.insert_symbol(&make_symbol("beta_fn")).await.unwrap();
+        assert_ne!(id1, id2, "each insert should return a unique ID");
+    }
+
+    #[tokio::test]
+    async fn test_symbol_exists_after_insert() {
+        let (store, _dir) = isolated_store().await;
+        let id = store.insert_symbol(&make_symbol("check_fn")).await.unwrap();
+        assert!(
+            store.symbol_exists(id).await.unwrap(),
+            "symbol should exist after insert"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_query_symbols_finds_inserted() {
+        let (store, _dir) = isolated_store().await;
+        store
+            .insert_symbol(&make_symbol("my_unique_query_target"))
+            .await
+            .unwrap();
+        let results = store.query_symbols("my_unique_query_target").await.unwrap();
+        assert!(!results.is_empty(), "query should find the inserted symbol");
     }
 }
