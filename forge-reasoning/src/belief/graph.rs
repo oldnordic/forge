@@ -13,6 +13,7 @@ use crate::hypothesis::types::HypothesisId;
 ///
 /// Edge direction: A -> B means "A depends on B"
 /// So B is a "dependee" of A, and A is a "dependent" of B
+#[derive(Clone)]
 pub struct BeliefGraph {
     graph: DiGraph<HypothesisId, ()>,
     node_indices: HashMap<HypothesisId, NodeIndex>,

@@ -267,7 +267,8 @@ impl WorkflowBuilder {
     ) -> Result<crate::workflow::executor::WorkflowExecutor, WorkflowError> {
         let forge = self.forge.clone();
         let workflow = self.build()?;
-        let mut executor = crate::workflow::executor::WorkflowExecutor::new(workflow);
+        let mut executor = crate::workflow::executor::WorkflowExecutor::new(workflow)
+            .with_tool_registry(crate::workflow::tools::ToolRegistry::with_standard_tools());
         if let Some(f) = forge {
             executor = executor.with_forge(f);
         }
@@ -550,5 +551,20 @@ mod tests {
 
         let result = executor.execute().await.unwrap();
         assert!(result.success, "task must receive forge in context");
+    }
+
+    // ── INT-8: ToolRegistry populated in build_executor ──────────────────
+
+    #[test]
+    fn test_build_executor_has_default_tool_registry() {
+        let executor = WorkflowBuilder::new()
+            .add_task(Box::new(MockTask::new("t", "Task")))
+            .build_executor()
+            .unwrap();
+
+        assert!(
+            executor.tool_registry().is_some(),
+            "build_executor must set a default ToolRegistry"
+        );
     }
 }

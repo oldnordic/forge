@@ -38,6 +38,19 @@ pub enum AgentPhase {
     Commit,
 }
 
+/// A lightweight snapshot of the agent state after a completed phase.
+///
+/// Used to implement the INT-9 per-phase checkpoint mechanism.  Each
+/// entry records which phase completed and when, giving the agent a
+/// resumable breadcrumb trail.
+#[derive(Clone, Debug)]
+pub struct AgentLoopCheckpoint {
+    /// Name of the phase that just completed (e.g. "observe", "plan")
+    pub phase: String,
+    /// Wall-clock time of checkpoint creation
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 /// Result of a complete agent loop execution.
 #[derive(Clone, Debug)]
 pub struct LoopResult {
@@ -79,6 +92,10 @@ pub struct AgentLoop {
     policies: Vec<crate::policy::Policy>,
     /// Codebase-level context for enriching LLM prompts
     context: crate::context::AgentContext,
+    /// Gap hints from KnowledgeGapAnalyzer, surfaced to the planner
+    gap_hints: Vec<String>,
+    /// Per-phase checkpoint log (INT-9)
+    checkpoints: Vec<AgentLoopCheckpoint>,
 }
 
 impl AgentLoop {
@@ -107,6 +124,8 @@ impl AgentLoop {
             current_hypothesis: None,
             policies: Vec::new(),
             context,
+            gap_hints: Vec::new(),
+            checkpoints: Vec::new(),
         }
     }
 
@@ -137,6 +156,54 @@ impl AgentLoop {
     /// Returns the reasoning system for querying hypothesis state.
     pub fn reasoning(&self) -> &forge_reasoning::ReasoningSystem {
         &self.reasoning
+    }
+
+    /// Returns knowledge gap hints populated by the last observe phase.
+    pub fn gap_hints(&self) -> &[String] {
+        &self.gap_hints
+    }
+
+    /// Returns the per-phase checkpoint log from the most recent run.
+    pub fn checkpoints(&self) -> &[AgentLoopCheckpoint] {
+        &self.checkpoints
+    }
+
+    /// Records a phase checkpoint.
+    fn save_phase_checkpoint(&mut self, phase: &str) {
+        self.checkpoints.push(AgentLoopCheckpoint {
+            phase: phase.to_string(),
+            timestamp: Utc::now(),
+        });
+    }
+
+    /// Analyzes observation quality and registers knowledge gaps.
+    ///
+    /// Runs after `observe_phase` to surface missing-information gaps (e.g., no
+    /// symbols found) to the planner via `gap_hints`.
+    async fn analyze_gaps(&mut self, observation: &crate::observe::Observation) {
+        use forge_reasoning::{GapCriticality, GapType, KnowledgeGapAnalyzer};
+
+        let board = Arc::new(self.reasoning.board.clone());
+        let graph = Arc::new(self.reasoning.graph.clone());
+        let mut analyzer = KnowledgeGapAnalyzer::new(board, graph);
+
+        if observation.symbols.is_empty() {
+            let _ = analyzer
+                .register_gap(
+                    "No symbols found in observation — codebase may be empty or query too vague"
+                        .to_string(),
+                    GapCriticality::High,
+                    GapType::MissingInformation,
+                    self.current_hypothesis,
+                )
+                .await;
+        }
+
+        let suggestions = analyzer.get_suggestions(true).await;
+        self.gap_hints = suggestions
+            .into_iter()
+            .map(|s| format!("gap[{:.2}]: {}", s.priority, s.rationale))
+            .collect();
     }
 
     /// Executes a workflow using this loop's Forge SDK instance.
@@ -182,6 +249,7 @@ impl AgentLoop {
 
         // Auto-store observed symbols to atheneum (fire-and-forget)
         self.store_observation_discoveries(&observation).await;
+        self.save_phase_checkpoint("observe");
 
         // Phase 2: Constrain
         let constrained = match self.constrain_phase(observation).await {
@@ -191,6 +259,7 @@ impl AgentLoop {
                 return Err(e);
             }
         };
+        self.save_phase_checkpoint("constrain");
 
         // Phase 3: Plan
         let mut plan = match self.plan_phase(constrained.clone()).await {
@@ -200,6 +269,7 @@ impl AgentLoop {
                 return Err(e);
             }
         };
+        self.save_phase_checkpoint("plan");
 
         // Phases 4 + 5 with verify→fix retry loop
         let mut attempt = 0u32;
@@ -219,6 +289,7 @@ impl AgentLoop {
                     return Err(e);
                 }
             };
+            self.save_phase_checkpoint("mutate");
 
             // Phase 5: Verify
             let verification = match self.verify_phase(mutation_result).await {
@@ -228,6 +299,7 @@ impl AgentLoop {
                     return Err(e);
                 }
             };
+            self.save_phase_checkpoint("verify");
 
             if verification.passed || attempt >= self.max_fix_attempts {
                 break verification;
@@ -359,6 +431,8 @@ impl AgentLoop {
             self.current_hypothesis = Some(id);
         }
 
+        self.analyze_gaps(&observation).await;
+
         Ok(observation)
     }
 
@@ -422,7 +496,9 @@ impl AgentLoop {
         constrained: ConstrainedPlan,
     ) -> Result<ExecutionPlan, crate::AgentError> {
         // Create planner
-        let mut planner = crate::planner::Planner::new().with_context(&self.context);
+        let mut planner = crate::planner::Planner::new()
+            .with_context(&self.context)
+            .with_gap_hints(&self.gap_hints);
         if let Some(ref llm) = self.llm {
             planner = planner.with_llm(llm.clone()).with_generator(Arc::new(
                 crate::generate::Generator::new(self.forge.clone(), llm.clone()),
@@ -474,6 +550,20 @@ impl AgentLoop {
                 (0.8, 0.2)
             };
             let _ = self.reasoning.board.update_with_evidence(id, lh, lnh).await;
+
+            // Register each plan step as a sub-hypothesis and link it to the main
+            // hypothesis so BeliefGraph captures inter-step dependencies.
+            for step in &ordered_steps {
+                let step_desc = format!("step: {:?}", step.operation);
+                if let Ok(step_id) = self
+                    .reasoning
+                    .board
+                    .propose_with_max_uncertainty(step_desc)
+                    .await
+                {
+                    let _ = self.reasoning.add_dependency(id, step_id).await;
+                }
+            }
         }
 
         // Generate rollback plan
@@ -1389,6 +1479,135 @@ mod tests {
         assert!(
             !evidence.is_empty(),
             "verify_phase must attach structured evidence via VerificationRunner"
+        );
+    }
+
+    // ── INT-4: KnowledgeGapAnalyzer wired after observe ──────────────────
+
+    #[tokio::test]
+    async fn test_observe_phase_registers_knowledge_gaps() {
+        let temp = TempDir::new().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge));
+
+        // Empty dir → observer finds 0 symbols → gap analyzer must register a gap
+        let _ = agent_loop.observe_phase("add a parser function").await;
+
+        assert!(
+            !agent_loop.gap_hints().is_empty(),
+            "gap_hints must be non-empty after observe on empty dir"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gap_hints_appear_in_planner_prompt() {
+        use crate::llm::CapturingMockProvider;
+        use std::sync::Arc;
+
+        let temp = TempDir::new().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+        let capturing = Arc::new(CapturingMockProvider::new(
+            r#"[{"operation":"inspect","symbol_name":"foo","symbol_id":1}]"#,
+        ));
+        let mut agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_llm(capturing.clone() as Arc<dyn crate::llm::LlmProvider>);
+
+        // Populate gap_hints via observe_phase
+        let _ = agent_loop.observe_phase("add parser").await;
+
+        // Build a minimal ConstrainedPlan and call plan_phase
+        let obs = crate::observe::Observation {
+            symbols: vec![],
+            query: "add parser".to_string(),
+            summary: None,
+        };
+        let constrained = crate::ConstrainedPlan {
+            observation: obs,
+            policy_violations: vec![],
+        };
+        let _ = agent_loop.plan_phase(constrained).await;
+
+        let prompt = capturing
+            .last_prompt
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_default();
+        assert!(
+            prompt.to_lowercase().contains("gap") || prompt.to_lowercase().contains("missing"),
+            "planner prompt must contain gap hints; got: {:?}",
+            &prompt[..prompt.len().min(200)]
+        );
+    }
+
+    // ── INT-5: BeliefGraph dependency edges ──────────────────────────────
+
+    #[tokio::test]
+    async fn test_plan_phase_registers_step_dependencies_in_belief_graph() {
+        use crate::llm::MockProvider;
+
+        let temp = TempDir::new().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+        // Two-step plan: inspect then modify — produces an ordering dependency
+        let mock_llm = Arc::new(MockProvider::new(
+            r#"[{"operation":"inspect","symbol_name":"foo","symbol_id":1},{"operation":"modify","file":"src/main.rs","start":1,"end":5,"replacement":"fn foo() {}"}]"#,
+        ));
+        let mut agent_loop =
+            AgentLoop::new(Arc::new(forge)).with_llm(mock_llm as Arc<dyn crate::llm::LlmProvider>);
+
+        // Register main hypothesis (normally set by observe_phase)
+        let hyp_id = agent_loop
+            .reasoning
+            .board
+            .propose_with_max_uncertainty("modify foo")
+            .await
+            .unwrap();
+        agent_loop.current_hypothesis = Some(hyp_id);
+
+        let obs = crate::observe::Observation {
+            symbols: vec![],
+            query: "modify foo".to_string(),
+            summary: None,
+        };
+        let constrained = crate::ConstrainedPlan {
+            observation: obs,
+            policy_violations: vec![],
+        };
+        let _ = agent_loop.plan_phase(constrained).await;
+
+        // BeliefGraph must have dependency edges for the main hypothesis
+        let chain = agent_loop
+            .reasoning
+            .graph
+            .dependency_chain(hyp_id)
+            .unwrap_or_default();
+
+        assert!(
+            !chain.is_empty(),
+            "BeliefGraph must have dependency edges after plan_phase with multi-step plan"
+        );
+    }
+
+    // ── INT-9: per-phase checkpoint saving ───────────────────────────────
+
+    #[tokio::test]
+    async fn test_run_saves_checkpoints_per_phase() {
+        let temp = TempDir::new().unwrap();
+        let forge = Forge::open(temp.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge)).with_max_fix_attempts(1);
+
+        let _ = agent_loop.run("test checkpoint").await;
+
+        // At minimum the observe phase checkpoint must be saved
+        let cps = agent_loop.checkpoints();
+        assert!(
+            !cps.is_empty(),
+            "expected phase checkpoints after run; got 0"
+        );
+        assert!(
+            cps.iter().any(|c| c.phase == "observe"),
+            "expected 'observe' phase checkpoint; got: {:?}",
+            cps.iter().map(|c| &c.phase).collect::<Vec<_>>()
         );
     }
 }

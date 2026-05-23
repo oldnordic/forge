@@ -20,6 +20,8 @@ pub struct Planner {
     attempted: Vec<PlanStep>,
     /// Optional generator for enriching `Create` step content with real code.
     generator: Option<Arc<crate::generate::Generator>>,
+    /// Knowledge gap hints from KnowledgeGapAnalyzer, appended to LLM prompts.
+    gap_hints: Vec<String>,
 }
 
 impl Default for Planner {
@@ -36,6 +38,7 @@ impl Planner {
             context_prefix: None,
             attempted: Vec::new(),
             generator: None,
+            gap_hints: Vec::new(),
         }
     }
 
@@ -54,6 +57,13 @@ impl Planner {
     /// Sets the code generator used to enrich `Create` step content.
     pub fn with_generator(mut self, gen: Arc<crate::generate::Generator>) -> Self {
         self.generator = Some(gen);
+        self
+    }
+
+    /// Appends knowledge gap hints to LLM prompts so the planner is aware of
+    /// missing information flagged by `KnowledgeGapAnalyzer`.
+    pub fn with_gap_hints(mut self, hints: &[String]) -> Self {
+        self.gap_hints = hints.to_vec();
         self
     }
 
@@ -138,9 +148,15 @@ impl Planner {
             .as_deref()
             .map(|p| format!("{}\n", p))
             .unwrap_or_default();
+        let gap_text = if self.gap_hints.is_empty() {
+            String::new()
+        } else {
+            format!("Knowledge gaps:\n{}\n", self.gap_hints.join("\n"))
+        };
         let prompt = format!(
-            "{}Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}{}",
+            "{}{}Query: {}\nSymbols: [{}]\nCompilation/verification errors:\n{}{}",
             prefix,
+            gap_text,
             observation.query,
             symbol_list.join(", "),
             error_text,
@@ -212,9 +228,15 @@ Output ONLY a JSON array. No explanation.";
             .as_deref()
             .map(|p| format!("{}\n", p))
             .unwrap_or_default();
+        let gap_text = if self.gap_hints.is_empty() {
+            String::new()
+        } else {
+            format!("Knowledge gaps:\n{}\n", self.gap_hints.join("\n"))
+        };
         let prompt = format!(
-            "{}Query: {}\nSummary: {}\nSymbols: [{}]",
+            "{}{}Query: {}\nSummary: {}\nSymbols: [{}]",
             prefix,
+            gap_text,
             observation.query,
             summary_text,
             symbol_list.join(", ")
