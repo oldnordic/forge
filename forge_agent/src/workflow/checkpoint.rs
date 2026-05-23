@@ -1308,10 +1308,10 @@ mod tests {
 
     #[test]
     fn test_extract_confidence_with_compensation() {
-        use crate::workflow::task::{CompensationAction, TaskResult};
+        use crate::workflow::task::{ExecutableCompensation, TaskResult};
 
         let inner = Box::new(TaskResult::Success);
-        let compensation = CompensationAction::skip("test");
+        let compensation = ExecutableCompensation::skip("test");
         let result = TaskResult::WithCompensation {
             result: inner,
             compensation,
@@ -1325,10 +1325,10 @@ mod tests {
 
     #[test]
     fn test_extract_confidence_with_compensation_failed() {
-        use crate::workflow::task::{CompensationAction, TaskResult};
+        use crate::workflow::task::{ExecutableCompensation, TaskResult};
 
         let inner = Box::new(TaskResult::Failed("error".to_string()));
-        let compensation = CompensationAction::skip("test");
+        let compensation = ExecutableCompensation::skip("test");
         let result = TaskResult::WithCompensation {
             result: inner,
             compensation,

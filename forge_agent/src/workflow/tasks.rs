@@ -4,7 +4,8 @@
 //! and simple function wrapping.
 
 use crate::workflow::task::{
-    CompensationAction, TaskContext, TaskError, TaskId, TaskResult, WorkflowTask,
+    CompensationAction, ExecutableCompensation, TaskContext, TaskError, TaskId, TaskResult,
+    WorkflowTask,
 };
 use crate::workflow::tools::{FallbackHandler, FallbackResult, ToolError, ToolInvocation};
 use async_trait::async_trait;
@@ -583,7 +584,22 @@ impl WorkflowTask for FileEditTask {
         tokio::fs::write(&self.file_path, &self.new_content)
             .await
             .map_err(TaskError::Io)?;
-        Ok(TaskResult::Success)
+
+        // Capture path + original content so the executor can register a real undo
+        let path = self.file_path.clone();
+        let original = self.original_content.clone();
+        let compensation = ExecutableCompensation::with_undo(
+            format!("Restore original content of {}", path.display()),
+            move |_ctx| {
+                std::fs::write(&path, &original).map_err(TaskError::Io)?;
+                Ok(TaskResult::Success)
+            },
+        );
+
+        Ok(TaskResult::WithCompensation {
+            result: Box::new(TaskResult::Success),
+            compensation,
+        })
     }
 
     fn id(&self) -> TaskId {
@@ -1359,5 +1375,45 @@ mod tests {
         // Note: Audit event recording from within tasks is a limitation of the current design
         // The executor records events, but tasks can't easily record to the audit log
         // without mutable access. For now, we just verify the fallback works correctly.
+    }
+
+    #[tokio::test]
+    async fn test_file_edit_task_rollback_restores_content() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("target.rs");
+        tokio::fs::write(&file_path, "original content")
+            .await
+            .unwrap();
+
+        let task = FileEditTask::new(
+            TaskId::new("edit"),
+            "Edit target.rs".to_string(),
+            file_path.clone(),
+            "original content".to_string(),
+            "modified content".to_string(),
+        );
+
+        let context = TaskContext::new("wf-1", task.id());
+        let result = task.execute(&context).await.unwrap();
+
+        // After execute, file should contain new content
+        let on_disk = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(on_disk, "modified content");
+
+        // Execute must return WithCompensation so the executor can register the undo
+        let compensation = match result {
+            TaskResult::WithCompensation { compensation, .. } => compensation,
+            other => panic!("expected WithCompensation, got {:?}", other),
+        };
+
+        // Running the compensation must restore the original content
+        compensation.execute(&context).unwrap();
+        let restored = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(
+            restored, "original content",
+            "compensation must restore the original file content"
+        );
     }
 }

@@ -139,13 +139,12 @@ pub use gate::{Gate, GateAction, GateLanguage, GateResult, GateRunner};
 #[cfg(feature = "sqlite")]
 pub use plan::{PlanEdgeKind, PlanGraph, PlanNodeKind};
 pub use rollback::{
-    CompensationReport, ExecutableCompensation, RollbackEngine, RollbackError, RollbackReport,
-    RollbackStrategy,
+    CompensationReport, RollbackEngine, RollbackError, RollbackReport, RollbackStrategy,
 };
 pub use state::{TaskStatus, TaskSummary, WorkflowState, WorkflowStatus};
 pub use task::{
-    CompensationAction, CompensationType, Dependency, TaskContext, TaskError, TaskId, TaskResult,
-    WorkflowTask,
+    CompensationAction, CompensationType, Dependency, ExecutableCompensation, TaskContext,
+    TaskError, TaskId, TaskResult, WorkflowTask,
 };
 pub use tasks::{
     AgentLoopTask, FileEditTask, FunctionTask, GraphQueryTask, GraphQueryType, ShellCommandTask,

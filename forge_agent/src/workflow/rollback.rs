@@ -21,7 +21,8 @@
 use crate::audit::AuditLog;
 use crate::workflow::dag::Workflow;
 use crate::workflow::task::{
-    CompensationAction, CompensationType, TaskContext, TaskError, TaskId, TaskResult,
+    CompensationAction, CompensationType, ExecutableCompensation, TaskContext, TaskError, TaskId,
+    TaskResult,
 };
 use chrono::Utc;
 use petgraph::graph::NodeIndex;
@@ -32,71 +33,8 @@ use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
-/// Extended compensation action with undo function support.
-///
-/// This extends the base CompensationAction with executable undo logic.
-/// The base type is serializable for audit logs, while this type adds
-/// runtime execution capabilities.
-#[derive(Clone)]
-pub struct ExecutableCompensation {
-    /// Base compensation action
-    pub action: CompensationAction,
-    /// Optional undo function (used for UndoFunction type)
-    #[allow(clippy::type_complexity)]
-    undo_fn: Option<Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>>,
-}
-
-impl ExecutableCompensation {
-    /// Creates a new ExecutableCompensation from an action.
-    pub fn new(action: CompensationAction) -> Self {
-        Self {
-            action,
-            undo_fn: None,
-        }
-    }
-
-    /// Creates an UndoFunction compensation with the given undo function.
-    pub fn with_undo<F>(description: impl Into<String>, undo_fn: F) -> Self
-    where
-        F: Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync + 'static,
-    {
-        Self {
-            action: CompensationAction::undo(description),
-            undo_fn: Some(Arc::new(undo_fn)),
-        }
-    }
-
-    /// Creates a Skip compensation (no undo needed).
-    pub fn skip(description: impl Into<String>) -> Self {
-        Self::new(CompensationAction::skip(description))
-    }
-
-    /// Creates a Retry compensation (recommends retry instead of undo).
-    pub fn retry(description: impl Into<String>) -> Self {
-        Self::new(CompensationAction::retry(description))
-    }
-
-    /// Executes the compensation action.
-    pub fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
-        match self.action.action_type {
-            CompensationType::UndoFunction => {
-                if let Some(undo_fn) = &self.undo_fn {
-                    undo_fn(context)
-                } else {
-                    Ok(TaskResult::Skipped)
-                }
-            }
-            CompensationType::Skip => Ok(TaskResult::Skipped),
-            CompensationType::Retry => Ok(TaskResult::Skipped),
-        }
-    }
-}
-
-impl From<ExecutableCompensation> for CompensationAction {
-    fn from(exec: ExecutableCompensation) -> Self {
-        exec.action
-    }
-}
+// ExecutableCompensation is defined in task.rs (alongside TaskResult) so that
+// TaskResult::WithCompensation can hold it without a circular dependency.
 
 /// Compensation action for external tool side effects.
 ///
@@ -222,12 +160,33 @@ impl From<CompensationAction> for ToolCompensation {
             CompensationType::Skip => ToolCompensation::skip(action.description),
             CompensationType::Retry => ToolCompensation::retry(action.description),
             CompensationType::UndoFunction => {
-                // Note: Can't create undo from serializable action
-                // This is a no-op compensation
+                // CompensationAction carries no callable — this path is only hit when
+                // code mistakenly uses CompensationAction::undo() instead of
+                // ExecutableCompensation::with_undo().
                 ToolCompensation::skip(format!(
                     "{} (no undo function available)",
                     action.description
                 ))
+            }
+        }
+    }
+}
+
+impl From<ExecutableCompensation> for ToolCompensation {
+    fn from(exec: ExecutableCompensation) -> Self {
+        let description = exec.action.description.clone();
+        match exec.action.action_type {
+            CompensationType::Skip => ToolCompensation::skip(description),
+            CompensationType::Retry => ToolCompensation::retry(description),
+            CompensationType::UndoFunction => {
+                if let Some(undo_fn) = exec.into_undo_fn() {
+                    ToolCompensation {
+                        description,
+                        compensate: undo_fn,
+                    }
+                } else {
+                    ToolCompensation::skip(format!("{} (no undo function)", description))
+                }
             }
         }
     }

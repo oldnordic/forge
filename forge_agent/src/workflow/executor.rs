@@ -1893,7 +1893,7 @@ mod tests {
                 // Return WithCompensation to enable rollback testing
                 Ok(TaskResult::WithCompensation {
                     result: Box::new(TaskResult::Success),
-                    compensation: crate::workflow::task::CompensationAction::skip(format!(
+                    compensation: crate::workflow::task::ExecutableCompensation::skip(format!(
                         "Mock compensation for task {}",
                         self.name
                     )),

@@ -83,12 +83,12 @@ pub enum TaskResult {
     Failed(String),
     /// Task was skipped (e.g., due to failed hard dependency)
     Skipped,
-    /// Task result with compensation action (for Saga rollback)
+    /// Task result with an executable compensation (for Saga rollback)
     WithCompensation {
         /// The actual result of task execution
         result: Box<TaskResult>,
-        /// Compensation action to undo task side effects
-        compensation: CompensationAction,
+        /// Executable compensation that can restore side effects on rollback
+        compensation: ExecutableCompensation,
     },
 }
 
@@ -350,6 +350,92 @@ pub enum CompensationType {
     Skip,
     /// Recommend retry instead of compensation (transient failure)
     Retry,
+}
+
+/// Executable compensation with a runtime undo function.
+///
+/// Extends `CompensationAction` with a callable closure so that rollback
+/// can actually perform the compensating operation (e.g. restore a file).
+/// The base `CompensationAction` is serializable for audit logs; this type
+/// adds execution capability and is not serializable.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ExecutableCompensation {
+    /// Serializable metadata (for audit logs)
+    pub action: CompensationAction,
+    /// Optional undo function executed during rollback (not serialized)
+    #[serde(skip)]
+    #[allow(clippy::type_complexity)]
+    undo_fn: Option<Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>>,
+}
+
+impl fmt::Debug for ExecutableCompensation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExecutableCompensation")
+            .field("action", &self.action)
+            .field("has_undo_fn", &self.undo_fn.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for ExecutableCompensation {
+    fn eq(&self, other: &Self) -> bool {
+        self.action == other.action
+    }
+}
+
+impl Eq for ExecutableCompensation {}
+
+impl ExecutableCompensation {
+    /// Creates an `ExecutableCompensation` from a base action (no undo function).
+    pub fn new(action: CompensationAction) -> Self {
+        Self {
+            action,
+            undo_fn: None,
+        }
+    }
+
+    /// Creates an `UndoFunction` compensation with the given closure.
+    pub fn with_undo<F>(description: impl Into<String>, undo_fn: F) -> Self
+    where
+        F: Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync + 'static,
+    {
+        Self {
+            action: CompensationAction::undo(description),
+            undo_fn: Some(Arc::new(undo_fn)),
+        }
+    }
+
+    /// Creates a `Skip` compensation (no undo needed).
+    pub fn skip(description: impl Into<String>) -> Self {
+        Self::new(CompensationAction::skip(description))
+    }
+
+    /// Creates a `Retry` compensation.
+    pub fn retry(description: impl Into<String>) -> Self {
+        Self::new(CompensationAction::retry(description))
+    }
+
+    /// Executes the compensation. Returns `Skipped` if no undo function is set.
+    pub fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError> {
+        match self.action.action_type {
+            CompensationType::UndoFunction => {
+                if let Some(f) = &self.undo_fn {
+                    f(context)
+                } else {
+                    Ok(TaskResult::Skipped)
+                }
+            }
+            CompensationType::Skip | CompensationType::Retry => Ok(TaskResult::Skipped),
+        }
+    }
+
+    /// Returns the underlying `undo_fn` Arc, if any.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn into_undo_fn(
+        self,
+    ) -> Option<Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>> {
+        self.undo_fn
+    }
 }
 
 /// Error types for task execution.
