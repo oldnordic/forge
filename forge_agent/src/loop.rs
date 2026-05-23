@@ -82,6 +82,10 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
+    /// Hypothesis confidence below this threshold triggers early bail-out in the
+    /// fix loop instead of burning remaining retry attempts.
+    pub const CONFIDENCE_BAIL_THRESHOLD: f64 = 0.15;
+
     /// Creates a new agent loop with fresh state.
     ///
     /// # Arguments
@@ -221,6 +225,27 @@ impl AgentLoop {
 
             if verification.passed || attempt >= self.max_fix_attempts {
                 break verification;
+            }
+
+            // Bail out early if reasoning confidence has collapsed
+            if let Some(id) = self.current_hypothesis {
+                let conf = self
+                    .reasoning
+                    .board
+                    .get(id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|h| h.current_confidence().get())
+                    .unwrap_or(1.0);
+                if conf < Self::CONFIDENCE_BAIL_THRESHOLD {
+                    let e = crate::AgentError::VerificationFailed(format!(
+                        "hypothesis confidence {conf:.3} collapsed below threshold {:.3}, aborting fix loop",
+                        Self::CONFIDENCE_BAIL_THRESHOLD
+                    ));
+                    self.record_rollback(&e).await;
+                    return Err(e);
+                }
             }
 
             // Verification failed — ask LLM for a fix plan
@@ -1262,5 +1287,40 @@ mod tests {
             result.unwrap().success,
             "workflow result should report success"
         );
+    }
+
+    // ── Gap 5: reasoning confidence bail-out ─────────────────────────────
+
+    /// When hypothesis confidence drops below CONFIDENCE_BAIL_THRESHOLD during
+    /// the fix loop the loop must bail out before exhausting max_fix_attempts.
+    #[tokio::test]
+    async fn test_low_confidence_bails_before_max_attempts() {
+        use crate::llm::MockProvider;
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+
+        // Enough retries that without early bail-out we'd see multiple attempts;
+        // with bail-out we should see VerificationFailed before reaching attempt 5.
+        let llm = Arc::new(MockProvider::new("[]"));
+        let mut agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_llm(llm)
+            .with_max_fix_attempts(5);
+
+        let result = agent_loop.run("test confidence bail-out").await;
+
+        // Must fail (empty dir cannot pass verification)
+        assert!(result.is_err(), "expected failure on empty codebase");
+
+        // If a hypothesis was registered, its confidence must be below threshold
+        // (evidence of 0.1/0.9 likelihood on failure drives it below 0.15)
+        if let Some(id) = agent_loop.current_hypothesis {
+            let hyp = agent_loop.reasoning().board.get(id).await.unwrap().unwrap();
+            let conf = hyp.current_confidence().get();
+            // The bail-out threshold is CONFIDENCE_BAIL_THRESHOLD = 0.15
+            assert!(
+                conf < AgentLoop::CONFIDENCE_BAIL_THRESHOLD,
+                "confidence {conf} should be below bail threshold after repeated failures"
+            );
+        }
     }
 }

@@ -5,12 +5,15 @@
 
 use crate::Result;
 use forge_core::Forge;
+use std::fmt;
 use std::sync::Arc;
+
+type CustomValidatorFn = Arc<dyn Fn(&Diff) -> Vec<PolicyViolation> + Send + Sync>;
 
 /// Policy for constraint validation.
 ///
 /// Policies define rules that must be satisfied before mutations are applied.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Policy {
     /// No unsafe code in public API
     NoUnsafeInPublicAPI,
@@ -21,8 +24,52 @@ pub enum Policy {
     /// Maximum cyclomatic complexity
     MaxComplexity(usize),
 
-    /// Custom policy with validation function
-    Custom { name: String, description: String },
+    /// Custom policy with a caller-supplied validation closure.
+    ///
+    /// Create with [`Policy::custom`].
+    Custom {
+        name: String,
+        description: String,
+        validator: CustomValidatorFn,
+    },
+}
+
+impl fmt::Debug for Policy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoUnsafeInPublicAPI => write!(f, "NoUnsafeInPublicAPI"),
+            Self::PreserveTests => write!(f, "PreserveTests"),
+            Self::MaxComplexity(n) => write!(f, "MaxComplexity({n})"),
+            Self::Custom {
+                name, description, ..
+            } => f
+                .debug_struct("Custom")
+                .field("name", name)
+                .field("description", description)
+                .finish(),
+        }
+    }
+}
+
+impl Policy {
+    /// Creates a custom policy backed by a synchronous validation closure.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Machine-readable policy identifier
+    /// * `description` - Human-readable description
+    /// * `validator` - Closure that inspects the diff and returns any violations
+    pub fn custom(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        validator: impl Fn(&Diff) -> Vec<PolicyViolation> + Send + Sync + 'static,
+    ) -> Self {
+        Self::Custom {
+            name: name.into(),
+            description: description.into(),
+            validator: Arc::new(validator),
+        }
+    }
 }
 
 impl Policy {
@@ -46,14 +93,8 @@ impl Policy {
                     violations.push(v);
                 }
             }
-            Policy::Custom { name, .. } => {
-                // Custom policies are not yet implemented
-                // In production, this would use a DSL or plugin system
-                violations.push(PolicyViolation {
-                    policy: name.clone(),
-                    message: "Custom policy validation not yet implemented".to_string(),
-                    location: None,
-                });
+            Policy::Custom { validator, .. } => {
+                violations.extend(validator(diff));
             }
         }
 
@@ -90,10 +131,7 @@ impl PolicyValidator {
         }
 
         Ok(PolicyReport {
-            policy: Policy::Custom {
-                name: "All".to_string(),
-                description: "Combined policy check".to_string(),
-            },
+            policy: Policy::custom("All", "Combined policy check", |_| vec![]),
             violations: all_violations.clone(),
             passed: all_violations.is_empty(),
         })
@@ -173,11 +211,9 @@ impl AllPolicies {
             all_violations.extend(report.violations);
         }
 
+        let n = self.policies.len();
         Ok(PolicyReport {
-            policy: Policy::Custom {
-                name: "All".to_string(),
-                description: format!("All {} policies must pass", self.policies.len()),
-            },
+            policy: Policy::custom("All", format!("All {n} policies must pass"), |_| vec![]),
             violations: all_violations.clone(),
             passed: all_violations.is_empty(),
         })
@@ -210,11 +246,13 @@ impl AnyPolicy {
             all_violations.extend(report.violations);
         }
 
+        let n = self.policies.len();
         Ok(PolicyReport {
-            policy: Policy::Custom {
-                name: "Any".to_string(),
-                description: format!("At least one of {} policies must pass", self.policies.len()),
-            },
+            policy: Policy::custom(
+                "Any",
+                format!("At least one of {n} policies must pass"),
+                |_| vec![],
+            ),
             violations: if any_passed {
                 Vec::new()
             } else {
@@ -503,18 +541,15 @@ mod tests {
 
         let policies = vec![
             Policy::NoUnsafeInPublicAPI,
-            Policy::Custom {
-                name: "AlwaysPass".to_string(),
-                description: "Always passes".to_string(),
-            },
+            Policy::custom("AlwaysPass", "Always passes", |_| vec![]),
         ];
 
         let any = AnyPolicy::new(policies);
         let report = any.validate(&forge, &diff).await.unwrap();
 
-        // Custom policy fails but Any still passes because first one also fails
-        // Actually with current implementation, Custom fails too
-        assert!(!report.passed);
+        // NoUnsafeInPublicAPI fails on `pub unsafe fn`, but AlwaysPass has no violations.
+        // AnyPolicy passes when at least one policy passes.
+        assert!(report.passed);
     }
 
     #[tokio::test]
@@ -532,5 +567,58 @@ mod tests {
 
         let count = count_tests(content);
         assert_eq!(count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_custom_policy_passing_validator() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = forge_core::Forge::open(temp.path()).await.unwrap();
+
+        // Validator that always passes (no violations)
+        let policy = Policy::custom("allow-all", "permits everything", |_diff| vec![]);
+
+        let diff = Diff {
+            file_path: std::path::PathBuf::from("src/lib.rs"),
+            original: "fn foo() {}".to_string(),
+            modified: "fn foo() { /* changed */ }".to_string(),
+            changes: vec![],
+        };
+
+        let report = policy.validate(&forge, &diff).await.unwrap();
+        assert!(
+            report.passed,
+            "custom passing validator should produce no violations"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_custom_policy_failing_validator() {
+        let temp = tempfile::tempdir().unwrap();
+        let forge = forge_core::Forge::open(temp.path()).await.unwrap();
+
+        // Validator that always fires a violation
+        let policy = Policy::custom("no-changes", "forbids any diff", |diff| {
+            vec![PolicyViolation::new(
+                "no-changes",
+                format!("file {} must not be modified", diff.file_path.display()),
+            )]
+        });
+
+        let diff = Diff {
+            file_path: std::path::PathBuf::from("src/lib.rs"),
+            original: "fn foo() {}".to_string(),
+            modified: "fn foo() { /* changed */ }".to_string(),
+            changes: vec![],
+        };
+
+        let report = policy.validate(&forge, &diff).await.unwrap();
+        assert!(
+            !report.passed,
+            "custom failing validator should produce violations"
+        );
+        assert_eq!(report.violations.len(), 1);
+        assert!(report.violations[0]
+            .message
+            .contains("must not be modified"));
     }
 }
