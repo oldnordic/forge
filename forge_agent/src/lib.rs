@@ -483,6 +483,25 @@ impl Agent {
 
         agent_loop.run(query).await
     }
+
+    /// Executes a workflow DAG, injecting this agent's Forge SDK into every task context.
+    ///
+    /// Tasks like `AgentLoopTask` and `GraphQueryTask` require forge in their context;
+    /// this method ensures they receive it without the caller needing to wire it manually.
+    pub async fn run_workflow(
+        &self,
+        workflow: workflow::Workflow,
+    ) -> Result<workflow::WorkflowResult> {
+        let forge = self
+            .forge
+            .as_ref()
+            .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
+        workflow::WorkflowExecutor::new(workflow)
+            .with_forge(std::sync::Arc::new(forge.clone()))
+            .execute()
+            .await
+            .map_err(|e| AgentError::WorkflowFailed(e.to_string()))
+    }
 }
 
 // Transaction module (Phase 3 - Plan 3)
@@ -582,5 +601,43 @@ mod tests {
 
         // No .forge.toml → no envoy
         assert!(agent.envoy.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_agent_run_workflow_passes_forge() {
+        use crate::workflow::dag::Workflow;
+        use crate::workflow::task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
+        use async_trait::async_trait;
+
+        struct ForgeCheckTask;
+        #[async_trait]
+        impl WorkflowTask for ForgeCheckTask {
+            async fn execute(
+                &self,
+                ctx: &TaskContext,
+            ) -> std::result::Result<TaskResult, TaskError> {
+                if ctx.forge.is_some() {
+                    Ok(TaskResult::Success)
+                } else {
+                    Err(TaskError::ExecutionFailed("no forge".to_string()))
+                }
+            }
+            fn id(&self) -> TaskId {
+                TaskId::new("forge-check")
+            }
+            fn name(&self) -> &str {
+                "ForgeCheckTask"
+            }
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let agent = Agent::new(temp.path()).await.unwrap();
+
+        let mut workflow = Workflow::new();
+        workflow.add_task(Box::new(ForgeCheckTask));
+
+        let result = agent.run_workflow(workflow).await;
+        assert!(result.is_ok(), "run_workflow failed: {:?}", result.err());
+        assert!(result.unwrap().success);
     }
 }
