@@ -109,7 +109,14 @@ Available operations:\n\
 Output ONLY a JSON array. No explanation.";
 
         match llm.complete(&prompt, Some(system)).await {
-            Ok(resp) => Ok(parse_llm_steps(&resp).unwrap_or_default()),
+            Ok(resp) => {
+                let steps = parse_llm_steps(&resp).unwrap_or_default();
+                let deduped: Vec<PlanStep> = steps
+                    .into_iter()
+                    .filter(|s| !previous_steps.iter().any(|p| p.operation == s.operation))
+                    .collect();
+                Ok(deduped)
+            }
             Err(e) => {
                 tracing::warn!("LLM fix generation failed: {e}");
                 Ok(Vec::new())
@@ -432,7 +439,7 @@ Output ONLY a JSON array. No explanation.";
 }
 
 /// A step in the execution plan.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlanStep {
     /// Step description
     pub description: String,
@@ -441,7 +448,7 @@ pub struct PlanStep {
 }
 
 /// Operation to perform in a plan step.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PlanOperation {
     /// Rename a symbol
     Rename {
@@ -895,5 +902,102 @@ mod tests {
             .generate_fix_steps(&obs, &["error".to_string()], &[])
             .await;
         assert!(result.is_ok());
+    }
+
+    // ── Gap 7: retry memoization ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_dedup_filters_repeated_fix_step() {
+        use crate::llm::MockProvider;
+        let llm = Arc::new(MockProvider::new(
+            r#"[{"operation":"modify","file":"src/lib.rs","start":10,"end":20,"replacement":"fixed"}]"#,
+        ));
+        let planner = Planner::new().with_llm(llm);
+        let obs = crate::observe::Observation {
+            query: "fix error".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let prev = vec![PlanStep {
+            description: "Modify src/lib.rs:10-20".to_string(),
+            operation: PlanOperation::Modify {
+                file: "src/lib.rs".to_string(),
+                start: 10,
+                end: 20,
+                replacement: "fixed".to_string(),
+            },
+        }];
+        let result = planner
+            .generate_fix_steps(&obs, &["error".to_string()], &prev)
+            .await
+            .unwrap();
+        assert!(
+            result.is_empty(),
+            "repeated operation must be filtered out, got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dedup_keeps_new_fix_step() {
+        use crate::llm::MockProvider;
+        let llm = Arc::new(MockProvider::new(
+            r#"[{"operation":"modify","file":"src/lib.rs","start":30,"end":40,"replacement":"new_fix"}]"#,
+        ));
+        let planner = Planner::new().with_llm(llm);
+        let obs = crate::observe::Observation {
+            query: "fix error".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let prev = vec![PlanStep {
+            description: "Modify src/lib.rs:10-20".to_string(),
+            operation: PlanOperation::Modify {
+                file: "src/lib.rs".to_string(),
+                start: 10,
+                end: 20,
+                replacement: "old_fix".to_string(),
+            },
+        }];
+        let result = planner
+            .generate_fix_steps(&obs, &["error".to_string()], &prev)
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1, "new operation must pass through dedup");
+    }
+
+    #[tokio::test]
+    async fn test_dedup_mixed_new_and_repeated() {
+        use crate::llm::MockProvider;
+        let llm = Arc::new(MockProvider::new(
+            r#"[
+                {"operation":"modify","file":"src/lib.rs","start":10,"end":20,"replacement":"already_tried"},
+                {"operation":"create","path":"src/new.rs","content":"fn new_fix() {}"}
+            ]"#,
+        ));
+        let planner = Planner::new().with_llm(llm);
+        let obs = crate::observe::Observation {
+            query: "fix error".to_string(),
+            symbols: vec![],
+            summary: None,
+        };
+        let prev = vec![PlanStep {
+            description: "Modify src/lib.rs:10-20".to_string(),
+            operation: PlanOperation::Modify {
+                file: "src/lib.rs".to_string(),
+                start: 10,
+                end: 20,
+                replacement: "already_tried".to_string(),
+            },
+        }];
+        let result = planner
+            .generate_fix_steps(&obs, &["error".to_string()], &prev)
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1, "only the new operation should remain");
+        assert!(
+            matches!(&result[0].operation, PlanOperation::Create { path, .. } if path == "src/new.rs"),
+            "remaining step should be the Create, got: {:?}",
+            result[0].operation
+        );
     }
 }
