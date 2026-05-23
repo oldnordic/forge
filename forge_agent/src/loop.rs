@@ -325,41 +325,56 @@ impl AgentLoop {
     }
 
     /// Constraint phase - apply policy rules.
-    async fn constrain_phase(
+    pub(crate) async fn constrain_phase(
         &mut self,
         observation: Observation,
     ) -> Result<ConstrainedPlan, crate::AgentError> {
-        // Create validator — diff will be populated after plan phase in future versions
         let validator = PolicyValidator::new((*self.forge).clone());
-        let diff = crate::policy::Diff {
-            file_path: std::path::PathBuf::from(&observation.query),
-            original: String::new(),
-            modified: format!("query: {}", observation.query),
-            changes: Vec::new(),
-        };
         let policies = self.policies.clone();
+        let mut all_violations = Vec::new();
 
-        let report = validator
-            .validate(&diff, &policies)
-            .await
-            .map_err(|e| crate::AgentError::PolicyViolation(e.to_string()))?;
+        // Collect unique file paths from observed symbols and run policies against
+        // their current content. This catches pre-existing violations in files the
+        // query will touch before any mutation is applied.
+        let mut seen = std::collections::HashSet::new();
+        for symbol in &observation.symbols {
+            let path = &symbol.location.file_path;
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            let content = match tokio::fs::read_to_string(path).await {
+                Ok(c) => c,
+                Err(_) => continue, // new file — nothing to pre-check
+            };
+            let diff = crate::policy::Diff {
+                file_path: path.clone(),
+                original: content.clone(),
+                modified: content,
+                changes: Vec::new(),
+            };
+            let report = validator
+                .validate(&diff, &policies)
+                .await
+                .map_err(|e| crate::AgentError::PolicyViolation(e.to_string()))?;
+            all_violations.extend(report.violations);
+        }
 
         let policy_count = policies.len();
-        let violations = report.violations.len();
+        let violation_count = all_violations.len();
 
         // Record audit event
         self.audit_log
             .record(AuditEvent::Constrain {
                 timestamp: Utc::now(),
                 policy_count,
-                violations,
+                violations: violation_count,
             })
             .await
             .map_err(|e| crate::AgentError::PolicyViolation(e.to_string()))?;
 
         Ok(ConstrainedPlan {
             observation,
-            policy_violations: report.violations,
+            policy_violations: all_violations,
         })
     }
 
@@ -576,20 +591,18 @@ impl AgentLoop {
     }
 
     /// Commit phase - finalize transaction.
-    async fn commit_phase(
+    pub(crate) async fn commit_phase(
         &mut self,
-        verification: VerificationResult,
+        _verification: VerificationResult,
     ) -> Result<CommitResult, crate::AgentError> {
-        // Extract files from diagnostics
-        let files: Vec<std::path::PathBuf> = verification
-            .diagnostics
-            .iter()
-            .filter_map(|d| {
-                d.split(':')
-                    .next()
-                    .map(|s| std::path::PathBuf::from(s.trim()))
-            })
-            .collect();
+        // Extract modified files from the transaction snapshots.
+        // The transaction holds the authoritative record of what was changed;
+        // verification.diagnostics contains error messages, not file paths.
+        let files: Vec<std::path::PathBuf> = self
+            .transaction
+            .as_ref()
+            .map(|txn| txn.snapshots().iter().map(|s| s.path.clone()).collect())
+            .unwrap_or_default();
 
         // Create committer
         let committer = crate::commit::Committer::new();
@@ -1109,6 +1122,80 @@ mod tests {
         assert!(
             violations.is_empty(),
             "safe file should produce no violations"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_constrain_phase_reads_real_file_content() {
+        use crate::observe::{Observation, ObservedSymbol};
+        use forge_core::types::{Location, SymbolId, SymbolKind};
+
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge))
+            .with_policies(vec![crate::policy::Policy::NoUnsafeInPublicAPI]);
+
+        // Write a file that violates NoUnsafeInPublicAPI
+        let unsafe_file = temp_dir.path().join("danger.rs");
+        tokio::fs::write(&unsafe_file, "pub unsafe fn danger() {}")
+            .await
+            .unwrap();
+
+        // Build an observation whose symbol points at that real file.
+        // The query itself does NOT contain "unsafe" — so the current fake-diff
+        // path will produce zero violations (RED).
+        let observation = Observation {
+            query: "refactor danger module".to_string(),
+            symbols: vec![ObservedSymbol {
+                id: SymbolId(1),
+                name: "danger".to_string(),
+                kind: SymbolKind::Function,
+                location: Location {
+                    file_path: unsafe_file.clone(),
+                    byte_start: 0,
+                    byte_end: 0,
+                    line_number: 1,
+                },
+            }],
+            summary: None,
+        };
+
+        let constrained = agent_loop.constrain_phase(observation).await.unwrap();
+
+        assert!(
+            !constrained.policy_violations.is_empty(),
+            "constrain_phase must detect NoUnsafeInPublicAPI from the real file, not from the query string"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_commit_phase_uses_transaction_snapshots_not_diagnostics() {
+        use crate::transaction::Transaction;
+        let temp_dir = TempDir::new().unwrap();
+        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        let mut agent_loop = AgentLoop::new(Arc::new(forge));
+
+        // Write a real file and snapshot it in the transaction
+        let modified_file = temp_dir.path().join("modified.rs");
+        tokio::fs::write(&modified_file, "pub fn foo() {}")
+            .await
+            .unwrap();
+        let mut txn = Transaction::begin().await.unwrap();
+        txn.snapshot_file(&modified_file).await.unwrap();
+        agent_loop.transaction = Some(txn);
+
+        // Call commit_phase with EMPTY diagnostics — simulates a passing verification.
+        // The bug: files_committed is derived from diagnostics (empty), so git stages nothing.
+        let verification = crate::VerificationResult {
+            passed: true,
+            diagnostics: vec![],
+            suggestions: None,
+        };
+        let result = agent_loop.commit_phase(verification).await.unwrap();
+
+        assert!(
+            result.files_committed.contains(&modified_file),
+            "commit_phase must derive committed files from transaction snapshots, not diagnostics"
         );
     }
 }
