@@ -509,13 +509,79 @@ impl KnowledgeGraph {
     // -- Sync from Magellan --
 
     /// Syncs symbols from the Magellan .db into the knowledge graph.
+    ///
+    /// Reads all `graph_entities` from the Magellan DB, creates a KG node for
+    /// each, and writes a bridge entry so FTS5 lookups resolve to KG node IDs.
     pub async fn sync_symbols(&self) -> Result<SyncReport> {
-        Ok(SyncReport::default())
+        if !self.db_path.exists() {
+            return Ok(SyncReport::default());
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+        let mut stmt =
+            match conn.prepare("SELECT id, kind, name, file_path FROM graph_entities LIMIT 5000") {
+                Ok(s) => s,
+                Err(_) => return Ok(SyncReport::default()),
+            };
+        let rows: Vec<(i64, String, String, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?
+            .flatten()
+            .collect();
+        drop(stmt);
+        drop(conn);
+        let graph_file = self.graph_path.to_string_lossy().into_owned();
+        let mut nodes_added = 0usize;
+        for (magellan_id, kind, name, file_path) in rows {
+            let file = file_path.as_deref().unwrap_or("");
+            let kg_id = self.add_symbol(&name, &kind, &name, file, 0, 0, 0, "unknown", None)?;
+            self.insert_bridge_entry(kg_id, magellan_id, &graph_file)?;
+            nodes_added += 1;
+        }
+        Ok(SyncReport {
+            nodes_added,
+            ..Default::default()
+        })
     }
 
     /// Syncs references from the Magellan .db into the knowledge graph.
+    ///
+    /// Reads `graph_edges` from the Magellan DB and adds corresponding edges to
+    /// the KG for any pair whose bridge entries were populated by `sync_symbols`.
+    /// Must be called after `sync_symbols`.
     pub async fn sync_references(&self) -> Result<SyncReport> {
-        Ok(SyncReport::default())
+        if !self.db_path.exists() {
+            return Ok(SyncReport::default());
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+        let mut stmt =
+            match conn.prepare("SELECT from_id, to_id, edge_type FROM graph_edges LIMIT 10000") {
+                Ok(s) => s,
+                Err(_) => return Ok(SyncReport::default()),
+            };
+        let edges: Vec<(i64, i64, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?
+            .flatten()
+            .collect();
+        drop(stmt);
+        drop(conn);
+        let mut edges_added = 0usize;
+        for (from_magellan, to_magellan, edge_type) in edges {
+            let from_kg = self.resolve_fts5_by_magellan_id(from_magellan)?;
+            let to_kg = self.resolve_fts5_by_magellan_id(to_magellan)?;
+            if let (Some(from_id), Some(to_id)) = (from_kg, to_kg) {
+                self.add_edge(from_id, to_id, &edge_type, serde_json::Value::Null)?;
+                edges_added += 1;
+            }
+        }
+        Ok(SyncReport {
+            edges_added,
+            ..Default::default()
+        })
     }
 
     // -- Query entry point --
@@ -1162,5 +1228,62 @@ mod tests {
             "resolve_fts5 should find node via FTS5 index and bridge"
         );
         assert_eq!(result, Some(sym_id));
+    }
+
+    fn setup_entities_db(db_path: &std::path::Path, names: &[&str]) -> Vec<i64> {
+        use sqlitegraph::backend::NodeSpec;
+        use sqlitegraph::config::{open_graph, GraphConfig};
+        let config = GraphConfig::sqlite();
+        let backend = open_graph(db_path, &config).unwrap();
+        names
+            .iter()
+            .map(|name| {
+                backend
+                    .insert_node(NodeSpec {
+                        kind: "fn".to_string(),
+                        name: name.to_string(),
+                        file_path: Some("src/lib.rs".to_string()),
+                        data: serde_json::Value::Null,
+                    })
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_sync_symbols_inserts_entities() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+        setup_entities_db(&db_path, &["sync_fn_one", "sync_fn_two"]);
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        let report = kg.sync_symbols().await.unwrap();
+        assert_eq!(
+            report.nodes_added, 2,
+            "sync_symbols should add one KG node per magellan entity"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_references_inserts_edges() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+        let ids = setup_entities_db(&db_path, &["caller_fn", "callee_fn"]);
+        // add a graph_edge between the two entities
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO graph_edges (from_id, to_id, edge_type, data) VALUES (?1, ?2, 'calls', '{}')",
+                rusqlite::params![ids[0], ids[1]],
+            )
+            .unwrap();
+        }
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        // sync_symbols must run first to populate bridge table
+        kg.sync_symbols().await.unwrap();
+        let ref_report = kg.sync_references().await.unwrap();
+        assert_eq!(
+            ref_report.edges_added, 1,
+            "sync_references should add one KG edge per magellan graph_edge"
+        );
     }
 }

@@ -503,12 +503,49 @@ impl UnifiedGraphStore {
 
     /// Get all symbols in the graph.
     pub async fn get_all_symbols(&self) -> Result<Vec<Symbol>> {
-        Ok(Vec::new())
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+        let mut stmt = conn
+            .prepare("SELECT id, kind, name, file_path FROM graph_entities LIMIT 1000")
+            .map_err(|e| ForgeError::DatabaseError(format!("Prepare failed: {}", e)))?;
+        let symbols = stmt
+            .query_map([], |row| {
+                let id: i64 = row.get(0)?;
+                let sym_name: String = row.get(2)?;
+                let file_path: Option<String> = row.get(3)?;
+                Ok((id, sym_name, file_path))
+            })
+            .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?
+            .flatten()
+            .map(|(id, sym_name, file_path)| Symbol {
+                id: SymbolId(id),
+                name: Arc::from(sym_name.as_str()),
+                fully_qualified_name: Arc::from(sym_name.as_str()),
+                kind: SymbolKind::Function,
+                language: Language::Rust,
+                location: Location {
+                    file_path: file_path
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("")),
+                    byte_start: 0,
+                    byte_end: 0,
+                    line_number: 0,
+                },
+                parent_id: None,
+                metadata: serde_json::Value::Null,
+            })
+            .collect();
+        Ok(symbols)
     }
 
     /// Get count of symbols in the graph.
     pub async fn symbol_count(&self) -> Result<usize> {
-        Ok(0)
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| ForgeError::DatabaseError(format!("Open db failed: {}", e)))?;
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM graph_entities", [], |row| row.get(0))
+            .map_err(|e| ForgeError::DatabaseError(format!("Query failed: {}", e)))?;
+        Ok(count as usize)
     }
 
     /// Scans and indexes cross-file references for Native V3 backend.
@@ -820,31 +857,69 @@ mod tests {
         store.insert_reference(&reference).await.unwrap();
     }
 
-    // Test symbol_exists returns false for placeholder implementation
+    // Test symbol_exists returns false for an unknown ID
     #[tokio::test]
-    async fn test_symbol_exists_placeholder() {
-        let store = UnifiedGraphStore::memory().await.unwrap();
-
-        // Placeholder always returns false
-        assert!(!store.symbol_exists(SymbolId(1)).await.unwrap());
+    async fn test_symbol_exists_unknown_id() {
+        let (store, _dir) = isolated_store().await;
+        assert!(!store.symbol_exists(SymbolId(99999)).await.unwrap());
     }
 
-    // Test get_all_symbols returns empty for placeholder
+    // Test get_all_symbols returns empty on fresh DB
     #[tokio::test]
-    async fn test_get_all_symbols_empty() {
-        let store = UnifiedGraphStore::memory().await.unwrap();
-
+    async fn test_get_all_symbols_empty_db() {
+        let (store, _dir) = isolated_store().await;
         let symbols = store.get_all_symbols().await.unwrap();
         assert!(symbols.is_empty());
     }
 
-    // Test symbol_count returns 0 for placeholder
+    // Test get_all_symbols returns inserted symbols
     #[tokio::test]
-    async fn test_symbol_count_zero() {
-        let store = UnifiedGraphStore::memory().await.unwrap();
+    async fn test_get_all_symbols_returns_inserted() {
+        let (store, _dir) = isolated_store().await;
+        store
+            .insert_symbol(&make_symbol("alpha_get_all"))
+            .await
+            .unwrap();
+        store
+            .insert_symbol(&make_symbol("beta_get_all"))
+            .await
+            .unwrap();
+        let symbols = store.get_all_symbols().await.unwrap();
+        assert_eq!(
+            symbols.len(),
+            2,
+            "get_all_symbols should return all inserted symbols"
+        );
+    }
 
-        let count = store.symbol_count().await.unwrap();
-        assert_eq!(count, 0);
+    // Test symbol_count returns 0 on fresh DB
+    #[tokio::test]
+    async fn test_symbol_count_empty_db() {
+        let (store, _dir) = isolated_store().await;
+        assert_eq!(store.symbol_count().await.unwrap(), 0);
+    }
+
+    // Test symbol_count returns correct count after inserts
+    #[tokio::test]
+    async fn test_symbol_count_after_inserts() {
+        let (store, _dir) = isolated_store().await;
+        store
+            .insert_symbol(&make_symbol("count_sym_a"))
+            .await
+            .unwrap();
+        store
+            .insert_symbol(&make_symbol("count_sym_b"))
+            .await
+            .unwrap();
+        store
+            .insert_symbol(&make_symbol("count_sym_c"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.symbol_count().await.unwrap(),
+            3,
+            "symbol_count should equal insert count"
+        );
     }
 
     // Test Clone implementation
