@@ -64,7 +64,8 @@ impl Runtime {
     ///
     /// Returns an error if the graph store cannot be initialized.
     pub async fn new(path: PathBuf) -> anyhow::Result<Self> {
-        let store = Arc::new(UnifiedGraphStore::open(&path).await?);
+        let store =
+            Arc::new(UnifiedGraphStore::open(&path, crate::storage::BackendKind::SQLite).await?);
         let indexer = IncrementalIndexer::new(Arc::clone(&store));
 
         // Default cache: 1000 entries, 5 minute TTL
@@ -179,8 +180,8 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::watcher::WatchEvent;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_runtime_creation() {
@@ -201,7 +202,10 @@ mod tests {
 
         let runtime = Runtime::new(path).await.unwrap();
 
-        runtime.cache.insert("test".to_string(), "value".to_string()).await;
+        runtime
+            .cache
+            .insert("test".to_string(), "value".to_string())
+            .await;
         let value = runtime.cache.get(&"test".to_string()).await;
 
         assert_eq!(value, Some("value".to_string()));
@@ -214,7 +218,9 @@ mod tests {
 
         let runtime = Runtime::new(path).await.unwrap();
 
-        runtime.indexer.queue(WatchEvent::Modified(PathBuf::from("src/lib.rs")));
+        runtime
+            .indexer
+            .queue(WatchEvent::Modified(PathBuf::from("src/lib.rs")));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert_eq!(runtime.pending_changes().await, 1);
@@ -230,10 +236,12 @@ mod tests {
 
         let runtime = Runtime::new(path).await.unwrap();
 
-        runtime.indexer.queue(WatchEvent::Created(PathBuf::from("test.rs")));
+        runtime
+            .indexer
+            .queue(WatchEvent::Created(PathBuf::from("test.rs")));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let stats = runtime.process_events().await.unwrap();
+        let _stats = runtime.process_events().await.unwrap();
         // Flush completed without error (stats may show 0 if backend is stub)
     }
 
@@ -284,7 +292,9 @@ mod tests {
         assert!(runtime.is_watching());
 
         // Queue a file change event manually (use src/ path to pass filter)
-        runtime.indexer.queue(WatchEvent::Created(PathBuf::from("src/main.rs")));
+        runtime
+            .indexer
+            .queue(WatchEvent::Created(PathBuf::from("src/main.rs")));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Verify indexer has pending change
@@ -292,7 +302,7 @@ mod tests {
         assert!(pending >= 1, "Expected pending changes but got {}", pending);
 
         // Process events
-        let stats = runtime.process_events().await.unwrap();
+        let _stats = runtime.process_events().await.unwrap();
         // Flush completed without error (stats may show 0 if backend is stub)
 
         // Verify pending changes are cleared
@@ -304,19 +314,24 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().to_path_buf();
 
-        let mut runtime = Runtime::new(path).await.unwrap();
+        let runtime = Runtime::new(path).await.unwrap();
 
         // Perform cache operation
-        runtime.cache.insert("query".to_string(), "result".to_string()).await;
+        runtime
+            .cache
+            .insert("query".to_string(), "result".to_string())
+            .await;
         let cached = runtime.cache.get(&"query".to_string()).await;
         assert_eq!(cached, Some("result".to_string()));
 
         // Queue file event (simulates watcher)
-        runtime.indexer.queue(WatchEvent::Modified(PathBuf::from("modified.rs")));
+        runtime
+            .indexer
+            .queue(WatchEvent::Modified(PathBuf::from("modified.rs")));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Flush indexer
-        let stats = runtime.process_events().await.unwrap();
+        let _stats = runtime.process_events().await.unwrap();
         // Flush completed without error (stats may show 0 if backend is stub)
 
         // Verify pool is accessible
@@ -380,11 +395,18 @@ mod tests {
 
         // Test with non-existent directory (UnifiedGraphStore should create it)
         let temp_dir = TempDir::new().unwrap();
-        let nonexistent = temp_dir.path().join("nonexistent").join("deep").join("path");
+        let nonexistent = temp_dir
+            .path()
+            .join("nonexistent")
+            .join("deep")
+            .join("path");
 
         // This should work because UnifiedGraphStore creates the directory
         let result = Runtime::new(nonexistent).await;
-        assert!(result.is_ok(), "Runtime should create non-existent directories");
+        assert!(
+            result.is_ok(),
+            "Runtime should create non-existent directories"
+        );
 
         // Verify runtime works
         let runtime = result.unwrap();

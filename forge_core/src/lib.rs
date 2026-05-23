@@ -49,9 +49,9 @@ pub mod knowledge;
 // Runtime layer modules
 pub mod cache;
 pub mod indexing;
+pub mod pool;
+pub mod runtime;
 pub mod watcher;
-// pub mod pool; // TODO: Re-enable when implemented
-// pub mod runtime; // TODO: Re-enable when implemented
 
 // Re-export sqlitegraph types for advanced usage
 pub use sqlitegraph::backend::{EdgeSpec, NodeSpec};
@@ -66,6 +66,8 @@ pub use types::{Location, SymbolId};
 // Re-export runtime module types
 pub use cache::QueryCache;
 pub use indexing::{FlushStats, IncrementalIndexer, PathFilter};
+pub use pool::{ConnectionPermit, ConnectionPool};
+pub use runtime::Runtime;
 pub use watcher::{WatchEvent, Watcher};
 
 use anyhow::anyhow;
@@ -238,10 +240,7 @@ impl ForgeBuilder {
         let resolved_db = if let Some(explicit) = self.db_path {
             explicit
         } else if let Some(dir) = self.db_dir {
-            let stem = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("graph");
+            let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("graph");
             dir.join(format!("{}.db", stem))
         } else {
             storage::default_db_path(&path)
@@ -264,13 +263,18 @@ mod tests {
     #[tokio::test]
     async fn test_forge_open_creates_database() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let db_path = temp_dir.path().join(".forge").join("graph.db");
+        let db_path = temp_dir.path().join("test-graph.db");
 
         // Verify database doesn't exist initially
         assert!(!db_path.exists());
 
-        // Open Forge - this creates database directory and file
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
+        // Open Forge with explicit db_path — never writes to ~/.magellan/ in tests
+        let forge = ForgeBuilder::new()
+            .path(temp_dir.path())
+            .db_path(db_path.clone())
+            .build()
+            .await
+            .unwrap();
 
         // Verify database was created
         assert!(db_path.exists());
@@ -288,9 +292,13 @@ mod tests {
     async fn test_forge_graph_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
-                .await
-                .unwrap(),
+            storage::UnifiedGraphStore::open_with_path(
+                temp_dir.path(),
+                temp_dir.path().join("test-graph.db"),
+                BackendKind::default(),
+            )
+            .await
+            .unwrap(),
         );
 
         let forge = Forge { store };
@@ -304,9 +312,13 @@ mod tests {
     async fn test_forge_search_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
-                .await
-                .unwrap(),
+            storage::UnifiedGraphStore::open_with_path(
+                temp_dir.path(),
+                temp_dir.path().join("test-graph.db"),
+                BackendKind::default(),
+            )
+            .await
+            .unwrap(),
         );
 
         let forge = Forge { store };
@@ -320,9 +332,13 @@ mod tests {
     async fn test_forge_cfg_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
-                .await
-                .unwrap(),
+            storage::UnifiedGraphStore::open_with_path(
+                temp_dir.path(),
+                temp_dir.path().join("test-graph.db"),
+                BackendKind::default(),
+            )
+            .await
+            .unwrap(),
         );
 
         let forge = Forge { store };
@@ -336,9 +352,13 @@ mod tests {
     async fn test_forge_edit_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
-                .await
-                .unwrap(),
+            storage::UnifiedGraphStore::open_with_path(
+                temp_dir.path(),
+                temp_dir.path().join("test-graph.db"),
+                BackendKind::default(),
+            )
+            .await
+            .unwrap(),
         );
 
         let forge = Forge { store };
@@ -352,9 +372,13 @@ mod tests {
     async fn test_forge_analysis_accessor() {
         let temp_dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
-            storage::UnifiedGraphStore::open(temp_dir.path(), BackendKind::default())
-                .await
-                .unwrap(),
+            storage::UnifiedGraphStore::open_with_path(
+                temp_dir.path(),
+                temp_dir.path().join("test-graph.db"),
+                BackendKind::default(),
+            )
+            .await
+            .unwrap(),
         );
 
         let forge = Forge { store };
@@ -396,6 +420,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let builder = ForgeBuilder::new()
             .path(temp_dir.path())
+            .db_path(temp_dir.path().join("test.db"))
             .backend_kind(BackendKind::SQLite);
 
         let forge = builder.build().await.unwrap();
@@ -458,5 +483,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(forge.store.db_path, db_dir.join("my-project.db"));
+    }
+
+    #[tokio::test]
+    async fn test_connection_pool_exported() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::ConnectionPool::new(&db_path, 4);
+        assert_eq!(pool.available_connections(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_runtime_exported() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let rt = crate::Runtime::new(dir.path().to_path_buf()).await.unwrap();
+        assert!(!rt.is_watching());
     }
 }
