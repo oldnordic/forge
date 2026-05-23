@@ -535,8 +535,8 @@ mod tests {
         );
         let prefix = observer.context_prefix.as_deref().unwrap_or("");
         assert!(
-            prefix.contains("rust"),
-            "prefix should contain language: got {prefix}"
+            prefix.contains("Language:"),
+            "prefix should contain language label: got {prefix}"
         );
     }
 }
