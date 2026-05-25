@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] - Unreleased
+
+### Added
+
+- **Auto-indexing on `Forge::open()`**: `Forge::open()` and `Forge::open_with_backend()` now detect empty graph databases and auto-trigger `graph().index()` using magellan. This removes the manual indexing step for new projects.
+- **Mirage-powered CFG integration**: `CfgModule` now sources real CFG data from magellan's `cfg_blocks`/`cfg_edges` tables via mirage + direct rusqlite queries. `load_test_cfg()` helper added; `dominators()`, `loops()`, and `PathBuilder::execute()` use actual control-flow edges when available.
+- **`UnifiedGraphStore::needs_indexing()`**: Opens the sqlitegraph backend and checks `entity_ids().is_empty()` to determine if auto-indexing is required.
+- **Magellan-unified graph module**: All `GraphModule` methods (`find_symbol`, `callers_of`, `references`, `cycles`, `impact_analysis`) now delegate to `magellan::CodeGraph` directly. No more `#[cfg(feature)]` fallback arms. `graph/queries.rs` deleted entirely. DB path resolves to `~/.magellan/<stem>.db` via `default_db_path()`.
+- **`ForgeBuilder` with `db_path`/`db_dir` overrides**: `ForgeBuilder::db_path()` and `ForgeBuilder::db_dir()` allow explicit database path control for tests and non-standard setups.
+- **Real git commit integration**: `Committer::finalize` now runs `git add` + `git commit` via `tokio::process::Command`. `CommitReport` includes `git_committed: bool` and `files_committed: Vec<PathBuf>`. Non-fatal on missing git.
+- **Verification retry/fix loop**: `AgentLoop::run` retries failed verifications up to `max_fix_attempts` (default: 3). `Planner::generate_fix_steps` asks the LLM for fix steps using error diagnostics. Fix steps are deduplicated against previous attempts.
+- **`Generator` module for code generation**: `forge_agent::generate::Generator` takes a natural language description, gathers graph context via `Observer`, and calls the LLM. Supports plain code or JSON `{"path":"...","code":"..."}` envelope responses.
+- **Knowledge graph module** (`forge_core::knowledge`): `KnowledgeGraph` backed by sqlitegraph native-v3. Eight node types (symbol, file, discovery, issue, pattern, knowledge, hotspot, cfg_block), eleven edge types, traversal operations (callers_of, callees_of, correlated, affected_by), graph algorithms (shortest_path, reachability, k_hop), FTS5 bridge to Magellan DB, sync_symbols/sync_references, and `query()` entry point. `Forge::knowledge()` accessor.
+- **Workflow executor refactor**: Monolithic `executor.rs` (3340 lines) split into `executor/` directory with focused modules: `serial.rs`, `parallel.rs`, `result.rs`, `audit.rs`, `tests.rs`.
+- **Workflow submodule splits**: All workflow files over 1000 LOC split into focused submodules — `tools/` (fallback, process, registry), `plan/` (graph, types), `checkpoint/` (service, validation), `tasks/` (graph_query, agent_loop, shell, file_edit, tool), `rollback/` (tool_compensation, compensation_registry, engine), `dag/` (core, tests). No remaining workflow file exceeds 1000 LOC.
+- **Integration gap fixes**: KnowledgeGapAnalyzer, BeliefGraph dependencies, ToolRegistry, phase checkpoints, CachingLlmProvider, Policy::Custom, Agent::run_workflow(), WorkflowBuilder::build_executor(), KnowledgeExplorer with real sqlitegraph queries.
+
+### Changed
+
+- **Tree-sitter CFG extraction removed**: `CfgExtractor` in `treesitter/mod.rs` is no longer called by `cfg/mod.rs`. `CfgModule::index()` is now a no-op with documentation explaining that CFG data is populated by magellan during `GraphModule::index()`.
+- **Edit module: splice-only refactored**: `patch_symbol()` and `rename_symbol()` no longer fall back to naive file-system scanning or `String::replace_range`. They now require `graph.db` + magellan + splice features. Missing DB returns explicit error: `"graph.db not found; run forge.graph().index() first"`. Missing splice feature returns: `"splice feature not enabled"`.
+- **`#[cfg(test)]` gating on helper functions**: `collect_files_recursive`, `find_symbol_span`, `find_definition_end`, `simple_word_replace` are now gated behind `#[cfg(test)]` since they are only used by unit tests after the splice-only refactor.
+- **Tree-sitter ecosystem bump**: `tree-sitter` 0.22 → 0.25, `tree-sitter-rust` 0.21 → 0.25, `tree-sitter-javascript` 0.21 → 0.25. Unblocks `ring` ≥ 0.17.12 which resolves RUSTSEC-2025-0009.
+- **Dependency bumps**: `magellan` 3.3.8 → 3.3.10, `mirage` 1.4.2 → 1.4.4, `splice` 2.6.9 → 2.6.11. All aligned on `cc` ≥ 1.2 for `ring` compatibility.
+
+### Removed
+
+- **`graph/queries.rs`**: `GraphQueryEngine` and all associated fallback query logic deleted. Replaced by direct `magellan::CodeGraph` calls.
+- **All `#[cfg(feature = "magellan")]` / `#[cfg(not(...))]` guards in graph module**: Unconditional magellan dependency — feature flag removed from graph code path.
+- **`patch_symbol_via_files()`**: Removed entirely. Was doing recursive directory scan + naive string replacement.
+- **`rename_symbol_via_files()`**: Removed entirely. Was doing recursive directory scan + `simple_word_replace()`.
+- **`wave_08_treesitter_cfg` E2E tests**: Removed 18 E2E tests that tested the now-removed tree-sitter CFG extraction behavior. These are superseded by the magellan/mirage integration.
+
+### Fixed
+
+- **`test_runtime_error_handling` incorrect assertion**: Test claimed `Runtime::new` creates nonexistent directories, but `UnifiedGraphStore::open` explicitly rejects them. Fixed to first assert the error, then create the directory and assert success.
+- **`test_concurrent_state_stress_test` and `test_concurrent_state_thread_safety` deadlock**: Tests used `std::sync::Barrier` and `std::sync::RwLock` inside `tokio::spawn` with a single-threaded runtime, causing deadlock. Switched to `#[tokio::test(flavor = "multi_thread", worker_threads = 4)]`.
+- **forge-runtime `default-features = false` build break**: After magellan unification removed cfg guards from graph/search modules, forge-runtime (which disabled default features) could no longer compile. Changed to inherit forge-core's default features.
+- **`test_path_builder_filters` stale DB conflict**: Test now uses `tempfile::tempdir()` instead of `std::env::current_dir()` to avoid hitting the project's own `.magellan/forge.db` with schema version 5 vs supported 4.
+- **Clippy lints**: Resolved dead_code and unused variable warnings in `forge_agent/src/workflow/plan.rs`, `semgrep.rs`, `forge_core/src/graph/mod.rs`, and `indexing.rs`.
+
+---
+
 ## [0.4.2] - 2026-05-13
 
 ### Added

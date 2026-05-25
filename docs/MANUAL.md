@@ -12,7 +12,8 @@ Complete guide to using ForgeKit for code intelligence operations.
 6. [Search Operations](#search-operations)
 7. [CFG Analysis](#cfg-analysis)
 8. [Edit Operations](#edit-operations)
-9. [Troubleshooting](#troubleshooting)
+9. [Workflow Orchestration](#workflow-orchestration)
+10. [Troubleshooting](#troubleshooting)
 
 ## Getting Started
 
@@ -514,6 +515,114 @@ let cfg = TestCfg::simple_loop();
 let dominators = cfg.compute_dominators();
 let loops = cfg.detect_loops();
 let paths = cfg.enumerate_paths();
+```
+
+## Workflow Orchestration
+
+The `forge_agent::workflow` module provides DAG-based task orchestration with rollback, checkpointing, and audit logging.
+
+### Example 9: Basic Workflow
+
+```rust
+use forge_agent::workflow::{Workflow, WorkflowExecutor, WorkflowTask, TaskContext, TaskResult};
+use async_trait::async_trait;
+
+// Define a task
+struct MyTask {
+    id: String,
+}
+
+#[async_trait]
+impl WorkflowTask for MyTask {
+    async fn execute(&self, _ctx: &TaskContext) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        println!("Executing task: {}", self.id);
+        Ok(TaskResult::Success)
+    }
+
+    fn id(&self) -> String { self.id.clone() }
+    fn name(&self) -> &str { &self.id }
+    fn dependencies(&self) -> Vec<String> { vec![] }
+}
+
+// Build and execute
+let mut workflow = Workflow::new();
+workflow.add_task(Box::new(MyTask { id: "task-1".into() }));
+workflow.add_task(Box::new(MyTask { id: "task-2".into() }));
+
+let executor = WorkflowExecutor::new(workflow);
+let result = executor.execute_serial().await?;
+println!("Completed {} tasks", result.completed_tasks.len());
+```
+
+### Example 10: Workflow with Rollback
+
+```rust
+use forge_agent::workflow::rollback::RollbackStrategy;
+
+let executor = WorkflowExecutor::new(workflow)
+    .with_rollback_strategy(RollbackStrategy::AllDependent);
+
+let result = executor.execute_serial().await?;
+if result.failed_task.is_some() {
+    println!("Task failed: {:?}", result.failed_task);
+    if let Some(report) = &result.rollback_report {
+        println!("Rolled back {} tasks", report.rolled_back.len());
+    }
+}
+```
+
+### Example 11: Checkpointing and Resume
+
+```rust
+use forge_agent::workflow::checkpoint::WorkflowCheckpointService;
+
+let checkpoint_service = WorkflowCheckpointService::new_default();
+
+let executor = WorkflowExecutor::new(workflow)
+    .with_checkpoint_service(checkpoint_service.clone());
+
+// Execute (checkpoints saved after each task)
+let result = executor.execute_serial().await?;
+
+// Later, resume from checkpoint
+let mut resume_executor = WorkflowExecutor::new(same_workflow)
+    .with_checkpoint_service(checkpoint_service);
+if resume_executor.can_resume() {
+    let result = resume_executor.resume().await?;
+}
+```
+
+### Example 12: Tool Registry
+
+```rust
+use forge_agent::workflow::tools::{Tool, ToolRegistry, ToolInvocation};
+
+let mut registry = ToolRegistry::new();
+registry.register(Tool::new("magellan", "/usr/bin/magellan")
+    .default_args(vec!["--db".into(), ".magellan/forge.db".into()]))?;
+
+let invocation = ToolInvocation::new("magellan")
+    .args(vec!["find".into(), "--name".into(), "my_function".into()]);
+
+let result = registry.invoke(&invocation).await?;
+if result.result.success {
+    println!("Output: {}", result.result.stdout);
+}
+```
+
+### Example 13: Cancellation
+
+```rust
+use forge_agent::workflow::cancellation::CancellationTokenSource;
+
+let cancel_source = CancellationTokenSource::new();
+let executor = WorkflowExecutor::new(workflow)
+    .with_cancellation_source(cancel_source.clone());
+
+// Cancel from another thread
+cancel_source.cancel();
+
+let result = executor.execute_serial().await?;
 ```
 
 ## Troubleshooting

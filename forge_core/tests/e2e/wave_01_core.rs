@@ -46,12 +46,15 @@ async fn e2e_forge_creates_directory_structure() {
     let forge = Forge::open(&project_path).await.unwrap();
 
     // DB lives at ~/.magellan/<project>.db
-    let db = forge.codebase_path()
+    let db = forge
+        .codebase_path()
         .file_name()
         .and_then(|n| n.to_str())
         .map(|stem| {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            std::path::PathBuf::from(home).join(".magellan").join(format!("{}.db", stem))
+            std::path::PathBuf::from(home)
+                .join(".magellan")
+                .join(format!("{}.db", stem))
         })
         .unwrap();
     assert!(db.exists(), "~/.magellan/<project>.db should be created");

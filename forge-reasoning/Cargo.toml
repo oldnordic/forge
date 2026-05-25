@@ -21,7 +21,7 @@ thiserror = "1.0"
 async-trait = "0.1"
 
 # SQLiteGraph - storage backend
-sqlitegraph = { version = "2.2", features = ["sqlite-backend"] }
+sqlitegraph = { version = "3.0.2", features = ["sqlite-backend"] }
 
 # Cryptographic hashing for data integrity
 sha2 = "0.10"

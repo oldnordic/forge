@@ -200,17 +200,14 @@ async fn test_search_semantic_sqlite() {
         .await
         .expect("Failed to index for search");
 
-    // Semantic search
+    // Semantic search — query by symbol name since llmgrep uses FTS5 matching
     let results = forge
         .search()
-        .semantic("addition function")
+        .semantic("add")
         .await
         .expect("Failed to search");
 
-    assert!(
-        !results.is_empty(),
-        "Should find results for 'addition function'"
-    );
+    assert!(!results.is_empty(), "Should find results for 'add'");
     assert!(results.iter().any(|r| r.name.contains("add")));
 }
 

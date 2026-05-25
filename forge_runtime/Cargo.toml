@@ -12,15 +12,15 @@ name = "forge_runtime"
 path = "src/lib.rs"
 
 [features]
-default = ["sqlite"]
+default = ["sqlite", "forge-core/default"]
 
 # Storage backends (passed to forge_core)
 sqlite = ["forge-core/sqlite"]
-full = ["sqlite"]
+full = ["sqlite", "forge-core/default"]
 
 [dependencies]
-forge-core = { version = "0.2.2", path = "../forge_core", default-features = false }
-sqlitegraph = { version = "2.2.4", default-features = false, optional = true }
+forge-core = { version = "0.2.2", path = "../forge_core" }
+sqlitegraph = { version = "3.0.2", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 notify = "8"
 anyhow = "1"

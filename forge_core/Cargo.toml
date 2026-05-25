@@ -29,7 +29,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 notify = "8"
 
 # Graph database
-sqlitegraph = { version = "2.2.4", features = ["sqlite-backend"], default-features = false, optional = true }
+sqlitegraph = { version = "3.0.2", features = ["sqlite-backend"], default-features = false, optional = true }
 
 # Tool integrations - these are the crates published from individual tool repos
 magellan = { version = "3.3.10", optional = true }

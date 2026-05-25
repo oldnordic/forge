@@ -325,7 +325,7 @@ mod concurrent_state_tests {
         assert!(concurrent.try_write().is_some());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_concurrent_state_thread_safety() {
         let state = WorkflowState::new("workflow-1").with_status(WorkflowStatus::Running);
         let concurrent = Arc::new(ConcurrentState::new(state));
@@ -372,7 +372,7 @@ mod concurrent_state_tests {
         assert_eq!(reader.status, WorkflowStatus::Completed);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_concurrent_state_stress_test() {
         let state = WorkflowState::new("workflow-stress");
         let concurrent = Arc::new(ConcurrentState::new(state));

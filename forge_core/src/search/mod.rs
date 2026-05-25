@@ -34,11 +34,10 @@ impl SearchModule {
     /// With llmgrep: queries the magellan DB with regex matching.
     /// Without: scans source files recursively with regex.
     pub async fn pattern_search(&self, pattern: &str) -> ForgeResult<Vec<Symbol>> {
-        #[cfg(feature = "llmgrep")]
-        {
-            let db_path = self.store.db_path.join("graph.db");
-            if db_path.exists() {
-                return self.search_via_llmgrep(pattern, true).await;
+        let db_path = self.store.db_path.clone();
+        if db_path.exists() {
+            if let Ok(results) = self.search_via_llmgrep(pattern, true).await {
+                return Ok(results);
             }
         }
 
@@ -55,11 +54,14 @@ impl SearchModule {
     /// With llmgrep: queries the magellan DB with fuzzy/substring matching.
     /// Without: splits query into keywords and scans files.
     pub async fn semantic_search(&self, query: &str) -> ForgeResult<Vec<Symbol>> {
-        #[cfg(feature = "llmgrep")]
-        {
-            let db_path = self.store.db_path.join("graph.db");
-            if db_path.exists() {
-                return self.search_via_llmgrep(query, false).await;
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let db_path = self.store.db_path.clone();
+        if db_path.exists() {
+            if let Ok(results) = self.search_via_llmgrep(query, false).await {
+                return Ok(results);
             }
         }
 
@@ -90,11 +92,10 @@ impl SearchModule {
 
     // -- llmgrep-backed search --
 
-    #[cfg(feature = "llmgrep")]
     async fn search_via_llmgrep(&self, query: &str, use_regex: bool) -> ForgeResult<Vec<Symbol>> {
         use llmgrep::query::SearchOptions;
 
-        let db_path = self.store.db_path.join("graph.db");
+        let db_path = self.store.db_path.clone();
         let backend = llmgrep::Backend::detect_and_open(&db_path).map_err(|e| {
             ForgeError::DatabaseError(format!("Failed to open llmgrep backend: {}", e))
         })?;
@@ -277,7 +278,6 @@ async fn collect_source_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-#[cfg(feature = "llmgrep")]
 fn llmgrep_match_to_symbol(m: llmgrep::output::SymbolMatch) -> Symbol {
     let kind = map_llmgrep_kind(&m.kind);
     let language = m
@@ -304,7 +304,6 @@ fn llmgrep_match_to_symbol(m: llmgrep::output::SymbolMatch) -> Symbol {
     }
 }
 
-#[cfg(feature = "llmgrep")]
 fn map_llmgrep_kind(kind: &str) -> SymbolKind {
     match kind {
         "function_item" | "function" => SymbolKind::Function,
@@ -320,7 +319,6 @@ fn map_llmgrep_kind(kind: &str) -> SymbolKind {
     }
 }
 
-#[cfg(feature = "llmgrep")]
 fn map_llmgrep_language(lang: &str) -> Language {
     match lang {
         "rust" => Language::Rust,

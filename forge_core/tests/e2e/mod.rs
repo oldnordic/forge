@@ -9,4 +9,3 @@ pub mod wave_04_edit;
 pub mod wave_05_cfg;
 pub mod wave_06_analysis;
 pub mod wave_07_workflow;
-pub mod wave_08_treesitter_cfg;

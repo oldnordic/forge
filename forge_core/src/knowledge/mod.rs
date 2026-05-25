@@ -532,16 +532,40 @@ impl KnowledgeGraph {
             .collect();
         drop(stmt);
         drop(conn);
+
+        let specs: Vec<sqlitegraph::backend::NodeSpec> = rows
+            .iter()
+            .map(|(_, kind, name, file_path)| {
+                let file = file_path.as_deref().unwrap_or("");
+                sqlitegraph::backend::NodeSpec {
+                    kind: types::node::SYMBOL.to_string(),
+                    name: name.clone(),
+                    file_path: Some(file.to_string()),
+                    data: serde_json::json!({
+                        "symbol_kind": kind,
+                        "qualified_name": name,
+                        "file": file,
+                        "line": 0u64,
+                        "byte_start": 0u64,
+                        "byte_end": 0u64,
+                        "language": "unknown",
+                    }),
+                }
+            })
+            .collect();
+
+        let kg_ids = self
+            .backend
+            .insert_nodes_bulk(&specs)
+            .map_err(|e| ForgeError::DatabaseError(format!("Bulk node insert failed: {}", e)))?;
+
         let graph_file = self.graph_path.to_string_lossy().into_owned();
-        let mut nodes_added = 0usize;
-        for (magellan_id, kind, name, file_path) in rows {
-            let file = file_path.as_deref().unwrap_or("");
-            let kg_id = self.add_symbol(&name, &kind, &name, file, 0, 0, 0, "unknown", None)?;
-            self.insert_bridge_entry(kg_id, magellan_id, &graph_file)?;
-            nodes_added += 1;
+        for ((magellan_id, ..), &kg_id) in rows.iter().zip(kg_ids.iter()) {
+            self.insert_bridge_entry(kg_id, *magellan_id, &graph_file)?;
         }
+
         Ok(SyncReport {
-            nodes_added,
+            nodes_added: kg_ids.len(),
             ..Default::default()
         })
     }
@@ -569,17 +593,29 @@ impl KnowledgeGraph {
             .collect();
         drop(stmt);
         drop(conn);
-        let mut edges_added = 0usize;
-        for (from_magellan, to_magellan, edge_type) in edges {
-            let from_kg = self.resolve_fts5_by_magellan_id(from_magellan)?;
-            let to_kg = self.resolve_fts5_by_magellan_id(to_magellan)?;
-            if let (Some(from_id), Some(to_id)) = (from_kg, to_kg) {
-                self.add_edge(from_id, to_id, &edge_type, serde_json::Value::Null)?;
-                edges_added += 1;
+
+        let mut specs = Vec::with_capacity(edges.len());
+        for (from_magellan, to_magellan, edge_type) in &edges {
+            if let (Some(from_id), Some(to_id)) = (
+                self.resolve_fts5_by_magellan_id(*from_magellan)?,
+                self.resolve_fts5_by_magellan_id(*to_magellan)?,
+            ) {
+                specs.push(sqlitegraph::backend::EdgeSpec {
+                    from: from_id,
+                    to: to_id,
+                    edge_type: edge_type.clone(),
+                    data: serde_json::Value::Null,
+                });
             }
         }
+
+        let edge_ids = self
+            .backend
+            .insert_edges_bulk(&specs)
+            .map_err(|e| ForgeError::DatabaseError(format!("Bulk edge insert failed: {}", e)))?;
+
         Ok(SyncReport {
-            edges_added,
+            edges_added: edge_ids.len(),
             ..Default::default()
         })
     }
@@ -1261,6 +1297,26 @@ mod tests {
             report.nodes_added, 2,
             "sync_symbols should add one KG node per magellan entity"
         );
+    }
+
+    #[tokio::test]
+    async fn test_sync_symbols_bulk_all_bridge_entries_accessible() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("magellan.db");
+        let names = ["alpha", "beta", "gamma", "delta", "epsilon"];
+        let magellan_ids = setup_entities_db(&db_path, &names);
+
+        let kg = KnowledgeGraph::open(&temp.path().join("kg.graph"), &db_path).unwrap();
+        let report = kg.sync_symbols().await.unwrap();
+        assert_eq!(report.nodes_added, 5);
+
+        for mid in &magellan_ids {
+            let node_id = kg.resolve_fts5_by_magellan_id(*mid).unwrap();
+            assert!(
+                node_id.is_some(),
+                "bridge entry missing for magellan_id={mid}"
+            );
+        }
     }
 
     #[tokio::test]

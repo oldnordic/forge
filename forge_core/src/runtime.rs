@@ -387,13 +387,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_runtime_error_handling() {
-        // Test with empty path - UnifiedGraphStore creates .forge in current dir
-        // So this will actually succeed (not error)
         let result = Runtime::new(PathBuf::from("")).await;
-        // The important thing is it doesn't panic
         let _ = result;
 
-        // Test with non-existent directory (UnifiedGraphStore should create it)
         let temp_dir = TempDir::new().unwrap();
         let nonexistent = temp_dir
             .path()
@@ -401,17 +397,18 @@ mod tests {
             .join("deep")
             .join("path");
 
-        // This should work because UnifiedGraphStore creates the directory
+        let result = Runtime::new(nonexistent.clone()).await;
+        assert!(result.is_err(), "Runtime should reject non-existent paths");
+
+        tokio::fs::create_dir_all(&nonexistent).await.unwrap();
         let result = Runtime::new(nonexistent).await;
         assert!(
             result.is_ok(),
-            "Runtime should create non-existent directories"
+            "Runtime should work after directory is created"
         );
 
-        // Verify runtime works
         let runtime = result.unwrap();
         assert!(!runtime.is_watching());
-        // Verify basic operations work
         assert_eq!(runtime.pending_changes().await, 0);
     }
 }

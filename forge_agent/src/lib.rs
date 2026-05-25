@@ -169,6 +169,79 @@ pub struct CommitResult {
     pub files_committed: Vec<PathBuf>,
 }
 
+/// Reads the `[llm]` section from `.forge.toml` in `project_path` and builds a provider.
+/// Returns `None` if the file is absent, the section is missing, or the provider type is
+/// not compiled in.
+#[cfg(any(
+    feature = "llm-ollama",
+    feature = "llm-openai",
+    feature = "llm-anthropic"
+))]
+fn load_llm_from_forge_toml(
+    project_path: &std::path::Path,
+) -> Option<std::sync::Arc<dyn llm::LlmProvider>> {
+    #[derive(serde::Deserialize)]
+    struct LlmSection {
+        provider: String,
+        // Used by all three LLM branches — always present when this function is compiled.
+        model: String,
+        // Only consumed by the ollama and openai branches; absent from the struct when
+        // neither feature is active so serde simply ignores the key in the TOML file.
+        #[cfg(any(feature = "llm-ollama", feature = "llm-openai"))]
+        url: Option<String>,
+        // Only consumed by the openai and anthropic branches.
+        #[cfg(any(feature = "llm-openai", feature = "llm-anthropic"))]
+        api_key: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ForgeToml {
+        llm: Option<LlmSection>,
+    }
+    let text = std::fs::read_to_string(project_path.join(".forge.toml")).ok()?;
+    let parsed: ForgeToml = toml::from_str(&text).ok()?;
+    let cfg = parsed.llm?;
+    match cfg.provider.as_str() {
+        #[cfg(feature = "llm-ollama")]
+        "ollama" => {
+            let endpoint = cfg
+                .url
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            Some(std::sync::Arc::new(llm::OllamaProvider::new(
+                endpoint, cfg.model,
+            )))
+        }
+        #[cfg(feature = "llm-openai")]
+        "openai" => {
+            let api_key = cfg.api_key?;
+            let url = cfg
+                .url
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            Some(std::sync::Arc::new(llm::OpenAiProvider::new(
+                url, cfg.model, api_key,
+            )))
+        }
+        #[cfg(feature = "llm-anthropic")]
+        "anthropic" => {
+            let api_key = cfg.api_key?;
+            Some(std::sync::Arc::new(llm::AnthropicProvider::new(
+                cfg.model, api_key,
+            )))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(not(any(
+    feature = "llm-ollama",
+    feature = "llm-openai",
+    feature = "llm-anthropic"
+)))]
+fn load_llm_from_forge_toml(
+    _project_path: &std::path::Path,
+) -> Option<std::sync::Arc<dyn llm::LlmProvider>> {
+    None
+}
+
 /// Agent for deterministic AI-driven code operations.
 ///
 /// The agent follows a strict loop:
@@ -215,6 +288,9 @@ impl Agent {
         // Try to initialize Forge SDK
         let forge = forge_core::Forge::open(&path).await.ok();
 
+        // Load LLM provider from .forge.toml [llm] section
+        let llm = load_llm_from_forge_toml(&path);
+
         // Load envoy config from .forge.toml
         #[cfg(feature = "envoy")]
         let envoy = {
@@ -228,7 +304,7 @@ impl Agent {
         Ok(Self {
             codebase_path: path,
             forge,
-            llm: None,
+            llm,
             #[cfg(feature = "envoy")]
             envoy,
             policies: Vec::new(),
@@ -477,6 +553,11 @@ impl Agent {
             agent_loop = agent_loop.with_llm(llm.clone());
         }
 
+        #[cfg(feature = "envoy")]
+        if let Some(ref envoy) = self.envoy {
+            agent_loop = agent_loop.with_discovery_store(envoy.clone());
+        }
+
         if !self.policies.is_empty() {
             agent_loop = agent_loop.with_policies(self.policies.clone());
         }
@@ -639,5 +720,41 @@ mod tests {
         let result = agent.run_workflow(workflow).await;
         assert!(result.is_ok(), "run_workflow failed: {:?}", result.err());
         assert!(result.unwrap().success);
+    }
+
+    #[cfg(feature = "llm-ollama")]
+    #[tokio::test]
+    async fn test_llm_config_loaded_from_forge_toml() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join(".forge.toml"),
+            "[llm]\nprovider = \"ollama\"\nmodel = \"llama3\"\nurl = \"http://localhost:11434\"\n",
+        )
+        .unwrap();
+        let agent = Agent::new(temp.path()).await.unwrap();
+        assert!(
+            agent.llm.is_some(),
+            "LLM provider should be loaded from .forge.toml"
+        );
+    }
+
+    #[cfg(feature = "envoy")]
+    #[tokio::test]
+    async fn test_envoy_client_implements_discovery_store() {
+        let config = envoy::EnvoyConfig {
+            url: "http://localhost:9999".to_string(),
+            agent_name: "test-forge".to_string(),
+        };
+        let client = std::sync::Arc::new(envoy::EnvoyClient::new(config));
+        // Verify EnvoyClient can be coerced to DiscoveryStore
+        let store: std::sync::Arc<dyn crate::r#loop::DiscoveryStore> = client.clone();
+        // Fire-and-forget: should not panic even when server is unreachable
+        store
+            .store(
+                "Symbol",
+                "test_symbol",
+                serde_json::json!({"file": "test.rs"}),
+            )
+            .await;
     }
 }

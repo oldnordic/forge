@@ -623,6 +623,220 @@ pub fn backend_kind(&self) -> BackendKind
 pub fn is_connected(&self) -> bool
 ```
 
+## Workflow Module (forge_agent)
+
+The workflow module provides DAG-based task orchestration with rollback, checkpointing, and audit logging. Available via `forge_agent::workflow`.
+
+### Core Types
+
+#### Workflow
+
+DAG of tasks with topological execution ordering.
+
+```rust
+pub struct Workflow { /* ... */ }
+
+impl Workflow {
+    pub fn new() -> Self;
+    pub fn add_task(&mut self, task: Box<dyn WorkflowTask>) -> TaskId;
+    pub fn task_count(&self) -> usize;
+    pub fn task_ids(&self) -> Vec<TaskId>;
+    pub fn execution_order(&self) -> Result<Vec<TaskId>, WorkflowError>;
+}
+```
+
+#### WorkflowExecutor
+
+Executes tasks sequentially with audit logging and rollback.
+
+```rust
+pub struct WorkflowExecutor { /* ... */ }
+
+impl WorkflowExecutor {
+    pub fn new(workflow: Workflow) -> Self;
+    pub fn with_forge(self, forge: Arc<Forge>) -> Self;
+    pub fn with_rollback_strategy(self, strategy: RollbackStrategy) -> Self;
+    pub fn with_checkpoint_service(self, service: WorkflowCheckpointService) -> Self;
+    pub fn with_timeout_config(self, config: TimeoutConfig) -> Self;
+    pub fn with_tool_registry(self, registry: ToolRegistry) -> Self;
+    pub fn with_cancellation_source(self, source: CancellationTokenSource) -> Self;
+}
+```
+
+#### WorkflowResult
+
+Result of workflow execution.
+
+```rust
+pub struct WorkflowResult {
+    pub completed_tasks: Vec<TaskId>,
+    pub failed_task: Option<TaskId>,
+    pub error: Option<String>,
+    pub rollback_report: Option<RollbackReport>,
+}
+```
+
+#### WorkflowTask
+
+Trait for executable workflow tasks.
+
+```rust
+#[async_trait]
+pub trait WorkflowTask: Send + Sync {
+    async fn execute(&self, context: &TaskContext) -> Result<TaskResult, TaskError>;
+    fn id(&self) -> TaskId;
+    fn name(&self) -> &str;
+    fn dependencies(&self) -> Vec<TaskId>;
+}
+```
+
+#### TaskResult
+
+```rust
+pub enum TaskResult {
+    Success,
+    Skipped,
+    Failed(String),
+    WithCompensation { result: Box<TaskResult>, compensation: ExecutableCompensation },
+}
+```
+
+### Rollback and Compensation
+
+#### RollbackStrategy
+
+```rust
+pub enum RollbackStrategy {
+    AllDependent,
+    DirectDependentsOnly,
+    None,
+}
+```
+
+#### CompensationRegistry
+
+Tracks compensation actions for rollback.
+
+```rust
+pub struct CompensationRegistry { /* ... */ }
+
+impl CompensationRegistry {
+    pub fn new() -> Self;
+    pub fn register(&mut self, task_id: TaskId, compensation: ToolCompensation);
+    pub fn validate_coverage(&self, task_ids: &[TaskId]) -> CompensationReport;
+}
+```
+
+### Checkpointing
+
+#### WorkflowCheckpointService
+
+In-memory checkpoint storage with SHA-256 integrity validation.
+
+```rust
+pub struct WorkflowCheckpointService { /* ... */ }
+
+impl WorkflowCheckpointService {
+    pub fn new(namespace: impl Into<String>) -> Self;
+    pub fn new_default() -> Self;
+    pub fn save(&self, checkpoint: &WorkflowCheckpoint) -> Result<(), WorkflowError>;
+    pub fn load(&self, id: &CheckpointId) -> Result<Option<WorkflowCheckpoint>, WorkflowError>;
+    pub fn get_latest(&self, workflow_id: &str) -> Result<Option<WorkflowCheckpoint>, WorkflowError>;
+    pub fn list_by_workflow(&self, workflow_id: &str) -> Result<Vec<CheckpointSummary>, WorkflowError>;
+    pub fn delete(&self, id: &CheckpointId) -> Result<(), WorkflowError>;
+}
+```
+
+#### ValidationCheckpoint
+
+Confidence threshold configuration for task validation.
+
+```rust
+pub struct ValidationCheckpoint {
+    pub min_confidence: f64,      // default: 0.7
+    pub warning_threshold: f64,   // default: 0.85
+    pub rollback_on_failure: bool, // default: true
+}
+```
+
+### Tool Registry
+
+#### ToolRegistry
+
+Central registry for external tool invocation with RAII process guards.
+
+```rust
+pub struct ToolRegistry { /* ... */ }
+
+impl ToolRegistry {
+    pub fn new() -> Self;
+    pub fn register(&mut self, tool: Tool) -> Result<(), ToolError>;
+    pub fn get(&self, name: &str) -> Option<&Tool>;
+    pub async fn invoke(&self, invocation: &ToolInvocation) -> Result<ToolInvocationResult, ToolError>;
+    pub fn with_standard_tools() -> Self;
+}
+```
+
+#### Fallback Handlers
+
+```rust
+pub trait FallbackHandler: Send + Sync {
+    async fn handle(&self, error: &ToolError, invocation: &ToolInvocation) -> FallbackResult;
+}
+
+pub struct RetryFallback { /* retries on transient errors */ }
+pub struct SkipFallback { /* returns fixed result */ }
+pub struct ChainFallback { /* tries multiple handlers in sequence */ }
+```
+
+### Plan Graph
+
+#### PlanGraph
+
+Stores plan artifacts as sqlitegraph nodes and edges for dashboard queries.
+
+```rust
+#[cfg(feature = "sqlite")]
+pub struct PlanGraph { /* ... */ }
+
+impl PlanGraph {
+    pub fn open(path: &Path) -> Result<Self>;
+    pub fn open_in_memory() -> Result<Self>;
+    pub fn add_requirement(&mut self, title: &str, description: &str) -> Result<i64>;
+    pub fn add_plan(&mut self, name: &str, requirement_ids: &[i64]) -> Result<i64>;
+    pub fn approve(&mut self, plan_id: i64, approver: &str) -> Result<i64>;
+    pub fn reject(&mut self, plan_id: i64, reason: &str) -> Result<i64>;
+    pub fn trace_forward(&self, requirement_id: i64) -> Result<CustodyChain>;
+    pub fn trace_backward(&self, node_id: i64) -> Result<Vec<CustodyNode>>;
+    pub fn find_gaps(&self, plan_id: i64) -> Result<Vec<i64>>;
+}
+```
+
+### Cancellation
+
+```rust
+pub struct CancellationTokenSource { /* ... */ }
+pub struct CancellationToken { /* ... */ }
+
+impl CancellationTokenSource {
+    pub fn new() -> Self;
+    pub fn token(&self) -> CancellationToken;
+    pub fn cancel(&self);
+}
+```
+
+### Gates
+
+```rust
+pub struct Gate { /* ... */ }
+pub struct GateRunner { /* ... */ }
+
+impl GateRunner {
+    pub fn new(gate: Gate) -> Self;
+    pub async fn run(&self, context: &TaskContext) -> Result<GateResult, WorkflowError>;
+}
+```
+
 ## Error Handling
 
 All operations return `Result<T, ForgeError>`.

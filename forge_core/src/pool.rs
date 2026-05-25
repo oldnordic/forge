@@ -126,10 +126,14 @@ impl ConnectionPool {
     /// # }
     /// ```
     pub async fn try_acquire(&self) -> Option<ConnectionPermit> {
-        self.semaphore.clone().try_acquire_owned().ok().map(|permit| ConnectionPermit {
-            _permit: permit,
-            db_path: self.db_path.clone(),
-        })
+        self.semaphore
+            .clone()
+            .try_acquire_owned()
+            .ok()
+            .map(|permit| ConnectionPermit {
+                _permit: permit,
+                db_path: self.db_path.clone(),
+            })
     }
 }
 
