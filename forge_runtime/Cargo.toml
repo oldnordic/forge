@@ -19,8 +19,8 @@ sqlite = ["forge-core/sqlite"]
 full = ["sqlite", "forge-core/default"]
 
 [dependencies]
-forge-core = { version = "0.2.2", path = "../forge_core" }
-sqlitegraph = { version = "3.0.2", default-features = false, optional = true }
+forge-core = { version = "0.3.0", path = "../forge_core" }
+sqlitegraph = { version = "3.0.7", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 notify = "8"
 anyhow = "1"
