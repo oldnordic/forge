@@ -34,7 +34,7 @@ impl WorkflowTask for AgentLoopTask {
             TaskError::ExecutionFailed("Forge SDK not available in TaskContext".to_string())
         })?;
 
-        let mut agent_loop = crate::r#loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
+        let mut agent_loop = crate::agent_loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
         let result = agent_loop
             .run(&self.query)
             .await

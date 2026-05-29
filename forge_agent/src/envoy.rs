@@ -19,6 +19,32 @@ pub struct EnvoyConfig {
     pub agent_name: String,
 }
 
+/// Evidence recording configuration from `[evidence]` section.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EvidenceConfig {
+    pub tool_name: String,
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
+impl EvidenceConfig {
+    pub fn from_file(path: &Path) -> std::io::Result<Option<Self>> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        #[derive(Deserialize)]
+        struct Toml {
+            #[serde(default)]
+            evidence: Option<EvidenceConfig>,
+        }
+        let parsed: Toml =
+            toml::from_str(&text).map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(parsed.evidence)
+    }
+}
+
 #[derive(Deserialize)]
 struct ForgeToml {
     #[serde(default)]
@@ -343,6 +369,164 @@ impl EnvoyClient {
             .map_err(|e| format!("get_pending_handoff parse: {e}"))?;
         Ok(Some(val))
     }
+
+    // ── Forge Evidence Methods ────────────────────────────────────────────────
+
+    pub async fn forge_prompt(
+        &self,
+        session_id: &str,
+        record: &crate::evidence::PromptRecord,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "sequence": record.sequence,
+            "role": record.role,
+            "input_hash": record.input_hash,
+            "input_tokens": record.input_tokens,
+            "output_hash": record.output_hash,
+            "output_tokens": record.output_tokens,
+            "latency_ms": record.latency_ms,
+            "model": record.model,
+            "cost_usd": record.cost_usd,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/prompts"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_prompt: {}", resp.status()))
+        }
+    }
+
+    pub async fn forge_tool_call(
+        &self,
+        session_id: &str,
+        record: &crate::evidence::ToolCallEvidence,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "tool_name": record.tool_name,
+            "tool_version": record.tool_version,
+            "input_hash": record.input_hash,
+            "input_summary": record.input_summary,
+            "output_hash": record.output_hash,
+            "output_summary": record.output_summary,
+            "exit_status": record.exit_status,
+            "latency_ms": record.latency_ms,
+            "input_tokens_est": record.input_tokens_est,
+            "tool_category": record.tool_category,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/tool-calls"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_tool_call: {}", resp.status()))
+        }
+    }
+
+    pub async fn forge_file_write(
+        &self,
+        session_id: &str,
+        record: &crate::evidence::FileWriteRecord,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "file_path": record.file_path,
+            "file_id": record.file_id,
+            "before_hash": record.before_hash,
+            "after_hash": record.after_hash,
+            "lines_added": record.lines_added,
+            "lines_deleted": record.lines_deleted,
+            "lines_changed": record.lines_changed,
+            "write_type": record.write_type,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/file-writes"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_file_write: {}", resp.status()))
+        }
+    }
+
+    pub async fn forge_commit(
+        &self,
+        session_id: &str,
+        record: &crate::evidence::CommitRecord,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "commit_sha": record.commit_sha,
+            "parent_sha": record.parent_sha,
+            "message": record.message,
+            "author": record.author,
+            "files_changed": record.files_changed,
+            "lines_inserted": record.lines_inserted,
+            "lines_deleted": record.lines_deleted,
+            "commit_type": record.commit_type,
+            "feature_tag": record.feature_tag,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/commits"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_commit: {}", resp.status()))
+        }
+    }
+
+    pub async fn forge_test_run(
+        &self,
+        session_id: &str,
+        record: &crate::evidence::TestRunRecord,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "test_name": record.test_name,
+            "test_suite": record.test_suite,
+            "test_command": record.test_command,
+            "result": record.result,
+            "duration_ms": record.duration_ms,
+            "logs_summary": record.logs_summary,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/test-runs"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_test_run: {}", resp.status()))
+        }
+    }
+
+    pub async fn forge_fix_chain(
+        &self,
+        session_id: &str,
+        record: &crate::evidence::FixChainRecord,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "bug_commit_sha": record.bug_commit_sha,
+            "fix_commit_sha": record.fix_commit_sha,
+            "fix_type": record.fix_type,
+            "severity": record.severity,
+            "cycles_to_fix": record.cycles_to_fix,
+            "time_to_fix_ms": record.time_to_fix_ms,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/fix-chains"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_fix_chain: {}", resp.status()))
+        }
+    }
 }
 
 // ── KnowledgeSource impl ──────────────────────────────────────────────────────
@@ -360,7 +544,7 @@ impl crate::observe::KnowledgeSource for EnvoyClient {
 // ── DiscoveryStore impl ───────────────────────────────────────────────────────
 
 #[async_trait::async_trait]
-impl crate::r#loop::DiscoveryStore for EnvoyClient {
+impl crate::agent_loop::DiscoveryStore for EnvoyClient {
     async fn store(&self, discovery_type: &str, target: &str, metadata: serde_json::Value) {
         let _ = self.store_discovery(discovery_type, target, metadata).await;
     }

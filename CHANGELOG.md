@@ -9,12 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - Unreleased
 
+### Changed
+
+- **Tool deps are now required**: `magellan`, `llmgrep`, `mirage-analyzer`, `splice`, and `which` are no longer optional feature-gated dependencies. All `#[cfg(feature = "...")]` gates and empty-return fallback arms have been removed from `CfgModule`, `SearchModule`, `EditModule`, `GraphModule`, `indexing`, and `lib`. The `tools` feature flag is removed; `default = ["sqlite"]` is the only default feature.
+
 ### Added
 
+- **Tool forge API delegation**: `forge_core` modules now delegate to `splice::forge`, `llmgrep::forge`, and `mirage_analyzer::forge` convenience functions instead of reimplementing symbol resolution and backend construction internally.
+- **EditModule::delete_symbol()**: Deletes a symbol from a file via `splice::forge::delete_symbol_from_file`.
+- **EditModule::resolve_span()**: Resolves a symbol to its byte span via `splice::forge::resolve_symbol_span`.
+- **SearchModule::references()**: Finds all references to a symbol via `llmgrep::forge::search_references`.
+- **SearchModule::calls()**: Finds all calls involving a symbol via `llmgrep::forge::search_calls`.
+- **SearchModule::lookup()**: Looks up a symbol by FQN via `llmgrep::forge::lookup_symbol`.
+- **CfgModule::detect_cycles()**: Detects cycles in the call graph via `mirage_analyzer::forge::detect_cycles`.
+- **CfgModule::dead_symbols()**: Finds dead (unreachable) symbols via `mirage_analyzer::forge::find_dead_symbols`.
+- **CfgModule::reachable_symbols()**: Finds reachable symbols via `mirage_analyzer::forge::reachable_symbols`.
+- **CfgModule::callees()**: Gets outgoing calls for a function via `mirage_analyzer::forge::get_callees`.
+- **CfgModule::resolve_function()**: Resolves a function name to its database ID via `mirage_analyzer::forge::resolve_function`.
+- **CfgModule::database_status()**: Gets database status summary via `mirage_analyzer::forge::database_status`.
+- **New types**: `CycleReport`, `CallCycle`, `DeadSymbol`, `DatabaseStatus` in `cfg` module.
 - **Auto-indexing on `Forge::open()`**: `Forge::open()` and `Forge::open_with_backend()` now detect empty graph databases and auto-trigger `graph().index()` using magellan. This removes the manual indexing step for new projects.
 - **Mirage-powered CFG integration**: `CfgModule` now sources real CFG data from magellan's `cfg_blocks`/`cfg_edges` tables via mirage + direct rusqlite queries. `load_test_cfg()` helper added; `dominators()`, `loops()`, and `PathBuilder::execute()` use actual control-flow edges when available.
 - **`UnifiedGraphStore::needs_indexing()`**: Opens the sqlitegraph backend and checks `entity_ids().is_empty()` to determine if auto-indexing is required.
 - **Magellan-unified graph module**: All `GraphModule` methods (`find_symbol`, `callers_of`, `references`, `cycles`, `impact_analysis`) now delegate to `magellan::CodeGraph` directly. No more `#[cfg(feature)]` fallback arms. `graph/queries.rs` deleted entirely. DB path resolves to `~/.magellan/<stem>.db` via `default_db_path()`.
+- **Graph module Magellan unification v2**: `callers_of` replaced O(n) file iteration with targeted `search_symbols_by_name` + per-file `callers_of_symbol`. `cycles` now uses `detect_cycles()` returning `CycleReport` with real `SymbolInfo` members (FQN, file_path, kind). `impact_analysis` replaced raw sqlitegraph k-hop with magellan `CodeGraph` BFS, tracking correct hop distances. `Cycle` type upgraded from `Vec<SymbolId>` to `Vec<CycleMember>` with full metadata. `CycleMember` type added to `forge_core::types`. 4 new integration tests with real indexed code.
 - **`ForgeBuilder` with `db_path`/`db_dir` overrides**: `ForgeBuilder::db_path()` and `ForgeBuilder::db_dir()` allow explicit database path control for tests and non-standard setups.
 - **Real git commit integration**: `Committer::finalize` now runs `git add` + `git commit` via `tokio::process::Command`. `CommitReport` includes `git_committed: bool` and `files_committed: Vec<PathBuf>`. Non-fatal on missing git.
 - **Verification retry/fix loop**: `AgentLoop::run` retries failed verifications up to `max_fix_attempts` (default: 3). `Planner::generate_fix_steps` asks the LLM for fix steps using error diagnostics. Fix steps are deduplicated against previous attempts.
@@ -23,11 +41,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workflow executor refactor**: Monolithic `executor.rs` (3340 lines) split into `executor/` directory with focused modules: `serial.rs`, `parallel.rs`, `result.rs`, `audit.rs`, `tests.rs`.
 - **Workflow submodule splits**: All workflow files over 1000 LOC split into focused submodules — `tools/` (fallback, process, registry), `plan/` (graph, types), `checkpoint/` (service, validation), `tasks/` (graph_query, agent_loop, shell, file_edit, tool), `rollback/` (tool_compensation, compensation_registry, engine), `dag/` (core, tests). No remaining workflow file exceeds 1000 LOC.
 - **Integration gap fixes**: KnowledgeGapAnalyzer, BeliefGraph dependencies, ToolRegistry, phase checkpoints, CachingLlmProvider, Policy::Custom, Agent::run_workflow(), WorkflowBuilder::build_executor(), KnowledgeExplorer with real sqlitegraph queries.
+- **Diff engine** (`forge_core::diff`): `UnifiedDiff::generate/apply/reverse/render/stats` via `similar` crate. Supports unified diff generation, idempotent apply, reverse application, and diff statistics. 14 tests.
+- **Structured diagnostics** (`forge_core::diagnostic`): `Diagnostic` builder pattern with `DiagnosticSeverity`, `DiagnosticSource`, `Location`, `FixSuggestion`, `TextEdit`, `RelatedInfo`. `DiagnosticParser` trait with `CargoDiagnosticParser` (JSON + rustc line format), `GoDiagnosticParser`, `GenericDiagnosticParser`. 11 tests.
+- **Build system abstraction** (`forge_core::build`): `BuildSystem` trait (detect/check/build/test/clean) with `CargoBuildSystem`, `GoBuildSystem`, `NpmBuildSystem`, `MakeBuildSystem`. `BuildModule` with `detect()` factory. `Forge::build()` returns `Option<BuildModule>`. 12 tests.
+- **Project scaffolding** (`forge_core::project`): `ProjectModule`, `ProjectScaffold`, `ProjectInfo`, `project_template()` with templates for Rust/Python/Java/C/TypeScript. `detect_project()` auto-detects language from directory contents. 10 tests.
+- **Dependency management** (`forge_core::dependency`): `DependencyModule` with `DependencyManifest`, `Dependency`, `DependencySource`. Parses and mutates Cargo.toml, package.json, go.mod. Add/remove dependency operations. 10 tests.
+- **Undo stack** (`forge_core::edit::undo`): `EditModule::undo()/can_undo()/undo_depth()/clear_undo_stack()` with bounded `Mutex<Vec<PendingUndo>>` (default 100). Hooked into `create_file`, `write_file`, `create_directory`. `ForgeBuilder::undo_capacity()` config. 6 tests.
+- **Streaming progress** (`forge_core::progress`): `ProgressSink` trait, `NoopProgress`, `ChannelProgress` (tokio unbounded channel), `ProgressEmitter` with `started/progress/completed/failed` methods. 6 tests.
+- **Workspace awareness** (`forge_core::workspace`): `Workspace::detect/open/project_for_path`. Cargo workspace member parsing, Go/Node/pnpm monorepo discovery, walk-up root detection. `Forge::as_workspace()` accessor. 9 tests.
+- **Multi-language identifiers** (`forge_core::edit::identifiers`): `identifier_spans(source, target, lang)` with `qualified_prefixes()` for Rust/Python/Java/C/Cpp/TypeScript/JavaScript/Go. `language_from_extension()` helper. 5 tests.
+- **File creation API**: `EditModule::create_file/create_directory/write_file` with `validate_relative_path` (rejects absolute paths, validates no path traversal). `ForgeError::PathNotAllowed/FileAlreadyExists`. 7 tests.
+- **Forge facade accessors**: `Forge::project()`, `Forge::dependency()`, `Forge::as_workspace()` for module access without manual construction.
+- **Agent integration — verify.rs**: `Verifier::compile_check/test_check` now delegates to `BuildModule::check/test` when a Forge instance is available, falling back to raw `cargo` commands otherwise.
+- **Agent integration — mutate.rs**: `Mutator::with_forge()` constructor. `PlanOperation::Create` uses `EditModule::create_file()` when forge is available for path validation and undo support.
 
 ### Changed
 
+- **Edit module delegates to splice::forge**: `patch_symbol()` uses `llmgrep::forge::search_symbols` for file discovery then `splice::forge::patch_symbol_in_file` for each file. `rename_symbol()` delegates to `splice::forge::rename_symbol_across_files`. Removed ~160 LOC of manual magellan iteration and identifier_spans utilities.
+- **Search module delegates to llmgrep::forge**: `search_via_llmgrep()` replaced with `llmgrep::forge::search_symbols`/`search_symbols_regex` calls. Removed ~30 LOC of manual `Backend` + `SearchOptions` construction.
 - **Tree-sitter CFG extraction removed**: `CfgExtractor` in `treesitter/mod.rs` is no longer called by `cfg/mod.rs`. `CfgModule::index()` is now a no-op with documentation explaining that CFG data is populated by magellan during `GraphModule::index()`.
 - **Edit module: splice-only refactored**: `patch_symbol()` and `rename_symbol()` no longer fall back to naive file-system scanning or `String::replace_range`. They now require `graph.db` + magellan + splice features. Missing DB returns explicit error: `"graph.db not found; run forge.graph().index() first"`. Missing splice feature returns: `"splice feature not enabled"`.
+- **Edit module modularized**: `edit/mod.rs` split into `edit/mod.rs` (986 LOC), `edit/undo.rs` (99 LOC), `edit/identifiers.rs` (98 LOC). No file exceeds 1K LOC.
+- **Forge struct gains undo_capacity field**: `Forge { store, undo_capacity }` — `Forge::edit()` passes capacity through to `EditModule::with_undo_capacity()`.
+- **Verifier compiles/tests via BuildModule**: When forge is configured, structured diagnostics from `forge_core::diagnostic::Diagnostic` are converted to agent `Diagnostic` type. Falls back to raw `Command::new("cargo")` otherwise.
+- **Mutator create_file via EditModule**: When forge is configured, `PlanOperation::Create` delegates to `EditModule::create_file()` for path validation and undo tracking.
 - **`#[cfg(test)]` gating on helper functions**: `collect_files_recursive`, `find_symbol_span`, `find_definition_end`, `simple_word_replace` are now gated behind `#[cfg(test)]` since they are only used by unit tests after the splice-only refactor.
 - **Tree-sitter ecosystem bump**: `tree-sitter` 0.22 → 0.25, `tree-sitter-rust` 0.21 → 0.25, `tree-sitter-javascript` 0.21 → 0.25. Unblocks `ring` ≥ 0.17.12 which resolves RUSTSEC-2025-0009.
 - **Dependency bumps**: `magellan` 3.3.8 → 3.3.10, `mirage` 1.4.2 → 1.4.4, `splice` 2.6.9 → 2.6.11. All aligned on `cc` ≥ 1.2 for `ring` compatibility.
@@ -47,6 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **forge-runtime `default-features = false` build break**: After magellan unification removed cfg guards from graph/search modules, forge-runtime (which disabled default features) could no longer compile. Changed to inherit forge-core's default features.
 - **`test_path_builder_filters` stale DB conflict**: Test now uses `tempfile::tempdir()` instead of `std::env::current_dir()` to avoid hitting the project's own `.magellan/forge.db` with schema version 5 vs supported 4.
 - **Clippy lints**: Resolved dead_code and unused variable warnings in `forge_agent/src/workflow/plan.rs`, `semgrep.rs`, `forge_core/src/graph/mod.rs`, and `indexing.rs`.
+- **`SemgrepRunner` dead_code suppression**: Removed `#[allow(dead_code)]`, prefixed unused fields with `_`.
+- **`edit/undo.rs` bare unwrap**: `stack.pop().unwrap()` replaced with `.expect("invariant: stack non-empty after is_empty check")`.
+- **`loop.rs` modularization**: Renamed `loop.rs` → `agent_loop.rs` (eliminated `r#loop` raw identifier), then split into `agent_loop/` directory: `mod.rs` (311), `types.rs` (30), `phases.rs` (546), `tests.rs` (627). All 6 reference sites updated.
 
 ---
 

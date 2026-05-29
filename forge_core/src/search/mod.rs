@@ -1,8 +1,8 @@
 //! Search module - Semantic code search via llmgrep
 //!
-//! This module provides semantic code search by integrating with llmgrep,
-//! which queries magellan databases for symbols, references, and calls.
-//! When the llmgrep feature is disabled, falls back to regex-based file scanning.
+//! This module provides semantic code search by delegating to `llmgrep::forge`
+//! convenience functions. When llmgrep is disabled, falls back to regex-based
+//! file scanning.
 
 use crate::error::{ForgeError, Result as ForgeResult};
 use crate::storage::UnifiedGraphStore;
@@ -31,7 +31,7 @@ impl SearchModule {
 
     /// Pattern-based search using regex.
     ///
-    /// With llmgrep: queries the magellan DB with regex matching.
+    /// With llmgrep: delegates to `llmgrep::forge::search_symbols_regex`.
     /// Without: scans source files recursively with regex.
     pub async fn pattern_search(&self, pattern: &str) -> ForgeResult<Vec<Symbol>> {
         let db_path = self.store.db_path.clone();
@@ -51,7 +51,7 @@ impl SearchModule {
 
     /// Semantic search using natural language.
     ///
-    /// With llmgrep: queries the magellan DB with fuzzy/substring matching.
+    /// With llmgrep: delegates to `llmgrep::forge::search_symbols`.
     /// Without: splits query into keywords and scans files.
     pub async fn semantic_search(&self, query: &str) -> ForgeResult<Vec<Symbol>> {
         if query.trim().is_empty() {
@@ -90,52 +90,90 @@ impl SearchModule {
         Ok(all_symbols.into_iter().filter(|s| s.kind == kind).collect())
     }
 
+    /// Find all references to a symbol.
+    pub async fn references(&self, symbol_name: &str, limit: usize) -> ForgeResult<Vec<Symbol>> {
+        let db_path = self.store.db_path.clone();
+        if !db_path.exists() {
+            return Ok(Vec::new());
+        }
+        llmgrep::forge::search_references(symbol_name, &db_path, limit)
+            .map(|refs| {
+                refs.into_iter()
+                    .map(|r| Symbol {
+                        id: SymbolId(0),
+                        name: Arc::from(r.referenced_symbol.clone()),
+                        fully_qualified_name: Arc::from(r.referenced_symbol),
+                        kind: SymbolKind::Function,
+                        language: Language::Unknown("unknown".to_string()),
+                        location: Location {
+                            file_path: PathBuf::from(&r.span.file_path),
+                            byte_start: r.span.byte_start as u32,
+                            byte_end: r.span.byte_end as u32,
+                            line_number: r.span.start_line as usize,
+                        },
+                        parent_id: None,
+                        metadata: serde_json::Value::Null,
+                    })
+                    .collect()
+            })
+            .map_err(|e| ForgeError::DatabaseError(format!("Reference search failed: {}", e)))
+    }
+
+    /// Find all calls involving a symbol.
+    pub async fn calls(&self, symbol_name: &str, limit: usize) -> ForgeResult<Vec<Symbol>> {
+        let db_path = self.store.db_path.clone();
+        if !db_path.exists() {
+            return Ok(Vec::new());
+        }
+        llmgrep::forge::search_calls(symbol_name, &db_path, limit)
+            .map(|calls| {
+                calls
+                    .into_iter()
+                    .map(|c| Symbol {
+                        id: SymbolId(0),
+                        name: Arc::from(c.caller.clone()),
+                        fully_qualified_name: Arc::from(c.caller.clone()),
+                        kind: SymbolKind::Function,
+                        language: Language::Unknown("unknown".to_string()),
+                        location: Location {
+                            file_path: PathBuf::from(&c.span.file_path),
+                            byte_start: c.span.byte_start as u32,
+                            byte_end: c.span.byte_end as u32,
+                            line_number: c.span.start_line as usize,
+                        },
+                        parent_id: None,
+                        metadata: serde_json::Value::Null,
+                    })
+                    .collect()
+            })
+            .map_err(|e| ForgeError::DatabaseError(format!("Call search failed: {}", e)))
+    }
+
+    /// Lookup a symbol by fully-qualified name.
+    pub async fn lookup(&self, fqn: &str) -> ForgeResult<Option<Symbol>> {
+        let db_path = self.store.db_path.clone();
+        if !db_path.exists() {
+            return Ok(None);
+        }
+        llmgrep::forge::lookup_symbol(fqn, &db_path)
+            .map(|m| Some(llmgrep_match_to_symbol(m)))
+            .map_err(|e| ForgeError::DatabaseError(format!("Lookup failed: {}", e)))
+    }
+
     // -- llmgrep-backed search --
 
     async fn search_via_llmgrep(&self, query: &str, use_regex: bool) -> ForgeResult<Vec<Symbol>> {
-        use llmgrep::query::SearchOptions;
-
         let db_path = self.store.db_path.clone();
-        let backend = llmgrep::Backend::detect_and_open(&db_path).map_err(|e| {
-            ForgeError::DatabaseError(format!("Failed to open llmgrep backend: {}", e))
-        })?;
 
-        let options = SearchOptions {
-            db_path: &db_path,
-            query,
-            path_filter: None,
-            kind_filter: None,
-            language_filter: None,
-            limit: 50,
-            use_regex,
-            candidates: 100,
-            context: llmgrep::query::ContextOptions::default(),
-            snippet: llmgrep::query::SnippetOptions::default(),
-            fqn: llmgrep::query::FqnOptions {
-                fqn: true,
-                ..Default::default()
-            },
-            include_score: false,
-            sort_by: llmgrep::SortMode::default(),
-            metrics: llmgrep::query::MetricsOptions::default(),
-            ast: llmgrep::query::AstOptions::new(),
-            depth: llmgrep::query::DepthOptions::default(),
-            algorithm: llmgrep::AlgorithmOptions::default(),
-            symbol_id: None,
-            fqn_pattern: None,
-            exact_fqn: None,
-            coverage_filter: None,
+        let result = if use_regex {
+            llmgrep::forge::search_symbols_regex(query, &db_path, 50)
+        } else {
+            llmgrep::forge::search_symbols(query, &db_path, 50)
         };
 
-        let (response, _truncated, _fts_used) = backend
-            .search_symbols(options)
-            .map_err(|e| ForgeError::DatabaseError(format!("llmgrep search failed: {}", e)))?;
-
-        Ok(response
-            .results
-            .into_iter()
-            .map(llmgrep_match_to_symbol)
-            .collect())
+        result
+            .map(|matches| matches.into_iter().map(llmgrep_match_to_symbol).collect())
+            .map_err(|e| ForgeError::DatabaseError(format!("llmgrep search failed: {}", e)))
     }
 
     // -- File-based fallback search --
@@ -245,7 +283,6 @@ impl SearchModule {
     }
 }
 
-/// Recursively collect source files, skipping build artifacts.
 async fn collect_source_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
         return;
@@ -333,7 +370,6 @@ fn map_llmgrep_language(lang: &str) -> Language {
     }
 }
 
-/// Extract function name from a source line
 fn extract_symbol_from_line(line: &str) -> String {
     let line = line.trim();
 

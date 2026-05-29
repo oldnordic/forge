@@ -32,6 +32,14 @@
 pub mod error;
 pub mod types;
 
+pub mod build;
+pub mod dependency;
+pub mod diagnostic;
+pub mod diff;
+pub mod progress;
+pub mod project;
+pub mod workspace;
+
 use std::sync::Arc;
 
 // Public API modules
@@ -79,6 +87,7 @@ use anyhow::anyhow;
 #[derive(Clone, Debug)]
 pub struct Forge {
     store: std::sync::Arc<UnifiedGraphStore>,
+    undo_capacity: usize,
 }
 
 impl Forge {
@@ -113,9 +122,11 @@ impl Forge {
         backend: BackendKind,
     ) -> anyhow::Result<Self> {
         let store = std::sync::Arc::new(storage::UnifiedGraphStore::open(path, backend).await?);
-        let forge = Forge { store };
+        let forge = Forge {
+            store,
+            undo_capacity: 100,
+        };
 
-        #[cfg(feature = "magellan")]
         {
             if forge.store.needs_indexing() {
                 tracing::info!("Graph empty — auto-indexing codebase with magellan");
@@ -150,12 +161,35 @@ impl Forge {
 
     /// Returns the edit module for span-safe refactoring.
     pub fn edit(&self) -> edit::EditModule {
-        edit::EditModule::new(Arc::clone(&self.store))
+        edit::EditModule::new(Arc::clone(&self.store)).with_undo_capacity(self.undo_capacity)
     }
 
     /// Returns the analysis module for combined operations.
     pub fn analysis(&self) -> analysis::AnalysisModule {
         analysis::AnalysisModule::new(self.graph(), self.cfg(), self.edit(), self.search())
+    }
+
+    /// Returns the build module for build system operations.
+    ///
+    /// Detects the build system from the codebase root. Returns `None` if
+    /// no known build system is detected.
+    pub fn build(&self) -> Option<build::BuildModule> {
+        build::BuildModule::detect(&self.store.codebase_path)
+    }
+
+    /// Returns the workspace view for monorepo awareness.
+    pub fn as_workspace(&self) -> anyhow::Result<workspace::Workspace> {
+        workspace::Workspace::open(&self.store.codebase_path).map_err(|e| anyhow!("{e}"))
+    }
+
+    /// Returns the project module for scaffolding and detection.
+    pub fn project(&self) -> project::ProjectModule {
+        project::ProjectModule::new(Arc::clone(&self.store))
+    }
+
+    /// Returns the dependency module for manifest operations.
+    pub fn dependency(&self) -> dependency::DependencyModule {
+        dependency::DependencyModule::new(self.store.codebase_path.clone())
     }
 
     /// Returns the codebase path.
@@ -192,6 +226,7 @@ pub struct ForgeBuilder {
     backend_kind: Option<BackendKind>,
     db_path: Option<std::path::PathBuf>,
     db_dir: Option<std::path::PathBuf>,
+    undo_capacity: Option<usize>,
 }
 
 impl ForgeBuilder {
@@ -232,6 +267,14 @@ impl ForgeBuilder {
         }
     }
 
+    /// Sets the undo stack capacity (default: 100).
+    pub fn undo_capacity(self, capacity: usize) -> Self {
+        Self {
+            undo_capacity: Some(capacity),
+            ..self
+        }
+    }
+
     /// Builds a `Forge` instance with configured options.
     pub async fn build(self) -> anyhow::Result<Forge> {
         let path = self.path.ok_or_else(|| anyhow!("path is required"))?;
@@ -250,7 +293,10 @@ impl ForgeBuilder {
             storage::UnifiedGraphStore::open_with_path(&path, &resolved_db, backend).await?,
         );
 
-        Ok(Forge { store })
+        Ok(Forge {
+            store,
+            undo_capacity: self.undo_capacity.unwrap_or(100),
+        })
     }
 }
 
@@ -301,7 +347,10 @@ mod tests {
             .unwrap(),
         );
 
-        let forge = Forge { store };
+        let forge = Forge {
+            store,
+            undo_capacity: 100,
+        };
 
         // Graph accessor should return GraphModule
         let graph = forge.graph();
@@ -321,7 +370,10 @@ mod tests {
             .unwrap(),
         );
 
-        let forge = Forge { store };
+        let forge = Forge {
+            store,
+            undo_capacity: 100,
+        };
 
         // Search accessor should return SearchModule
         let search = forge.search();
@@ -341,7 +393,10 @@ mod tests {
             .unwrap(),
         );
 
-        let forge = Forge { store };
+        let forge = Forge {
+            store,
+            undo_capacity: 100,
+        };
 
         // CFG accessor should return CfgModule
         let cfg = forge.cfg();
@@ -361,7 +416,10 @@ mod tests {
             .unwrap(),
         );
 
-        let forge = Forge { store };
+        let forge = Forge {
+            store,
+            undo_capacity: 100,
+        };
 
         // Edit accessor should return EditModule
         let edit = forge.edit();
@@ -381,7 +439,10 @@ mod tests {
             .unwrap(),
         );
 
-        let forge = Forge { store };
+        let forge = Forge {
+            store,
+            undo_capacity: 100,
+        };
 
         // Analysis accessor should return AnalysisModule
         let analysis = forge.analysis();

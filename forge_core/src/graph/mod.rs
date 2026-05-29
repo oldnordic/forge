@@ -5,7 +5,7 @@
 
 use crate::error::Result;
 use crate::storage::UnifiedGraphStore;
-use crate::types::{Cycle, Reference, ReferenceKind, Symbol, SymbolId};
+use crate::types::{Cycle, CycleMember, Reference, ReferenceKind, Symbol, SymbolId};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -125,17 +125,13 @@ impl GraphModule {
             crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
-        let file_paths: Vec<String> = graph
-            .all_file_nodes_readonly()
-            .map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!("Failed to get file nodes: {}", e))
-            })?
-            .into_keys()
-            .collect();
+        let symbols = graph.search_symbols_by_name(name).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Symbol search failed: {}", e))
+        })?;
 
         let mut callers = Vec::new();
-        for file_path in file_paths {
-            if let Ok(call_facts) = graph.callers_of_symbol(&file_path, name) {
+        for sym in &symbols {
+            if let Ok(call_facts) = graph.callers_of_symbol(&sym.file_path, name) {
                 for fact in call_facts {
                     callers.push(Reference {
                         from: SymbolId(0),
@@ -267,26 +263,26 @@ impl GraphModule {
             crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
-        let condensation = graph.condense_call_graph().map_err(|e| {
+        let report = graph.detect_cycles().map_err(|e| {
             crate::error::ForgeError::DatabaseError(format!("Cycle detection failed: {}", e))
         })?;
 
-        let cycles = condensation
-            .graph
-            .supernodes
+        Ok(report
+            .cycles
             .into_iter()
-            .filter(|sn| sn.members.len() > 1)
-            .map(|sn| Cycle {
-                members: sn
+            .map(|c| Cycle {
+                members: c
                     .members
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| SymbolId(sn.id * 1000 + i as i64))
+                    .into_iter()
+                    .map(|si| CycleMember {
+                        symbol_id: si.symbol_id,
+                        fqn: si.fqn,
+                        file_path: si.file_path,
+                        kind: si.kind,
+                    })
                     .collect(),
             })
-            .collect();
-
-        Ok(cycles)
+            .collect())
     }
 
     /// Returns the number of symbols in the graph.
@@ -313,65 +309,75 @@ impl GraphModule {
         symbol_name: &str,
         max_hops: Option<u32>,
     ) -> Result<Vec<ImpactedSymbol>> {
-        use sqlitegraph::{
-            backend::BackendDirection, open_graph, snapshot::SnapshotId, GraphConfig,
-        };
+        use magellan::CodeGraph;
 
         let db_path = &self.store.db_path;
         if !db_path.exists() {
             return Ok(Vec::new());
         }
 
-        let config = GraphConfig::sqlite();
-        let backend = open_graph(db_path, &config).map_err(|e| {
-            crate::error::ForgeError::DatabaseError(format!("Failed to open graph: {}", e))
+        let mut graph = CodeGraph::open(db_path).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Failed to open magellan graph: {}", e))
         })?;
 
-        let snapshot = SnapshotId::current();
-        let start_id = {
-            let ids = backend.entity_ids().map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!("Failed to list entities: {}", e))
-            })?;
-            let mut found = None;
-            for id in ids {
-                if let Ok(node) = backend.get_node(snapshot, id) {
-                    if node.name == symbol_name {
-                        found = Some(id);
-                        break;
-                    }
-                }
-            }
-            match found {
-                Some(id) => id,
-                None => return Ok(Vec::new()),
-            }
+        let symbols = graph.search_symbols_by_name(symbol_name).map_err(|e| {
+            crate::error::ForgeError::DatabaseError(format!("Symbol search failed: {}", e))
+        })?;
+
+        let start_entity_id = match symbols.first() {
+            Some(s) => s.entity_id,
+            None => return Ok(Vec::new()),
         };
 
         let hops = max_hops.unwrap_or(2);
-        let impacted_ids = backend
-            .k_hop(snapshot, start_id, hops, BackendDirection::Outgoing)
-            .map_err(|e| {
-                crate::error::ForgeError::DatabaseError(format!("k-hop query failed: {}", e))
-            })?;
 
-        let mut results = Vec::new();
-        for id in impacted_ids {
-            if id == start_id {
-                continue;
+        let mut impacted = Vec::new();
+        let mut visited = HashSet::new();
+        visited.insert(start_entity_id);
+        let mut current_level = vec![start_entity_id];
+
+        for hop in 1..=hops {
+            let mut next_level = Vec::new();
+            for &entity_id in &current_level {
+                if let Ok(sym) = graph.symbol_by_entity_id(entity_id) {
+                    let file = &sym.file_path;
+                    if let Ok(callers) =
+                        graph.callers_of_symbol(file, sym.fqn.as_deref().unwrap_or(&sym.kind))
+                    {
+                        for fact in callers {
+                            let caller_entity = graph
+                                .symbol_id_by_name(
+                                    fact.file_path.to_str().unwrap_or(""),
+                                    &fact.caller,
+                                )
+                                .ok()
+                                .flatten();
+                            if let Some(cid) = caller_entity {
+                                if visited.insert(cid) {
+                                    next_level.push(cid);
+                                    if let Ok(info) = graph.symbol_by_entity_id(cid) {
+                                        impacted.push(ImpactedSymbol {
+                                            symbol_id: cid,
+                                            name: info.fqn.clone().unwrap_or_default(),
+                                            kind: info.kind,
+                                            file_path: info.file_path,
+                                            hop_distance: hop,
+                                            edge_type: "call".to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            if let Ok(node) = backend.get_node(snapshot, id) {
-                results.push(ImpactedSymbol {
-                    symbol_id: id,
-                    name: node.name,
-                    kind: node.kind,
-                    file_path: node.file_path.unwrap_or_default(),
-                    hop_distance: 1,
-                    edge_type: "transitive".to_string(),
-                });
+            current_level = next_level;
+            if current_level.is_empty() {
+                break;
             }
         }
 
-        Ok(results)
+        Ok(impacted)
     }
 
     /// Indexes the codebase using magellan.
@@ -572,5 +578,95 @@ mod tests {
     #[test]
     fn test_byte_offset_to_line_number_empty_content() {
         assert_eq!(byte_offset_to_line_number(b"", 0), 1);
+    }
+
+    #[tokio::test]
+    async fn test_find_symbol_after_index() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(
+            src_dir.join("lib.rs"),
+            "fn hello() {}\nfn world() -> i32 { 42 }\n",
+        )
+        .await
+        .unwrap();
+
+        let forge = test_forge(temp_dir.path()).await;
+        forge.graph().index().await.unwrap();
+
+        let symbols = forge.graph().find_symbol("hello").await.unwrap();
+        assert!(!symbols.is_empty());
+        assert_eq!(symbols[0].name.as_ref(), "hello");
+    }
+
+    #[tokio::test]
+    async fn test_callers_of_after_index() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(
+            src_dir.join("lib.rs"),
+            "fn helper() -> i32 { 1 }\nfn caller() -> i32 { helper() }\n",
+        )
+        .await
+        .unwrap();
+
+        let forge = test_forge(temp_dir.path()).await;
+        forge.graph().index().await.unwrap();
+
+        let callers = forge.graph().callers_of("helper").await.unwrap();
+        assert!(!callers.is_empty(), "should find caller calling helper");
+    }
+
+    #[tokio::test]
+    async fn test_cycles_detect_mutual_recursion() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(src_dir.join("lib.rs"), "fn a() { b() }\nfn b() { a() }\n")
+            .await
+            .unwrap();
+
+        let forge = test_forge(temp_dir.path()).await;
+        forge.graph().index().await.unwrap();
+
+        let cycles = forge.graph().cycles().await.unwrap();
+        assert!(
+            !cycles.is_empty(),
+            "should detect mutual recursion between a and b"
+        );
+        let cycle = &cycles[0];
+        assert!(cycle.members.len() >= 2);
+        assert!(cycle.members.iter().any(|m| m.fqn.as_deref() == Some("a")));
+        assert!(cycle.members.iter().any(|m| m.fqn.as_deref() == Some("b")));
+    }
+
+    #[tokio::test]
+    async fn test_impact_analysis_after_index() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(
+            src_dir.join("lib.rs"),
+            "fn base() -> i32 { 1 }\nfn mid() -> i32 { base() }\nfn top() -> i32 { mid() }\n",
+        )
+        .await
+        .unwrap();
+
+        let forge = test_forge(temp_dir.path()).await;
+        forge.graph().index().await.unwrap();
+
+        let impacted = forge
+            .graph()
+            .impact_analysis("base", Some(2))
+            .await
+            .unwrap();
+        assert!(
+            !impacted.is_empty(),
+            "base should have mid and/or top as impacted"
+        );
+        let has_correct_hop = impacted.iter().any(|s| s.hop_distance == 1);
+        assert!(has_correct_hop, "at least one symbol should be at hop 1");
     }
 }

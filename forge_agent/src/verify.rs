@@ -49,12 +49,38 @@ impl Verifier {
         self
     }
 
-    /// Runs compile check via cargo.
+    /// Runs compile check.
     ///
-    /// # Arguments
-    ///
-    /// * `working_dir` - Directory to check
+    /// Uses `BuildModule::check()` when a Forge instance is available,
+    /// falling back to raw `cargo check` otherwise.
     pub async fn compile_check(&self, working_dir: &std::path::Path) -> Result<Vec<Diagnostic>> {
+        if let Some(ref forge) = self.forge {
+            if let Some(build) = forge.build() {
+                let output = build.check(working_dir).await.map_err(|e| {
+                    AgentError::VerificationFailed(format!("Build check failed: {}", e))
+                })?;
+                return Ok(output
+                    .diagnostics
+                    .iter()
+                    .filter_map(|d| {
+                        let level = match d.severity {
+                            forge_core::diagnostic::DiagnosticSeverity::Error => {
+                                Some(DiagnosticLevel::Error)
+                            }
+                            forge_core::diagnostic::DiagnosticSeverity::Warning => {
+                                Some(DiagnosticLevel::Warning)
+                            }
+                            _ => None,
+                        };
+                        level.map(|l| Diagnostic {
+                            level: l,
+                            message: d.message.clone(),
+                        })
+                    })
+                    .collect());
+            }
+        }
+
         let output = Command::new("cargo")
             .args(["check", "--message-format=short"])
             .current_dir(working_dir)
@@ -82,12 +108,38 @@ impl Verifier {
         Ok(diagnostics)
     }
 
-    /// Runs tests via cargo.
+    /// Runs tests.
     ///
-    /// # Arguments
-    ///
-    /// * `working_dir` - Directory to test
+    /// Uses `BuildModule::test()` when a Forge instance is available,
+    /// falling back to raw `cargo test` otherwise.
     pub async fn test_check(&self, working_dir: &std::path::Path) -> Result<Vec<Diagnostic>> {
+        if let Some(ref forge) = self.forge {
+            if let Some(build) = forge.build() {
+                let output = build.test(working_dir).await.map_err(|e| {
+                    AgentError::VerificationFailed(format!("Build test failed: {}", e))
+                })?;
+                if output.success {
+                    return Ok(Vec::new());
+                }
+                return Ok(output
+                    .diagnostics
+                    .iter()
+                    .filter_map(|d| {
+                        let level = match d.severity {
+                            forge_core::diagnostic::DiagnosticSeverity::Error => {
+                                Some(DiagnosticLevel::Error)
+                            }
+                            _ => None,
+                        };
+                        level.map(|l| Diagnostic {
+                            level: l,
+                            message: d.message.clone(),
+                        })
+                    })
+                    .collect());
+            }
+        }
+
         let output = Command::new("cargo")
             .args(["test", "--message-format=short"])
             .current_dir(working_dir)
@@ -99,7 +151,6 @@ impl Verifier {
 
         let mut diagnostics = Vec::new();
 
-        // Parse test results
         for line in stdout.lines().chain(stderr.lines()) {
             if line.contains("test result:") && line.contains("FAILED") {
                 diagnostics.push(Diagnostic {
@@ -447,5 +498,20 @@ mod tests {
             .await;
         assert!(result.is_some());
         assert!(result.unwrap().contains("import"));
+    }
+
+    #[tokio::test]
+    async fn test_verifier_with_forge_uses_build_module() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let forge = forge_core::ForgeBuilder::new()
+            .path(temp_dir.path())
+            .db_path(temp_dir.path().join("test.db"))
+            .build()
+            .await
+            .unwrap();
+
+        let verifier = Verifier::with_forge(forge);
+        let result = verifier.compile_check(temp_dir.path()).await;
+        assert!(result.is_ok(), "compile_check with forge should succeed");
     }
 }

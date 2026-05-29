@@ -15,14 +15,22 @@ use uuid::Uuid;
 /// snapshotting files before mutation and providing rollback capability.
 #[derive(Clone, Default)]
 pub struct Mutator {
-    /// Current transaction state
     transaction: Option<Transaction>,
+    forge: Option<forge_core::Forge>,
 }
 
 impl Mutator {
     /// Creates a new mutator.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a new mutator with a Forge instance for SDK-backed operations.
+    pub fn with_forge(forge: forge_core::Forge) -> Self {
+        Self {
+            transaction: None,
+            forge: Some(forge),
+        }
     }
 
     /// Begins a new transaction.
@@ -81,14 +89,22 @@ impl Mutator {
                 let p = Path::new(path);
                 let _ = transaction.snapshot_file(p).await;
 
-                if let Some(parent) = p.parent() {
-                    fs::create_dir_all(parent).await.map_err(|e| {
-                        AgentError::MutationFailed(format!("Failed to create dir: {}", e))
+                if let Some(ref forge) = self.forge {
+                    let edit = forge.edit();
+                    let result = edit.create_file(p, content).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to create {}: {}", path, e))
+                    })?;
+                    tracing::debug!("Created file via EditModule: {:?}", result.changed_files);
+                } else {
+                    if let Some(parent) = p.parent() {
+                        fs::create_dir_all(parent).await.map_err(|e| {
+                            AgentError::MutationFailed(format!("Failed to create dir: {}", e))
+                        })?;
+                    }
+                    fs::write(path, content).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to write {}: {}", path, e))
                     })?;
                 }
-                fs::write(path, content).await.map_err(|e| {
-                    AgentError::MutationFailed(format!("Failed to write {}: {}", path, e))
-                })?;
             }
             crate::planner::PlanOperation::Inspect { .. } => {
                 // No mutation needed for read-only operations
@@ -384,5 +400,19 @@ mod tests {
         assert!(previews[0].contains("Create"));
         assert!(previews[0].contains("fn test() {}"));
         assert!(previews[1].contains("Delete"));
+    }
+
+    #[tokio::test]
+    async fn test_mutator_with_forge_stores_forge() {
+        let temp_dir = TempDir::new().unwrap();
+        let forge = forge_core::ForgeBuilder::new()
+            .path(temp_dir.path())
+            .db_path(temp_dir.path().join("test.db"))
+            .build()
+            .await
+            .unwrap();
+
+        let mutator = Mutator::with_forge(forge);
+        assert!(mutator.forge.is_some());
     }
 }

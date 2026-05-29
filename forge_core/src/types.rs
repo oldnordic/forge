@@ -256,11 +256,24 @@ pub struct Path {
     pub length: usize,
 }
 
+/// A member of a call graph cycle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CycleMember {
+    /// Stable symbol ID (BLAKE3 hash string from magellan)
+    pub symbol_id: Option<String>,
+    /// Fully-qualified name of the symbol
+    pub fqn: Option<String>,
+    /// File path containing the symbol
+    pub file_path: String,
+    /// Symbol kind (Function, Method, etc.)
+    pub kind: String,
+}
+
 /// A cycle in the call graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cycle {
-    /// Symbols in the cycle
-    pub members: Vec<SymbolId>,
+    /// Symbols in the cycle with full metadata
+    pub members: Vec<CycleMember>,
 }
 
 /// A natural loop in the CFG.

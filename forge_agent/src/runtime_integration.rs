@@ -92,7 +92,7 @@ impl Agent {
         runtime: &mut ForgeRuntime,
         query: &str,
     ) -> crate::Result<LoopResult> {
-        use crate::r#loop::AgentLoop;
+        use crate::agent_loop::AgentLoop;
 
         let forge = self
             .forge

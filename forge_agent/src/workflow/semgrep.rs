@@ -17,17 +17,16 @@ pub struct SemgrepFinding {
 }
 
 /// Runs semgrep with configurable rulesets.
-#[allow(dead_code)]
 pub struct SemgrepRunner {
-    configs: Vec<String>,
-    json_output: bool,
+    _configs: Vec<String>,
+    _json_output: bool,
 }
 
 impl SemgrepRunner {
     pub fn new(configs: Vec<String>) -> Self {
         Self {
-            configs,
-            json_output: true,
+            _configs: configs,
+            _json_output: true,
         }
     }
 

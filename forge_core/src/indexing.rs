@@ -441,7 +441,6 @@ impl IncrementalIndexer {
             return Ok(());
         }
 
-        #[cfg(feature = "magellan")]
         {
             let mut graph = magellan::CodeGraph::open(&db_path)?;
             if let Some(parent) = path.parent() {
@@ -453,14 +452,12 @@ impl IncrementalIndexer {
     }
 
     /// Deletes a file from the index using magellan.
-    #[allow(unused_variables)]
     async fn delete_file(&self, path: &Path) -> anyhow::Result<()> {
         let db_path = self.store.db_path().join("graph.db");
         if !db_path.exists() {
             return Ok(());
         }
 
-        #[cfg(feature = "magellan")]
         {
             let mut graph = magellan::CodeGraph::open(&db_path)?;
             let path_str = path.to_string_lossy();

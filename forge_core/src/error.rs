@@ -64,6 +64,14 @@ pub enum ForgeError {
     /// External tool execution error (Magellan, LLMGrep, etc.).
     #[error("Tool error: {0}")]
     ToolError(String),
+
+    /// Path is not allowed (outside codebase or absolute).
+    #[error("Path not allowed: {0}")]
+    PathNotAllowed(PathBuf),
+
+    /// File already exists.
+    #[error("File already exists: {0}")]
+    FileAlreadyExists(PathBuf),
 }
 
 /// Type alias for Result with ForgeError.

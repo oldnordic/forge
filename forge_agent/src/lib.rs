@@ -34,7 +34,7 @@ pub mod verify;
 pub mod commit;
 
 // Loop module (Phase 3 - Task 1)
-pub mod r#loop;
+pub mod agent_loop;
 
 // Audit module (Phase 3 - Task 2)
 pub mod audit;
@@ -54,6 +54,10 @@ pub use llm::OpenAiProvider;
 // Envoy coordination module
 #[cfg(feature = "envoy")]
 pub mod envoy;
+
+// Evidence recording module
+#[cfg(feature = "envoy")]
+pub mod evidence;
 
 // Context composition module
 pub mod context;
@@ -108,7 +112,7 @@ pub use policy::{Policy, PolicyReport, PolicyValidator, PolicyViolation};
 pub use observe::Observation;
 
 // Re-export loop types
-pub use r#loop::{AgentLoop, AgentPhase, LoopResult};
+pub use agent_loop::{AgentLoop, AgentPhase, LoopResult};
 
 // Re-export audit types
 pub use audit::{AuditEvent, AuditLog};
@@ -272,6 +276,9 @@ pub struct Agent {
     /// Optional envoy client for multi-agent coordination
     #[cfg(feature = "envoy")]
     pub(crate) envoy: Option<std::sync::Arc<envoy::EnvoyClient>>,
+    /// Optional evidence recording session
+    #[cfg(feature = "envoy")]
+    pub(crate) session: Option<std::sync::Arc<evidence::ForgeSession>>,
     /// Policies enforced during the constraint phase
     policies: Vec<policy::Policy>,
 }
@@ -301,12 +308,32 @@ impl Agent {
                 .map(|c| std::sync::Arc::new(envoy::EnvoyClient::new(c)))
         };
 
+        #[cfg(feature = "envoy")]
+        let project_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_str()
+            .unwrap_or("unknown")
+            .to_string();
+
+        #[cfg(feature = "envoy")]
+        let session: Option<std::sync::Arc<evidence::ForgeSession>> = envoy.as_ref().map(|c| {
+            std::sync::Arc::new(evidence::ForgeSession::new(
+                c.clone() as std::sync::Arc<dyn evidence::EvidenceRecorder>,
+                &project_name,
+                "forge",
+                None,
+            ))
+        });
+
         Ok(Self {
             codebase_path: path,
             forge,
             llm,
             #[cfg(feature = "envoy")]
             envoy,
+            #[cfg(feature = "envoy")]
+            session,
             policies: Vec::new(),
         })
     }
@@ -546,7 +573,7 @@ impl Agent {
             .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
 
         // Create fresh loop state (no state leakage between runs)
-        let mut agent_loop = r#loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
+        let mut agent_loop = agent_loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
 
         // Pass LLM provider to agent loop if configured
         if let Some(ref llm) = self.llm {
@@ -556,6 +583,11 @@ impl Agent {
         #[cfg(feature = "envoy")]
         if let Some(ref envoy) = self.envoy {
             agent_loop = agent_loop.with_discovery_store(envoy.clone());
+        }
+
+        #[cfg(feature = "envoy")]
+        if let Some(ref session) = self.session {
+            agent_loop = agent_loop.with_session(session.clone());
         }
 
         if !self.policies.is_empty() {
@@ -747,7 +779,7 @@ mod tests {
         };
         let client = std::sync::Arc::new(envoy::EnvoyClient::new(config));
         // Verify EnvoyClient can be coerced to DiscoveryStore
-        let store: std::sync::Arc<dyn crate::r#loop::DiscoveryStore> = client.clone();
+        let store: std::sync::Arc<dyn crate::agent_loop::DiscoveryStore> = client.clone();
         // Fire-and-forget: should not panic even when server is unreachable
         store
             .store(
