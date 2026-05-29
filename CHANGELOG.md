@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Tool deps are now required**: `magellan`, `llmgrep`, `mirage-analyzer`, `splice`, and `which` are no longer optional feature-gated dependencies. All `#[cfg(feature = "...")]` gates and empty-return fallback arms have been removed from `CfgModule`, `SearchModule`, `EditModule`, `GraphModule`, `indexing`, and `lib`. The `tools` feature flag is removed; `default = ["sqlite"]` is the only default feature.
+- **Replaced petgraph with sqlitegraph TypedDiGraph**: `forge_agent` and `forge-reasoning` no longer depend on petgraph. `DiGraph<N, E>` replaced with `TypedDiGraph<N, E>` from sqlitegraph 3.0.7. All algorithm calls (`toposort`, `tarjan_scc`, `is_cyclic_directed`, `Dfs`) now use sqlitegraph's typed_digraph::algo module. Bumped sqlitegraph to 3.0.7 across the workspace.
+- **Test robustness fix**: `test_low_confidence_bails_before_max_attempts` no longer depends on `cargo check` output format varying across environments. Checks confidence threshold regardless of pipeline outcome.
 
 ### Added
 
