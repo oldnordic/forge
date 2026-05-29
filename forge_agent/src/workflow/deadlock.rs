@@ -7,7 +7,7 @@
 
 use crate::workflow::dag::{Workflow, WorkflowError};
 use crate::workflow::task::TaskId;
-use petgraph::algo::tarjan_scc;
+use sqlitegraph::typed_digraph::tarjan_scc;
 #[allow(unused_imports, reason = "HashSet used only in test code")]
 use std::collections::HashSet;
 use std::time::Duration;

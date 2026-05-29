@@ -1,6 +1,6 @@
 [package]
 name = "forge-core"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/oldnordic/forge"
@@ -18,6 +18,7 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 tracing = "0.1"
 blake3 = "1.5"
 regex = "1"
@@ -29,16 +30,17 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 notify = "8"
 
 # Graph database
-sqlitegraph = { version = "3.0.2", features = ["sqlite-backend"], default-features = false, optional = true }
+sqlitegraph = { version = "3.0.7", features = ["sqlite-backend"], default-features = false, optional = true }
 
-# Tool integrations - these are the crates published from individual tool repos
-magellan = { version = "3.3.10", optional = true }
-llmgrep = { version = "3.4.2", optional = true }
-mirage-analyzer = { version = "1.4.4", optional = true }
-splice = { version = "2.6.11", optional = true }
+# Tool integrations
+magellan = "4.2"
+llmgrep = "3.7"
+mirage-analyzer = "1.7"
+splice = "2.8"
+which = "6.0"
 
-# For CLI fallback when crates aren't available
-which = { version = "6.0", optional = true }
+# Diff engine
+similar = "2"
 
 # Tree-sitter for CFG extraction (always available)
 tree-sitter = "0.25"
@@ -51,18 +53,11 @@ tokio = { version = "1", features = ["test-util", "macros"] }
 tempfile = "3"
 
 [features]
-default = ["sqlite", "tools"]
+default = ["sqlite"]
 
 # Storage backends
 sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend"]
 native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3"]
 
-# Tool integrations
-magellan = ["dep:magellan"]
-llmgrep = ["dep:llmgrep"]
-mirage = ["dep:mirage-analyzer"]
-splice = ["dep:splice"]
-
-# Convenience feature groups
-tools = ["magellan", "llmgrep", "mirage", "splice", "which"]
-full = ["tools", "sqlite"]
+# Convenience feature group
+full = ["sqlite"]

@@ -19,7 +19,7 @@ path = "src/cli.rs"
 default = ["sqlite"]
 
 # Storage backends (inherited from forge_core)
-sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge-core/sqlite", "forge-core/tools"]
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend", "forge-core/sqlite"]
 full = ["sqlite"]
 
 # LLM providers
@@ -32,10 +32,10 @@ llm = ["llm-ollama"]
 envoy = ["dep:reqwest"]
 
 [dependencies]
-forge-core = { version = "0.2.2", path = "../forge_core", default-features = false }
-forge-reasoning = { path = "../forge-reasoning" }
+forge-core = { version = "0.3.0", path = "../forge_core", default-features = false }
+forge-reasoning = { version = "0.1.2", path = "../forge-reasoning" }
 forge-runtime = { version = "0.1", path = "../forge_runtime" }
-sqlitegraph = { version = "3.0.2", default-features = false, optional = true }
+sqlitegraph = { version = "3.0.7", default-features = false, optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
@@ -44,14 +44,14 @@ serde_yaml = "0.9"
 toml = "0.8"
 thiserror = "1"
 chrono = { version = "0.4", features = ["clock", "serde"], default-features = false }
-uuid = { version = "1.0", features = ["v4", "serde"] }
-petgraph = "0.8"
+uuid = { version = "1.0", features = ["v4", "v7", "serde"] }
 async-trait = "0.1"
-bincode = "2.0"
+
 sha2 = "0.10"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 tracing = "0.1"
+regex = "1"
 reqwest = { version = "0.12", features = ["json"], optional = true }
 
 [dev-dependencies]

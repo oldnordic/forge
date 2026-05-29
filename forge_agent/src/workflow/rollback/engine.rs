@@ -5,8 +5,7 @@ use crate::audit::AuditLog;
 use crate::workflow::dag::Workflow;
 use crate::workflow::task::{TaskContext, TaskId};
 use chrono::Utc;
-use petgraph::graph::NodeIndex;
-use petgraph::Direction;
+use sqlitegraph::typed_digraph::{Direction, NodeIndex};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub struct RollbackEngine {

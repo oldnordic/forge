@@ -5,7 +5,7 @@
 
 use crate::workflow::dag::Workflow;
 use crate::workflow::task::TaskId;
-use petgraph::algo::is_cyclic_directed;
+use sqlitegraph::typed_digraph::{is_cyclic_directed, tarjan_scc, Direction};
 use std::collections::HashSet;
 
 /// Validation report for workflow structure.
@@ -130,16 +130,13 @@ impl WorkflowValidator {
 
     /// Checks for cycles in the dependency graph.
     fn check_cycles(&self, workflow: &Workflow, report: &mut ValidationReport) {
-        // Use petgraph's cycle detection
         let is_cyclic = is_cyclic_directed(&workflow.graph);
 
         if is_cyclic {
-            // Find strongly connected components to identify cycles
-            let sccs = petgraph::algo::tarjan_scc(&workflow.graph);
+            let sccs = tarjan_scc(&workflow.graph);
 
             for scc in sccs {
                 if scc.len() > 1 {
-                    // This SCC is a cycle
                     let cycle_ids: Vec<TaskId> = scc
                         .iter()
                         .filter_map(|&idx| workflow.graph.node_weight(idx))
@@ -190,20 +187,18 @@ impl WorkflowValidator {
 
         for task_id in workflow.task_ids() {
             if let Some(&idx) = workflow.task_map.get(&task_id) {
-                // Check for incoming edges
                 let incoming_count = workflow
                     .graph
-                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .neighbors_directed(idx, Direction::Incoming)
                     .count();
 
                 if incoming_count > 0 {
                     has_incoming.insert(task_id.clone());
                 }
 
-                // Check for outgoing edges
                 let outgoing_count = workflow
                     .graph
-                    .neighbors_directed(idx, petgraph::Direction::Outgoing)
+                    .neighbors_directed(idx, Direction::Outgoing)
                     .count();
 
                 if outgoing_count > 0 {

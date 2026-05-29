@@ -1,10 +1,8 @@
 //! Dependency graph for beliefs (hypotheses)
 
 use indexmap::IndexSet;
-use petgraph::algo::tarjan_scc;
-use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::Dfs;
-use std::collections::{HashMap, HashSet}; // For deterministic ordering
+use sqlitegraph::typed_digraph::{tarjan_scc, Dfs, Direction, NodeIndex, TypedDiGraph};
+use std::collections::{HashMap, HashSet};
 
 use crate::errors::Result;
 use crate::hypothesis::types::HypothesisId;
@@ -15,14 +13,14 @@ use crate::hypothesis::types::HypothesisId;
 /// So B is a "dependee" of A, and A is a "dependent" of B
 #[derive(Clone)]
 pub struct BeliefGraph {
-    graph: DiGraph<HypothesisId, ()>,
+    graph: TypedDiGraph<HypothesisId, ()>,
     node_indices: HashMap<HypothesisId, NodeIndex>,
 }
 
 impl BeliefGraph {
     pub fn new() -> Self {
         Self {
-            graph: DiGraph::new(),
+            graph: TypedDiGraph::new(),
             node_indices: HashMap::new(),
         }
     }
@@ -95,10 +93,7 @@ impl BeliefGraph {
         })?;
 
         let mut result = IndexSet::new();
-        for neighbor in self
-            .graph
-            .neighbors_directed(node_idx, petgraph::Direction::Incoming)
-        {
+        for neighbor in self.graph.neighbors_directed(node_idx, Direction::Incoming) {
             result.insert(self.graph[neighbor]);
         }
         Ok(result)
@@ -116,10 +111,7 @@ impl BeliefGraph {
         })?;
 
         let mut result = IndexSet::new();
-        for neighbor in self
-            .graph
-            .neighbors_directed(node_idx, petgraph::Direction::Outgoing)
-        {
+        for neighbor in self.graph.neighbors_directed(node_idx, Direction::Outgoing) {
             result.insert(self.graph[neighbor]);
         }
         Ok(result)
@@ -138,9 +130,8 @@ impl BeliefGraph {
 
         let mut result = IndexSet::new();
         let mut dfs = Dfs::new(&self.graph, node_idx);
-        while let Some(reached) = dfs.next(&self.graph) {
+        while let Some(reached) = dfs.move_next() {
             if reached != node_idx {
-                // Exclude self
                 result.insert(self.graph[reached]);
             }
         }
@@ -221,9 +212,9 @@ impl BeliefGraph {
 
         // A cycle is created if 'to' can reach 'from' after adding edge
         let mut dfs = Dfs::new(&temp_graph, to_idx);
-        while let Some(reached) = dfs.next(&temp_graph) {
+        while let Some(reached) = dfs.move_next() {
             if reached == from_idx {
-                return true; // Cycle detected!
+                return true;
             }
         }
         false
@@ -249,13 +240,8 @@ impl BeliefGraph {
     /// If A depends on B, returns (A, B)
     pub fn all_edges(&self) -> Vec<(HypothesisId, HypothesisId)> {
         self.graph
-            .raw_edges()
-            .iter()
-            .map(|e| {
-                let dependent = self.graph[e.source()];
-                let dependee = self.graph[e.target()];
-                (dependent, dependee)
-            })
+            .iter_edges()
+            .map(|e| (self.graph[e.source], self.graph[e.target]))
             .collect()
     }
 

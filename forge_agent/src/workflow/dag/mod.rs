@@ -1,11 +1,10 @@
-//! DAG-based workflow representation using petgraph.
+//! DAG-based workflow representation using sqlitegraph TypedDiGraph.
 //!
 //! Provides the core workflow data structure with topological sorting,
 //! cycle detection, and dependency management.
 
 use crate::workflow::task::{TaskId, WorkflowTask};
-use petgraph::algo::toposort as petgraph_toposort;
-use petgraph::graph::{DiGraph, NodeIndex};
+use sqlitegraph::typed_digraph::{toposort as td_toposort, Direction, NodeIndex, TypedDiGraph};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
@@ -89,9 +88,7 @@ impl TaskNode {
 /// let order = workflow.execution_order()?;
 /// ```
 pub struct Workflow {
-    /// Directed graph of tasks with dependency edges
-    pub(in crate::workflow) graph: DiGraph<TaskNode, ()>,
-    /// Map from TaskId to graph node index for O(1) lookup
+    pub(in crate::workflow) graph: TypedDiGraph<TaskNode, ()>,
     pub(in crate::workflow) task_map: HashMap<TaskId, NodeIndex>,
 }
 
@@ -99,7 +96,7 @@ impl Workflow {
     /// Creates a new empty workflow.
     pub fn new() -> Self {
         Self {
-            graph: DiGraph::new(),
+            graph: TypedDiGraph::new(),
             task_map: HashMap::new(),
         }
     }
@@ -189,17 +186,15 @@ impl Workflow {
         self.graph.add_edge(from_idx, to_idx, ());
 
         // Check for cycles using topological sort
-        match petgraph_toposort(&self.graph, None) {
+        match td_toposort(&self.graph) {
             Ok(_) => Ok(()),
             Err(_) => {
-                // Remove the edge that created the cycle
                 self.graph.remove_edge(
                     self.graph
                         .find_edge(from_idx, to_idx)
-                        .expect("Edge just added"),
+                        .expect("invariant: edge just added"),
                 );
 
-                // Find the cycle path for better error message
                 let cycle_path = self.find_cycle_path(from_idx, to_idx);
                 Err(WorkflowError::CycleDetected(cycle_path))
             }
@@ -222,7 +217,7 @@ impl Workflow {
         }
 
         // Perform topological sort
-        let sorted_indices = petgraph_toposort(&self.graph, None)
+        let sorted_indices = td_toposort(&self.graph)
             .map_err(|_| WorkflowError::CycleDetected(self.detect_cycle_nodes()))?;
 
         // Convert NodeIndex to TaskId
@@ -268,16 +263,15 @@ impl Workflow {
         }
 
         // Verify no cycles using topological sort
-        let _sorted_indices = petgraph_toposort(&self.graph, None)
+        let _sorted_indices = td_toposort(&self.graph)
             .map_err(|_| WorkflowError::CycleDetected(self.detect_cycle_nodes()))?;
 
-        // Find all root nodes (in-degree = 0)
         let roots: Vec<NodeIndex> = self
             .graph
             .node_indices()
             .filter(|&idx| {
                 self.graph
-                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .neighbors_directed(idx, Direction::Incoming)
                     .count()
                     == 0
             })
@@ -298,11 +292,11 @@ impl Workflow {
         }
 
         // Process nodes in topological order to compute distances
-        let sorted_indices = petgraph_toposort(&self.graph, None).unwrap();
+        let sorted_indices = td_toposort(&self.graph).expect("invariant: already verified acyclic");
         for idx in sorted_indices {
             let max_incoming = self
                 .graph
-                .neighbors_directed(idx, petgraph::Direction::Incoming)
+                .neighbors_directed(idx, Direction::Incoming)
                 .filter_map(|neighbor| distances.get(&neighbor).copied())
                 .max()
                 .unwrap_or(0);
@@ -310,11 +304,7 @@ impl Workflow {
             let current_distance = distances.get(&idx).copied().unwrap_or(0);
             distances.insert(idx, std::cmp::max(current_distance, max_incoming + 1));
 
-            // Propagate distance to outgoing neighbors
-            for neighbor in self
-                .graph
-                .neighbors_directed(idx, petgraph::Direction::Outgoing)
-            {
+            for neighbor in self.graph.neighbors_directed(idx, Direction::Outgoing) {
                 let neighbor_dist = distances.get(&neighbor).copied().unwrap_or(0);
                 if distances[&idx] + 1 > neighbor_dist {
                     distances.insert(neighbor, distances[&idx] + 1);
@@ -363,7 +353,7 @@ impl Workflow {
     pub fn task_dependencies(&self, id: &TaskId) -> Option<Vec<TaskId>> {
         self.task_map.get(id).map(|&idx| {
             self.graph
-                .neighbors_directed(idx, petgraph::Direction::Incoming)
+                .neighbors_directed(idx, Direction::Incoming)
                 .filter_map(|neighbor_idx| self.graph.node_weight(neighbor_idx))
                 .map(|node| node.id.clone())
                 .collect()
@@ -384,7 +374,7 @@ impl Workflow {
             .node_indices()
             .filter(|&idx| {
                 self.graph
-                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .neighbors_directed(idx, Direction::Incoming)
                     .count()
                     == 0
             })
@@ -491,11 +481,7 @@ impl Workflow {
             }
             visited.insert(current);
 
-            // Add neighbors to queue
-            for neighbor in self
-                .graph
-                .neighbors_directed(current, petgraph::Direction::Incoming)
-            {
+            for neighbor in self.graph.neighbors_directed(current, Direction::Incoming) {
                 if !visited.contains(&neighbor) {
                     let mut new_path = path.clone();
                     new_path.push(neighbor);
@@ -510,10 +496,8 @@ impl Workflow {
 
     /// Detects all nodes involved in cycles (fallback error reporting).
     fn detect_cycle_nodes(&self) -> Vec<TaskId> {
-        // Use strongly connected components to find cycles
-        let sccs = petgraph::algo::tarjan_scc(&self.graph);
+        let sccs = sqlitegraph::typed_digraph::tarjan_scc(&self.graph);
 
-        // Return nodes from SCCs with more than one node
         sccs.into_iter()
             .filter(|scc| scc.len() > 1)
             .flat_map(|scc| {
