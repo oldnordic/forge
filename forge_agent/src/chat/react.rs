@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::chat::providers::ChatProvider;
 use crate::chat::tools::registry::ToolRegistry;
 use crate::chat::tools::types::ToolCall;
@@ -17,7 +19,7 @@ pub enum AgentError {
 }
 
 pub struct ReActLoop<R: ToolRegistry> {
-    provider: Box<dyn ChatProvider>,
+    provider: Arc<dyn ChatProvider>,
     registry: R,
     config: LlmConfig,
     max_iterations: usize,
@@ -25,7 +27,7 @@ pub struct ReActLoop<R: ToolRegistry> {
 }
 
 impl<R: ToolRegistry> ReActLoop<R> {
-    pub fn new(provider: Box<dyn ChatProvider>, registry: R, config: LlmConfig) -> Self {
+    pub fn new(provider: Arc<dyn ChatProvider>, registry: R, config: LlmConfig) -> Self {
         ReActLoop {
             provider,
             registry,

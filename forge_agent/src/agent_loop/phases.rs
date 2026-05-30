@@ -527,6 +527,7 @@ impl AgentLoop {
             crate::AgentError::CommitFailed(_) => "Commit",
             crate::AgentError::ForgeError(_) => "Forge",
             crate::AgentError::WorkflowFailed(_) => "Workflow",
+            crate::AgentError::ReActFailed(_) => "ReAct",
         };
 
         if let Err(e) = self

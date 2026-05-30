@@ -103,6 +103,10 @@ pub enum AgentError {
     /// Workflow execution failed
     #[error("Workflow failed: {0}")]
     WorkflowFailed(String),
+
+    /// ReAct agent loop failed
+    #[error("ReAct agent failed: {0}")]
+    ReActFailed(String),
 }
 
 /// Result type for agent operations.
@@ -276,6 +280,10 @@ pub struct Agent {
     forge: Option<forge_core::Forge>,
     /// Optional LLM provider for semantic operations
     pub(crate) llm: Option<std::sync::Arc<dyn llm::LlmProvider>>,
+    /// Optional chat provider for ReAct agent loop
+    chat_provider: Option<std::sync::Arc<dyn chat::ChatProvider>>,
+    /// Chat config (model, temperature, etc.) for ReAct loop
+    chat_config: Option<llm::LlmConfig>,
     /// Optional envoy client for multi-agent coordination
     #[cfg(feature = "envoy")]
     pub(crate) envoy: Option<std::sync::Arc<envoy::EnvoyClient>>,
@@ -333,6 +341,8 @@ impl Agent {
             codebase_path: path,
             forge,
             llm,
+            chat_provider: None,
+            chat_config: None,
             #[cfg(feature = "envoy")]
             envoy,
             #[cfg(feature = "envoy")]
@@ -350,6 +360,20 @@ impl Agent {
     /// Sets the policies enforced during the constraint phase.
     pub fn with_policies(mut self, policies: Vec<policy::Policy>) -> Self {
         self.policies = policies;
+        self
+    }
+
+    /// Sets a chat provider and config for the ReAct agent loop.
+    ///
+    /// When configured, `run_react()` will use this provider instead of
+    /// the default `AgentLoop` 6-phase pipeline.
+    pub fn with_chat_provider(
+        mut self,
+        provider: std::sync::Arc<dyn chat::ChatProvider>,
+        config: llm::LlmConfig,
+    ) -> Self {
+        self.chat_provider = Some(provider);
+        self.chat_config = Some(config);
         self
     }
 
@@ -600,6 +624,64 @@ impl Agent {
         agent_loop.run(query).await
     }
 
+    /// Runs the ReAct agent loop: an LLM-driven autonomous cycle of
+    /// reasoning and tool-calling.
+    ///
+    /// Unlike `run()` (fixed 6-phase pipeline), the ReAct loop lets the
+    /// LLM decide which tools to call and when to stop, up to a maximum
+    /// number of iterations.
+    ///
+    /// Requires a `ChatProvider` configured via `with_chat_provider()`.
+    /// Uses `BuiltinToolRegistry` with file_read, file_write, and
+    /// shell_exec tools scoped to the codebase path.
+    ///
+    /// Returns a `LoopResult` with a synthetic transaction ID. The ReAct
+    /// loop does not create git commits — it returns the LLM's final
+    /// text answer in the audit events.
+    pub async fn run_react(&self, query: &str) -> Result<LoopResult> {
+        let provider = self.chat_provider.as_ref().ok_or_else(|| {
+            AgentError::ReActFailed(
+                "no ChatProvider configured; use with_chat_provider()".to_string(),
+            )
+        })?;
+        let config = self
+            .chat_config
+            .as_ref()
+            .ok_or_else(|| {
+                AgentError::ReActFailed(
+                    "no LlmConfig configured; use with_chat_provider()".to_string(),
+                )
+            })?
+            .clone();
+
+        let mut registry = chat::BuiltinToolRegistry::new();
+        registry.register_many(chat::default_builtin_tools(&self.codebase_path));
+
+        let react = chat::ReActLoop::new(std::sync::Arc::clone(provider), registry, config)
+            .with_system_prompt(format!(
+                "You are an autonomous coding agent. You have tools to read files, \
+             write files, and execute shell commands. Your workspace is: {}",
+                self.codebase_path.display()
+            ));
+
+        let answer = react
+            .run(query)
+            .await
+            .map_err(|e| AgentError::ReActFailed(format!("{e}")))?;
+
+        Ok(LoopResult {
+            transaction_id: format!("react-{}", chrono::Utc::now().timestamp_millis()),
+            modified_files: vec![],
+            audit_events: vec![crate::audit::AuditEvent::WorkflowTaskCompleted {
+                timestamp: chrono::Utc::now(),
+                workflow_id: "react".to_string(),
+                task_id: "react-loop".to_string(),
+                task_name: "ReAct agent loop".to_string(),
+                result: answer,
+            }],
+        })
+    }
+
     /// Executes a workflow DAG, injecting this agent's Forge SDK into every task context.
     ///
     /// Tasks like `AgentLoopTask` and `GraphQueryTask` require forge in their context;
@@ -791,5 +873,82 @@ mod tests {
                 serde_json::json!({"file": "test.rs"}),
             )
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_run_react_without_provider_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let agent = Agent::new(temp.path()).await.unwrap();
+
+        let result = agent.run_react("do something").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AgentError::ReActFailed(msg) => {
+                assert!(msg.contains("no ChatProvider"));
+            }
+            other => panic!("expected ReActFailed, got {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_with_chat_provider_configures_agent() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = std::sync::Arc::new(chat::MockChatProvider::from_text("hello"));
+        let config = llm::LlmConfig::new("test-model");
+
+        let agent = Agent::new(temp.path())
+            .await
+            .unwrap()
+            .with_chat_provider(provider, config);
+
+        assert!(agent.chat_provider.is_some());
+        assert!(agent.chat_config.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_run_react_returns_loop_result() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let provider = std::sync::Arc::new(chat::MockChatProvider::from_text("The answer is 42"));
+        let config = llm::LlmConfig::new("test-model");
+
+        let agent = Agent::new(temp.path())
+            .await
+            .unwrap()
+            .with_chat_provider(provider, config);
+
+        let result = agent.run_react("What is the answer?").await;
+        assert!(result.is_ok(), "run_react failed: {:?}", result.err());
+
+        let loop_result = result.unwrap();
+        assert!(
+            loop_result.transaction_id.starts_with("react-"),
+            "transaction_id should start with 'react-'"
+        );
+        assert_eq!(loop_result.modified_files.len(), 0);
+        assert_eq!(loop_result.audit_events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_run_react_tool_call_then_answer() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let provider = std::sync::Arc::new(
+            chat::MockChatProvider::from_text("The file contains rust code").with_tool_call(
+                "file_read",
+                serde_json::json!({"path": temp.path().join("test.txt").to_string_lossy()}),
+            ),
+        );
+        let config = llm::LlmConfig::new("test-model");
+
+        std::fs::write(temp.path().join("test.txt"), "hello from test").unwrap();
+
+        let agent = Agent::new(temp.path())
+            .await
+            .unwrap()
+            .with_chat_provider(provider, config);
+
+        let result = agent.run_react("Read test.txt").await;
+        assert!(result.is_ok(), "run_react failed: {:?}", result.err());
     }
 }

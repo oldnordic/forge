@@ -1,44 +1,57 @@
-use async_trait::async_trait;
-use forge_agent::chat::conversation::Conversation;
-use forge_agent::chat::providers::ollama::OllamaChatProvider;
-use forge_agent::chat::providers::ChatProvider;
-use forge_agent::chat::tools::registry::{AsyncTool, BuiltinToolRegistry, ToolRegistry};
-use forge_agent::chat::tools::types::{ToolCall, ToolDef};
-use forge_agent::chat::types::{ChatMessage, ContentBlock};
-use forge_agent::llm::LlmConfig;
+//! Debug example for live ReAct loop testing with Ollama.
+//!
+//! Run with: `cargo run --example debug_react --features llm-ollama`
 
-struct FileReadTool;
-
-#[async_trait]
-impl AsyncTool for FileReadTool {
-    async fn call(&self, args: serde_json::Value) -> Result<String, String> {
-        let path = args["path"].as_str().unwrap_or("");
-        tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| format!("Failed to read {}: {}", path, e))
-    }
-
-    fn definition(&self) -> ToolDef {
-        ToolDef::new(
-            "file_read",
-            "Read the contents of a file",
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path to read"}
-                },
-                "required": ["path"]
-            }),
-        )
-    }
+#[cfg(not(feature = "llm-ollama"))]
+fn main() {
+    eprintln!("This example requires the llm-ollama feature.");
+    eprintln!("Run with: cargo run --example debug_react --features llm-ollama");
 }
 
+#[cfg(feature = "llm-ollama")]
 #[tokio::main]
 async fn main() {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use forge_agent::chat::conversation::Conversation;
+    use forge_agent::chat::providers::ollama::OllamaChatProvider;
+    use forge_agent::chat::providers::ChatProvider;
+    use forge_agent::chat::tools::registry::{AsyncTool, BuiltinToolRegistry, ToolRegistry};
+    use forge_agent::chat::tools::types::{ToolCall, ToolDef};
+    use forge_agent::chat::types::{ChatMessage, ContentBlock};
+    use forge_agent::llm::LlmConfig;
+
+    struct FileReadTool;
+
+    #[async_trait]
+    impl AsyncTool for FileReadTool {
+        async fn call(&self, args: serde_json::Value) -> Result<String, String> {
+            let path = args["path"].as_str().unwrap_or("");
+            tokio::fs::read_to_string(path)
+                .await
+                .map_err(|e| format!("Failed to read {}: {}", path, e))
+        }
+
+        fn definition(&self) -> ToolDef {
+            ToolDef::new(
+                "file_read",
+                "Read the contents of a file",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "File path to read"}
+                    },
+                    "required": ["path"]
+                }),
+            )
+        }
+    }
+
     let mut registry = BuiltinToolRegistry::new();
     registry.register(Box::new(FileReadTool));
 
-    let provider = OllamaChatProvider::local();
+    let provider = Arc::new(OllamaChatProvider::local());
     let config = LlmConfig::new("qwen3.5-agent:latest").with_temperature(0.0);
 
     let mut conversation = Conversation::new();

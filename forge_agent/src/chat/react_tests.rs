@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::chat::providers::mock::MockChatProvider;
 use crate::chat::react::{AgentError, ReActLoop};
 use crate::chat::tools::registry::BuiltinToolRegistry;
@@ -34,7 +36,7 @@ async fn react_text_only_no_tools() {
     let registry = BuiltinToolRegistry::new();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config);
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
     let result = react.run("Say hello").await;
 
     assert_eq!(result.unwrap(), "Hello world");
@@ -47,7 +49,7 @@ async fn react_tool_call_then_answer() {
     let registry = echo_registry();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config);
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
     let result = react.run("Echo hi").await;
 
     assert_eq!(result.unwrap(), "final answer");
@@ -61,7 +63,7 @@ async fn react_multi_step_tool_calls() {
     let registry = echo_registry();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config);
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
     let result = react.run("Multi-step").await;
 
     assert_eq!(result.unwrap(), "done");
@@ -76,7 +78,7 @@ async fn react_max_iterations_exceeded() {
     let registry = echo_registry();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config).with_max_iterations(2);
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_max_iterations(2);
     let result = react.run("Infinite loop").await;
 
     match result.unwrap_err() {
@@ -93,7 +95,7 @@ async fn react_provider_error_propagates() {
     let registry = BuiltinToolRegistry::new();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config);
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
     let result = react.run("Test").await;
 
     match result.unwrap_err() {
@@ -126,7 +128,7 @@ async fn react_tool_error_feeds_back() {
         .with_tool_call("fail", serde_json::json!({}));
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), reg, config);
+    let react = ReActLoop::new(Arc::new(provider), reg, config);
     let result = react.run("Try failing tool").await;
 
     assert_eq!(result.unwrap(), "I see the error");
@@ -138,7 +140,7 @@ async fn react_custom_system_prompt() {
     let registry = BuiltinToolRegistry::new();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config)
+    let react = ReActLoop::new(Arc::new(provider), registry, config)
         .with_system_prompt("You are a test assistant");
     let result = react.run("Test").await;
 
@@ -151,7 +153,7 @@ async fn react_no_tool_calls_returns_immediately() {
     let registry = echo_registry();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Box::new(provider), registry, config);
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
     let result = react.run("Direct question").await;
 
     assert_eq!(result.unwrap(), "quick answer");
@@ -215,7 +217,7 @@ async fn react_live_ollama_tool_calling() {
     let provider = OllamaChatProvider::local();
     let config = LlmConfig::new("qwen3.5-agent:latest").with_temperature(0.1);
 
-    let react = ReActLoop::new(Box::new(provider), registry, config)
+    let react = ReActLoop::new(Arc::new(provider), registry, config)
         .with_max_iterations(10)
         .with_system_prompt("You are a helpful assistant. Use tools when asked. After getting tool results, give a brief text answer. Do not make additional tool calls after you have the answer.");
 
