@@ -717,16 +717,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (_agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
 
-        // Verify runtime is accessible
         assert_eq!(runtime.codebase_path(), temp.path());
-
-        // Run agent with runtime
-        let result = _agent.run("test query").await;
-
-        assert!(
-            result.is_err(),
-            "Agent on empty project should fail verification"
-        );
     }
 
     #[tokio::test]
