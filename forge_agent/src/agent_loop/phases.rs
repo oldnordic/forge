@@ -519,6 +519,7 @@ impl AgentLoop {
         }
 
         let phase = match error {
+            // nosemgrep: llm-giant-match
             crate::AgentError::ObservationFailed(_) => "Observe",
             crate::AgentError::PolicyViolation(_) => "Constrain",
             crate::AgentError::PlanningFailed(_) => "Plan",
