@@ -6,6 +6,11 @@
 //! - `OpenAiProvider`    — OpenAI chat completions API (`llm-openai` feature)
 //! - `AnthropicProvider` — Anthropic Messages API (`llm-anthropic` feature)
 
+#[cfg(any(
+    feature = "llm-ollama",
+    feature = "llm-openai",
+    feature = "llm-anthropic"
+))]
 use serde::{Deserialize, Serialize};
 
 /// Async text-completion contract shared by all LLM backends.
@@ -15,9 +20,49 @@ pub trait LlmProvider: Send + Sync {
     async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, String>;
 }
 
-/// Stub LLM configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LlmConfig;
+/// LLM configuration for provider requests.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct LlmConfig {
+    pub model: String,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub stop: Vec<String>,
+    #[serde(default)]
+    pub json_mode: bool,
+}
+
+impl LlmConfig {
+    pub fn new(model: impl Into<String>) -> Self {
+        LlmConfig {
+            model: model.into(),
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stop: Vec::new(),
+            json_mode: false,
+        }
+    }
+
+    pub fn with_temperature(mut self, temp: f32) -> Self {
+        self.temperature = Some(temp);
+        self
+    }
+
+    pub fn with_max_tokens(mut self, tokens: u32) -> Self {
+        self.max_tokens = Some(tokens);
+        self
+    }
+
+    pub fn with_json_mode(mut self) -> Self {
+        self.json_mode = true;
+        self
+    }
+}
 
 // ── Mock ──────────────────────────────────────────────────────────────────────
 

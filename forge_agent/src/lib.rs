@@ -51,6 +51,9 @@ pub use llm::OllamaProvider;
 #[cfg(feature = "llm-openai")]
 pub use llm::OpenAiProvider;
 
+// Chat types and conversation
+pub mod chat;
+
 // Envoy coordination module
 #[cfg(feature = "envoy")]
 pub mod envoy;

@@ -52,8 +52,9 @@ clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 tracing = "0.1"
 regex = "1"
-reqwest = { version = "0.12", features = ["json"], optional = true }
+reqwest = { version = "0.12", features = ["json", "stream"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }
 tempfile = "3"
+mockito = "1"

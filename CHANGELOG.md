@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - Unreleased
 
+### Added
+
+- **Chat & Tool-Calling SDK** (`forge_agent/src/chat/`): Full model-agnostic SDK for autonomous multi-step agent workflows.
+  - `ChatProvider` trait with `chat()` and `chat_stream()` methods
+  - `OllamaChatProvider` — `/api/chat` with tool calling, NDJSON streaming
+  - `OpenAiChatProvider` — `/v1/chat/completions` with bearer auth, SSE streaming
+  - `AnthropicChatProvider` — `/v1/messages` with `x-api-key`, SSE streaming
+  - `MockChatProvider` — sequential canned responses for testing
+  - `LlmProviderAdapter` — bridges legacy `LlmProvider` to `ChatProvider`
+  - `RetryProvider` — exponential backoff on rate limits and connection errors
+  - `ReActLoop<R: ToolRegistry>` — autonomous tool-calling loop with max iterations
+  - `StreamEvent` enum — Token, ToolCallStart/Delta/End, Usage, Done, Error
+  - `Conversation` — message history manager with truncation
+  - `ToolRegistry` trait, `BuiltinToolRegistry`, `AsyncTool` trait
+  - Built-in tools: `FileReadTool`, `FileWriteTool`, `ShellExecTool` (with path escape protection)
+  - `validate_tool_arguments()` — required-parameter validation against JSON Schema
+  - Feature flags: `llm-ollama`, `llm-openai`, `llm-anthropic` (each gates `dep:reqwest`)
+  - `reqwest` gained `stream` feature for `bytes_stream()`
+  - Live Ollama integration test with `qwen3.5-agent:latest`
+  - 649 tests passing (all features), fmt + clippy clean
+
 ### Changed
 
 - **Tool deps are now required**: `magellan`, `llmgrep`, `mirage-analyzer`, `splice`, and `which` are no longer optional feature-gated dependencies. All `#[cfg(feature = "...")]` gates and empty-return fallback arms have been removed from `CfgModule`, `SearchModule`, `EditModule`, `GraphModule`, `indexing`, and `lib`. The `tools` feature flag is removed; `default = ["sqlite"]` is the only default feature.
