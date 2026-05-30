@@ -635,10 +635,8 @@ impl Agent {
     /// Uses `BuiltinToolRegistry` with file_read, file_write, and
     /// shell_exec tools scoped to the codebase path.
     ///
-    /// Returns a `LoopResult` with a synthetic transaction ID. The ReAct
-    /// loop does not create git commits — it returns the LLM's final
-    /// text answer in the audit events.
-    pub async fn run_react(&self, query: &str) -> Result<LoopResult> {
+    /// Returns the LLM's final text answer on success.
+    pub async fn run_react(&self, query: &str) -> Result<String> {
         let provider = self.chat_provider.as_ref().ok_or_else(|| {
             AgentError::ReActFailed(
                 "no ChatProvider configured; use with_chat_provider()".to_string(),
@@ -660,26 +658,14 @@ impl Agent {
         let react = chat::ReActLoop::new(std::sync::Arc::clone(provider), registry, config)
             .with_system_prompt(format!(
                 "You are an autonomous coding agent. You have tools to read files, \
-             write files, and execute shell commands. Your workspace is: {}",
+                 write files, and execute shell commands. Your workspace is: {}",
                 self.codebase_path.display()
             ));
 
-        let answer = react
+        react
             .run(query)
             .await
-            .map_err(|e| AgentError::ReActFailed(format!("{e}")))?;
-
-        Ok(LoopResult {
-            transaction_id: format!("react-{}", chrono::Utc::now().timestamp_millis()),
-            modified_files: vec![],
-            audit_events: vec![crate::audit::AuditEvent::WorkflowTaskCompleted {
-                timestamp: chrono::Utc::now(),
-                workflow_id: "react".to_string(),
-                task_id: "react-loop".to_string(),
-                task_name: "ReAct agent loop".to_string(),
-                result: answer,
-            }],
-        })
+            .map_err(|e| AgentError::ReActFailed(format!("{e}")))
     }
 
     /// Executes a workflow DAG, injecting this agent's Forge SDK into every task context.
@@ -737,8 +723,10 @@ mod tests {
         // Run agent with runtime
         let result = _agent.run("test query").await;
 
-        // Should complete (may fail on actual query, but infrastructure works)
-        assert!(result.is_ok() || result.is_err());
+        assert!(
+            result.is_err(),
+            "Agent on empty project should fail verification"
+        );
     }
 
     #[tokio::test]
@@ -906,7 +894,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_react_returns_loop_result() {
+    async fn test_run_react_returns_answer() {
         let temp = tempfile::tempdir().unwrap();
 
         let provider = std::sync::Arc::new(chat::MockChatProvider::from_text("The answer is 42"));
@@ -917,16 +905,9 @@ mod tests {
             .unwrap()
             .with_chat_provider(provider, config);
 
-        let result = agent.run_react("What is the answer?").await;
-        assert!(result.is_ok(), "run_react failed: {:?}", result.err());
-
-        let loop_result = result.unwrap();
-        assert!(
-            loop_result.transaction_id.starts_with("react-"),
-            "transaction_id should start with 'react-'"
-        );
-        assert_eq!(loop_result.modified_files.len(), 0);
-        assert_eq!(loop_result.audit_events.len(), 1);
+        let answer = agent.run_react("What is the answer?").await;
+        assert!(answer.is_ok(), "run_react failed: {:?}", answer.err());
+        assert_eq!(answer.unwrap(), "The answer is 42");
     }
 
     #[tokio::test]
@@ -934,10 +915,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
 
         let provider = std::sync::Arc::new(
-            chat::MockChatProvider::from_text("The file contains rust code").with_tool_call(
-                "file_read",
-                serde_json::json!({"path": temp.path().join("test.txt").to_string_lossy()}),
-            ),
+            chat::MockChatProvider::from_text("The file contains rust code")
+                .with_tool_call("file_read", serde_json::json!({"path": "test.txt"})),
         );
         let config = llm::LlmConfig::new("test-model");
 
@@ -948,7 +927,8 @@ mod tests {
             .unwrap()
             .with_chat_provider(provider, config);
 
-        let result = agent.run_react("Read test.txt").await;
-        assert!(result.is_ok(), "run_react failed: {:?}", result.err());
+        let answer = agent.run_react("Read test.txt").await;
+        assert!(answer.is_ok(), "run_react failed: {:?}", answer.err());
+        assert_eq!(answer.unwrap(), "The file contains rust code");
     }
 }

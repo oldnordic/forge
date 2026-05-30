@@ -121,7 +121,7 @@ async fn adapter_converts_legacy_provider() {
         .expect("adapter should succeed");
 
     assert_eq!(response.message.text(), Some("legacy response"));
-    assert_eq!(response.model, "legacy");
+    assert_eq!(response.model, "legacy-model");
 }
 
 #[tokio::test]

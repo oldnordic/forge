@@ -41,9 +41,13 @@ impl AnthropicChatProvider {
 #[serde(untagged)]
 enum AnthropicContentBlock {
     Text {
+        #[serde(rename = "type")]
+        kind: &'static str,
         text: String,
     },
     ToolUse {
+        #[serde(rename = "type")]
+        kind: &'static str,
         id: String,
         name: String,
         input: serde_json::Value,
@@ -180,6 +184,7 @@ fn convert_messages(messages: &[ChatMessage]) -> (Option<String>, Vec<AnthropicM
                 if let Some(t) = msg.text() {
                     if !t.is_empty() {
                         content.push(AnthropicContentBlock::Text {
+                            kind: "text",
                             text: t.to_string(),
                         });
                     }
@@ -192,13 +197,17 @@ fn convert_messages(messages: &[ChatMessage]) -> (Option<String>, Vec<AnthropicM
                             arguments,
                         } => {
                             content.push(AnthropicContentBlock::ToolUse {
+                                kind: "tool_use",
                                 id: id.clone(),
                                 name: name.clone(),
                                 input: arguments.clone(),
                             });
                         }
                         ContentBlock::Text { text } if !text.is_empty() => {
-                            content.push(AnthropicContentBlock::Text { text: text.clone() });
+                            content.push(AnthropicContentBlock::Text {
+                                kind: "text",
+                                text: text.clone(),
+                            });
                         }
                         _ => {}
                     }

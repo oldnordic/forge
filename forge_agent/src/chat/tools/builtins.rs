@@ -3,10 +3,36 @@ use super::types::ToolDef;
 use async_trait::async_trait;
 
 fn validate_path(working_dir: &std::path::Path, path: &str) -> Result<std::path::PathBuf, String> {
-    if path.contains("..") || path.starts_with('/') {
-        return Err(format!("Path escapes working directory: {path}"));
+    if path.contains('\0') {
+        return Err(format!("Path contains null bytes: {path}"));
+    }
+    if path.starts_with('/') || path.starts_with('\\') {
+        return Err(format!("Absolute paths not allowed: {path}"));
+    }
+    for component in std::path::Path::new(path).components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(format!("Path traversal not allowed: {path}"));
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(format!("Absolute paths not allowed: {path}"));
+            }
+            std::path::Component::CurDir | std::path::Component::Normal(_) => {}
+        }
     }
     let full = working_dir.join(path);
+    let canonical_working = working_dir
+        .canonicalize()
+        .unwrap_or_else(|_| working_dir.to_path_buf());
+    if let Ok(canonical) = full.canonicalize() {
+        if !canonical.starts_with(&canonical_working) {
+            return Err(format!(
+                "Path escapes working directory: {} (resolved to {})",
+                path,
+                canonical.display()
+            ));
+        }
+    }
     Ok(full)
 }
 

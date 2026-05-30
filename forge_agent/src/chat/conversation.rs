@@ -60,7 +60,7 @@ impl Conversation {
             .take_while(|m| m.role == Role::System)
             .count();
         if keep <= system_count {
-            self.messages.truncate(keep);
+            self.messages.truncate(system_count);
             return;
         }
         let system_msgs: Vec<ChatMessage> =

@@ -94,7 +94,7 @@ async fn registry_execute_tool_error() {
     let call = ToolCall::new("c1", "echo", serde_json::json!({}));
     let output = registry.execute(&call).await;
     assert!(output.is_error);
-    assert!(output.content.contains("Missing"));
+    assert!(output.content.contains("missing required argument"));
 }
 
 #[tokio::test]
@@ -123,7 +123,7 @@ async fn file_read_tool_path_escape_blocked() {
         .call(serde_json::json!({"path": "../../etc/passwd"}))
         .await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("escapes"));
+    assert!(result.unwrap_err().contains("traversal"));
 }
 
 #[tokio::test]

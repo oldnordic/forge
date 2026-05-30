@@ -28,6 +28,7 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace -- --skip "thread_safety" --skip "stress_test" --skip "concurrent_state"
+        timeout-minutes: 10
 
       - name: Semgrep
         uses: semgrep/semgrep-action@v1

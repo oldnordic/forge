@@ -1,8 +1,11 @@
 use crate::chat::providers::ChatProvider;
+use crate::chat::stream::StreamEvent;
 use crate::chat::tools::types::ToolDef;
 use crate::chat::types::{ChatMessage, ChatResponse, LlmError};
 use crate::llm::LlmConfig;
 use async_trait::async_trait;
+use futures::Stream;
+use std::pin::Pin;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -68,6 +71,15 @@ impl ChatProvider for RetryProvider {
         }
 
         Err(last_error.unwrap_or(LlmError::Provider("retry exhausted".to_string())))
+    }
+
+    fn chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDef],
+        config: &LlmConfig,
+    ) -> Pin<Box<dyn Stream<Item = StreamEvent> + Send>> {
+        self.inner.chat_stream(messages, tools, config)
     }
 }
 

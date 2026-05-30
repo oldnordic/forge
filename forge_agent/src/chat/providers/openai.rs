@@ -394,8 +394,14 @@ impl ChatProvider for OpenAiChatProvider {
 
         if let Some(tool_calls) = choice.message.tool_calls {
             for tc in tool_calls {
-                let arguments: serde_json::Value =
-                    serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({}));
+                let arguments: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(
+                            "OpenAI returned malformed tool arguments for {}: {e}",
+                            tc.function.name
+                        );
+                        serde_json::json!({ "_parse_error": &tc.function.arguments })
+                    });
                 content_blocks.push(ContentBlock::tool_call(tc.id, tc.function.name, arguments));
             }
         }

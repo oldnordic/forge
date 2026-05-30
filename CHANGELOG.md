@@ -11,24 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Chat & Tool-Calling SDK** (`forge_agent/src/chat/`): Full model-agnostic SDK for autonomous multi-step agent workflows.
-  - `ChatProvider` trait with `chat()` and `chat_stream()` methods
-  - `OllamaChatProvider` — `/api/chat` with tool calling, NDJSON streaming
-  - `OpenAiChatProvider` — `/v1/chat/completions` with bearer auth, SSE streaming
-  - `AnthropicChatProvider` — `/v1/messages` with `x-api-key`, SSE streaming
-  - `MockChatProvider` — sequential canned responses for testing
-  - `LlmProviderAdapter` — bridges legacy `LlmProvider` to `ChatProvider`
-  - `RetryProvider` — exponential backoff on rate limits and connection errors
-  - `ReActLoop<R: ToolRegistry>` — autonomous tool-calling loop with max iterations
+- **Chat & Tool-Calling SDK** (`forge_agent/src/chat/`): Model-agnostic SDK for LLM-driven agent workflows.
+  - `ChatProvider` trait with `chat()` (request/response) and `chat_stream()` methods
+  - `OllamaChatProvider` — Ollama `/api/chat` with tool calling and NDJSON streaming
+  - `OpenAiChatProvider` — OpenAI `/v1/chat/completions` with bearer auth and SSE streaming
+  - `AnthropicChatProvider` — Anthropic `/v1/messages` with `x-api-key` and SSE streaming
+  - `LlmProviderAdapter` — bridges legacy `LlmProvider` (text-only) to `ChatProvider`; errors if tool calling is requested
+  - `RetryProvider` — exponential backoff on rate limits and transient connection errors; delegates streaming
+  - `ReActLoop<R: ToolRegistry>` — autonomous tool-calling loop with configurable max iterations
   - `StreamEvent` enum — Token, ToolCallStart/Delta/End, Usage, Done, Error
-  - `Conversation` — message history manager with truncation
+  - `Conversation` — message history manager with system-message-preserving truncation
   - `ToolRegistry` trait, `BuiltinToolRegistry`, `AsyncTool` trait
-  - Built-in tools: `FileReadTool`, `FileWriteTool`, `ShellExecTool` (with path escape protection)
-  - `validate_tool_arguments()` — required-parameter validation against JSON Schema
+  - Built-in tools: `FileReadTool`, `FileWriteTool`, `ShellExecTool` with path traversal protection
+  - `validate_tool_arguments()` — wired into `BuiltinToolRegistry::execute()` to reject calls with missing required parameters before dispatching to the tool
   - Feature flags: `llm-ollama`, `llm-openai`, `llm-anthropic` (each gates `dep:reqwest`)
-  - `reqwest` gained `stream` feature for `bytes_stream()`
-  - Live Ollama integration test with `qwen3.5-agent:latest`
-  - 649 tests passing (all features), fmt + clippy clean
+  - `Agent::with_chat_provider()` + `Agent::run_react()` — LLM-driven autonomous agent as alternative to fixed 6-phase pipeline
+
+### Changed
+
+- **`run_react()` returns `String`** — the LLM's final text answer, not a synthetic `LoopResult`. The ReAct loop does not create git transactions or track modified files.
+- **`LlmProviderAdapter` now errors on tool calls** — previously silently discarded tools and multi-turn history. Now returns `LlmError::Provider` if any tools are passed. Assistant and tool-result messages are flattened into the prompt for legacy providers.
+- **`validate_tool_arguments()` is enforced at the registry level** — `BuiltinToolRegistry::execute()` validates required parameters before calling the tool. Tool implementations no longer need to do their own required-arg checks.
+- **Path validation in built-in tools** — `validate_path()` now checks raw input for `..` components before joining, then canonicalizes to detect symlink escapes on existing paths. Null bytes rejected.
+- **`RetryProvider` delegates `chat_stream()`** — previously fell through to the default impl which silently returned an error stream.
+- **`Conversation::truncate_to()` preserves system messages** — when `keep` is less than the system message count, system messages are now kept rather than dropped.
+- **OpenAI tool-call argument parse failures are preserved** — malformed JSON from the LLM is kept as `{"_parse_error": "<raw>"}` instead of silently becoming `{}`.
+- **Anthropic content blocks include `type` field** — `Text` and `ToolUse` variants now serialize `"type": "text"` and `"type": "tool_use"` as required by the Anthropic API.
+- **Replaced petgraph with sqlitegraph TypedDiGraph** (from 0.4.0 cycle)
+- **Tool deps are now required** (from 0.4.0 cycle)
+
+### Known Limitations
+
+- **Streaming is batch-then-yield** — `chat_stream()` on all three providers buffers the entire HTTP response before emitting events. This is not true token-by-token streaming. The API surface exists for future improvement but does not deliver incremental tokens today.
+- **`ShellExecTool` has no sandboxing** — the tool executes arbitrary `sh -c` commands with the full privileges of the process. No allowlist, no capability restriction. This is by design for an agent framework but should be documented to users.
+- **`LlmProviderAdapter` cannot support tool calling** — the underlying `LlmProvider` trait only accepts a flat prompt string. Use a native `ChatProvider` for agent workflows.
 
 ### Changed
 
