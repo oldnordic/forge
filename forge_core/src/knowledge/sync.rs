@@ -195,7 +195,7 @@ impl KnowledgeGraph {
 
 #[cfg(test)]
 mod tests {
-    use crate::knowledge::KnowledgeGraph;
+    use crate::knowledge::{KnowledgeGraph, SourceSpan};
 
     fn setup_bridge_table(db_path: &std::path::Path) {
         let conn = rusqlite::Connection::open(db_path).expect("invariant: temp db always opens");
@@ -344,10 +344,7 @@ mod tests {
                 "my_func",
                 "Function",
                 "a::my_func",
-                "f.rs",
-                1,
-                0,
-                10,
+                &SourceSpan::new("f.rs", 1, 0, 10),
                 "Rust",
                 None,
             )
@@ -357,10 +354,7 @@ mod tests {
                 "caller",
                 "Function",
                 "a::caller",
-                "f.rs",
-                5,
-                0,
-                10,
+                &SourceSpan::new("f.rs", 5, 0, 10),
                 "Rust",
                 None,
             )
@@ -398,10 +392,7 @@ mod tests {
                 "unique_resolve_target",
                 "Function",
                 "crate::unique_resolve_target",
-                "src/lib.rs",
-                1,
-                0,
-                10,
+                &SourceSpan::new("src/lib.rs", 1, 0, 10),
                 "Rust",
                 None,
             )

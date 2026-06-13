@@ -5,6 +5,7 @@ pub mod sync;
 pub mod traversal;
 pub mod types;
 
+pub use nodes::SourceSpan;
 pub use types::*;
 
 use std::path::{Path, PathBuf};

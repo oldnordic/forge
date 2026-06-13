@@ -34,9 +34,12 @@ pub struct Watcher {
     /// Channel sender for watch events.
     sender: mpsc::UnboundedSender<WatchEvent>,
     /// The underlying notify watcher (kept alive to continue watching).
-    #[allow(clippy::type_complexity)]
-    inner: Arc<parking_lot::Mutex<Option<notify::RecommendedWatcher>>>,
+    inner: WatchHandle,
 }
+
+/// Notify watcher handle, kept behind a parking-lot mutex so it can be swapped
+/// (e.g. paused) from any thread without risking poison on a panic.
+type WatchHandle = Arc<parking_lot::Mutex<Option<notify::RecommendedWatcher>>>;
 
 impl Watcher {
     /// Creates a new watcher instance.

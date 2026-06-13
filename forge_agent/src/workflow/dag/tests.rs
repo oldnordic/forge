@@ -16,12 +16,6 @@ impl MockTask {
             deps: Vec::new(),
         }
     }
-
-    #[allow(dead_code)]
-    fn with_dep(mut self, dep: impl Into<TaskId>) -> Self {
-        self.deps.push(dep.into());
-        self
-    }
 }
 
 #[async_trait]

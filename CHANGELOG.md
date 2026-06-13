@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`debug_react` example**: added `_ => {}` catchall for `#[non_exhaustive]` ContentBlock match
 - **`TokenTracker`, `RecordingTool`, `MockChatProvider` migrated from `std::sync::Mutex` to `parking_lot::Mutex`** — eliminates 12 poisoning-panic sites across the per-LLM-response accounting path (`TokenTracker`, 4× `.lock().expect()`) and pub test-support mocks (`RecordingTool` 4×, `MockChatProvider` 4×). No API change; all migrated `Mutex` fields are private.
 - **BREAKING: `SharedSandbox` migrated from `std::sync::Mutex` to `parking_lot::Mutex`** — the public type alias `chat::sandbox::SharedSandbox` (re-exported at `chat`) and the `shared_sandbox()` constructor now wrap a `parking_lot::Mutex`. This eliminates the last 3 production `.lock().expect("invariant: sandbox lock")` sites in `builtins.rs`. Callers that construct `SharedSandbox` via `shared_sandbox()` or pass it through `with_sandbox()` are unaffected; only code that manually `.lock()`s it (none outside `builtins.rs`) must drop `.unwrap()`/`.expect()`.
+- **All 12 undocumented `#[allow(...)]` lint suppressions eliminated** under the zero-tolerance policy (verified: `rg '#\[allow\(' src/ --type rust` returns 0 hits without `reason=`):
+  - Deleted 5 dead test-only builder methods (`with_dep`/`with_compensation`) and a dead `compensation` field in `workflow` mock structs (`deadlock.rs`, `dag/tests.rs`, `rollback/tests.rs`).
+  - Deleted 2 deserialized-but-unread response fields (`role`, `thinking`) from Ollama provider `Deserialize` structs (`ollama.rs`).
+  - Introduced `pub(crate) type CompensateFn` — the shared undo/compensation closure signature — replacing 3× `#[allow(clippy::type_complexity)]` in `task.rs`/`tool_compensation.rs`; `type WatchHandle` replacing 1× in `watcher.rs`.
+  - **BREAKING: `KnowledgeGraph::add_symbol` signature reduced from 9 to 6 params** via the new `SourceSpan { file, line, byte_start, byte_end }` struct (re-exported at `crate::knowledge::SourceSpan`), removing the last `#[allow(clippy::too_many_arguments)]`. All call sites (test-only — `add_symbol` has no production callers) updated. Byte-span grouping is a reusable concept for the knowledge-graph API.
 
 ### Known Limitations
 

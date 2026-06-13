@@ -352,6 +352,11 @@ pub enum CompensationType {
     Retry,
 }
 
+/// Closure executed during rollback to compensate for a completed task
+/// (e.g. delete a created file, terminate a spawned process).
+pub(crate) type CompensateFn =
+    Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>;
+
 /// Executable compensation with a runtime undo function.
 ///
 /// Extends `CompensationAction` with a callable closure so that rollback
@@ -364,8 +369,7 @@ pub struct ExecutableCompensation {
     pub action: CompensationAction,
     /// Optional undo function executed during rollback (not serialized)
     #[serde(skip)]
-    #[allow(clippy::type_complexity)]
-    undo_fn: Option<Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>>,
+    undo_fn: Option<CompensateFn>,
 }
 
 impl fmt::Debug for ExecutableCompensation {
@@ -430,10 +434,7 @@ impl ExecutableCompensation {
     }
 
     /// Returns the underlying `undo_fn` Arc, if any.
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_undo_fn(
-        self,
-    ) -> Option<Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>> {
+    pub(crate) fn into_undo_fn(self) -> Option<CompensateFn> {
         self.undo_fn
     }
 }

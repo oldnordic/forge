@@ -134,8 +134,6 @@ struct ChatResponseRaw {
 
 #[derive(Deserialize)]
 struct ChatMessageRaw {
-    #[allow(dead_code)]
-    role: String,
     #[serde(default)]
     content: String,
     #[serde(default)]
@@ -160,9 +158,6 @@ struct StreamChunkRaw {
 struct StreamMessageRaw {
     #[serde(default)]
     content: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    thinking: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<OllamaToolCall>>,
 }
