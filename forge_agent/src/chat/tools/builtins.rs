@@ -62,7 +62,7 @@ impl AsyncTool for FileReadTool {
         let path = arguments["path"]
             .as_str()
             .ok_or_else(|| "Missing 'path' parameter".to_string())?;
-        if let Some(ref sandbox) = *self.sandbox.lock().expect("invariant: sandbox lock") {
+        if let Some(ref sandbox) = *self.sandbox.lock() {
             sandbox.is_path_allowed(path)?;
         }
         let full = validate_path(&self.working_dir, path)?;
@@ -114,7 +114,7 @@ impl AsyncTool for FileWriteTool {
         let path = arguments["path"]
             .as_str()
             .ok_or_else(|| "Missing 'path' parameter".to_string())?;
-        if let Some(ref sandbox) = *self.sandbox.lock().expect("invariant: sandbox lock") {
+        if let Some(ref sandbox) = *self.sandbox.lock() {
             sandbox.is_path_allowed(path)?;
         }
         let content = arguments["content"]
@@ -186,7 +186,7 @@ impl AsyncTool for ShellExecTool {
         let command = arguments["command"]
             .as_str()
             .ok_or_else(|| "Missing 'command' parameter".to_string())?;
-        if let Some(ref sandbox) = *self.sandbox.lock().expect("invariant: sandbox lock") {
+        if let Some(ref sandbox) = *self.sandbox.lock() {
             sandbox.is_command_allowed(command)?;
         }
         let result = tokio::time::timeout(

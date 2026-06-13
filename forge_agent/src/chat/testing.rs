@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use serde_json::Value;
 
 use crate::chat::tools::registry::AsyncTool;
@@ -21,7 +22,7 @@ pub struct RecordedCall {
 pub struct RecordingTool {
     name: String,
     response: String,
-    calls: Arc<std::sync::Mutex<Vec<RecordedCall>>>,
+    calls: Arc<Mutex<Vec<RecordedCall>>>,
 }
 
 impl RecordingTool {
@@ -29,28 +30,25 @@ impl RecordingTool {
         RecordingTool {
             name: name.into(),
             response: response.into(),
-            calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+            calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub fn call_count(&self) -> usize {
-        self.calls.lock().expect("invariant: recording lock").len()
+        self.calls.lock().len()
     }
 
     pub fn calls(&self) -> Vec<RecordedCall> {
-        self.calls
-            .lock()
-            .expect("invariant: recording lock")
-            .clone()
+        self.calls.lock().clone()
     }
 
     pub fn last_call(&self) -> Option<RecordedCall> {
-        let calls = self.calls.lock().expect("invariant: recording lock");
+        let calls = self.calls.lock();
         calls.last().cloned()
     }
 
     pub fn arguments_at(&self, index: usize) -> Option<Value> {
-        let calls = self.calls.lock().expect("invariant: recording lock");
+        let calls = self.calls.lock();
         calls.get(index).map(|c| c.arguments.clone())
     }
 }
@@ -59,14 +57,11 @@ impl RecordingTool {
 impl AsyncTool for RecordingTool {
     async fn call(&self, arguments: Value) -> Result<String, String> {
         let output = self.response.clone();
-        self.calls
-            .lock()
-            .expect("invariant: recording lock")
-            .push(RecordedCall {
-                arguments,
-                output: output.clone(),
-                was_error: false,
-            });
+        self.calls.lock().push(RecordedCall {
+            arguments,
+            output: output.clone(),
+            was_error: false,
+        });
         Ok(output)
     }
 

@@ -5,8 +5,8 @@ use crate::chat::types::{ChatMessage, ChatResponse, ContentBlock, LlmError, Usag
 use crate::llm::LlmConfig;
 use async_trait::async_trait;
 use futures::Stream;
+use parking_lot::Mutex;
 use std::pin::Pin;
-use std::sync::Mutex;
 
 enum MockResponse {
     Text(String),
@@ -30,29 +30,22 @@ impl MockChatProvider {
     pub fn with_tool_call(self, name: impl Into<String>, args: serde_json::Value) -> Self {
         self.responses
             .lock()
-            .expect("invariant: mock lock")
             .push(MockResponse::ToolCalls(vec![(name.into(), args)]));
         self
     }
 
     pub fn with_text(self, text: impl Into<String>) -> Self {
-        self.responses
-            .lock()
-            .expect("invariant: mock lock")
-            .push(MockResponse::Text(text.into()));
+        self.responses.lock().push(MockResponse::Text(text.into()));
         self
     }
 
     pub fn with_error(self, error: LlmError) -> Self {
-        self.responses
-            .lock()
-            .expect("invariant: mock lock")
-            .push(MockResponse::Error(error));
+        self.responses.lock().push(MockResponse::Error(error));
         self
     }
 
     fn next_response(&self) -> MockResponse {
-        let mut responses = self.responses.lock().expect("invariant: mock lock");
+        let mut responses = self.responses.lock();
         if responses.is_empty() {
             MockResponse::Text(self.default_text.clone())
         } else {
