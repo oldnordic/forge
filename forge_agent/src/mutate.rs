@@ -7,7 +7,6 @@ use crate::transaction::Transaction;
 use crate::{AgentError, Result};
 use std::path::Path;
 use tokio::fs;
-use uuid::Uuid;
 
 /// Mutator for transaction-based code changes.
 ///
@@ -16,21 +15,12 @@ use uuid::Uuid;
 #[derive(Clone, Default)]
 pub struct Mutator {
     transaction: Option<Transaction>,
-    forge: Option<forge_core::Forge>,
 }
 
 impl Mutator {
     /// Creates a new mutator.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Creates a new mutator with a Forge instance for SDK-backed operations.
-    pub fn with_forge(forge: forge_core::Forge) -> Self {
-        Self {
-            transaction: None,
-            forge: Some(forge),
-        }
     }
 
     /// Begins a new transaction.
@@ -89,22 +79,14 @@ impl Mutator {
                 let p = Path::new(path);
                 let _ = transaction.snapshot_file(p).await;
 
-                if let Some(ref forge) = self.forge {
-                    let edit = forge.edit();
-                    let result = edit.create_file(p, content).await.map_err(|e| {
-                        AgentError::MutationFailed(format!("Failed to create {}: {}", path, e))
-                    })?;
-                    tracing::debug!("Created file via EditModule: {:?}", result.changed_files);
-                } else {
-                    if let Some(parent) = p.parent() {
-                        fs::create_dir_all(parent).await.map_err(|e| {
-                            AgentError::MutationFailed(format!("Failed to create dir: {}", e))
-                        })?;
-                    }
-                    fs::write(path, content).await.map_err(|e| {
-                        AgentError::MutationFailed(format!("Failed to write {}: {}", path, e))
+                if let Some(parent) = p.parent() {
+                    fs::create_dir_all(parent).await.map_err(|e| {
+                        AgentError::MutationFailed(format!("Failed to create dir: {}", e))
                     })?;
                 }
+                fs::write(path, content).await.map_err(|e| {
+                    AgentError::MutationFailed(format!("Failed to write {}: {}", path, e))
+                })?;
             }
             crate::planner::PlanOperation::Inspect { .. } => {
                 // No mutation needed for read-only operations
@@ -144,31 +126,6 @@ impl Mutator {
         Ok(())
     }
 
-    /// Rolls back the current transaction.
-    ///
-    /// Takes the transaction, rolls back all changes, and returns Ok.
-    pub async fn rollback(&mut self) -> Result<()> {
-        let transaction = self
-            .transaction
-            .take()
-            .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))?;
-
-        transaction.rollback().await?;
-        Ok(())
-    }
-
-    /// Commits the current transaction.
-    ///
-    /// Takes the transaction, commits it, and returns the commit ID.
-    pub async fn commit_transaction(mut self) -> Result<Uuid> {
-        let transaction = self
-            .transaction
-            .take()
-            .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))?;
-
-        transaction.commit().await
-    }
-
     /// Extracts the transaction from the mutator.
     ///
     /// This is used when transferring the transaction to another component
@@ -177,28 +134,6 @@ impl Mutator {
         self.transaction
             .take()
             .ok_or_else(|| AgentError::MutationFailed("No active transaction".to_string()))
-    }
-
-    /// Returns preview of changes without applying.
-    pub async fn preview(&self, steps: &[crate::planner::PlanStep]) -> Result<Vec<String>> {
-        let mut previews = Vec::new();
-
-        for step in steps {
-            match &step.operation {
-                crate::planner::PlanOperation::Create { path, content } => {
-                    previews.push(format!("Create {}:\n{}", path, content));
-                }
-                crate::planner::PlanOperation::Delete { name, .. } => {
-                    previews.push(format!("Delete {}", name));
-                }
-                crate::planner::PlanOperation::Rename { old, new, .. } => {
-                    previews.push(format!("Rename {} to {}", old, new));
-                }
-                _ => {}
-            }
-        }
-
-        Ok(previews)
     }
 
     /// Returns a reference to the current transaction (for testing).
@@ -212,6 +147,7 @@ impl Mutator {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_mutator_creation() {
@@ -229,17 +165,6 @@ mod tests {
 
         // Second begin should fail
         assert!(mutator.begin_transaction().await.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_rollback() {
-        let mut mutator = Mutator::new();
-
-        mutator.begin_transaction().await.unwrap();
-        assert!(mutator.transaction().is_some());
-
-        mutator.rollback().await.unwrap();
-        assert!(mutator.transaction().is_none());
     }
 
     #[tokio::test]
@@ -265,8 +190,9 @@ mod tests {
         // Transaction should have snapshot
         assert!(mutator.transaction().is_some());
 
-        // Cleanup
-        mutator.rollback().await.unwrap();
+        // Cleanup via into_transaction + rollback
+        let txn = mutator.into_transaction().unwrap();
+        txn.rollback().await.unwrap();
     }
 
     #[tokio::test]
@@ -295,8 +221,9 @@ mod tests {
         // Transaction should have snapshot
         assert!(mutator.transaction().is_some());
 
-        // Cleanup
-        mutator.rollback().await.unwrap();
+        // Rollback via into_transaction
+        let txn = mutator.into_transaction().unwrap();
+        txn.rollback().await.unwrap();
         // File should still exist with original content after rollback
         assert!(file_path.exists());
         let content = tokio::fs::read_to_string(&file_path).await.unwrap();
@@ -304,14 +231,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_commit_transaction() {
+    async fn test_into_transaction_commit() {
         let mut mutator = Mutator::new();
         mutator.begin_transaction().await.unwrap();
 
-        let commit_id = mutator.commit_transaction().await.unwrap();
+        let transaction = mutator.into_transaction().unwrap();
+        let commit_id = transaction.commit().await.unwrap();
 
-        // commit_transaction consumes self, so we can't check mutator after
-        // But we can verify the commit ID is valid
         assert_ne!(commit_id, Uuid::default());
     }
 
@@ -365,54 +291,12 @@ mod tests {
         let content = tokio::fs::read_to_string(&file_path).await.unwrap();
         assert_eq!(content, "modified content");
 
-        // Rollback
-        mutator.rollback().await.unwrap();
+        // Rollback via into_transaction
+        let txn = mutator.into_transaction().unwrap();
+        txn.rollback().await.unwrap();
 
         // File should be restored
         let content = tokio::fs::read_to_string(&file_path).await.unwrap();
         assert_eq!(content, "original content");
-    }
-
-    #[tokio::test]
-    async fn test_preview() {
-        let mutator = Mutator::new();
-
-        let steps = vec![
-            crate::planner::PlanStep {
-                description: "Create file".to_string(),
-                operation: crate::planner::PlanOperation::Create {
-                    path: "/tmp/test.rs".to_string(),
-                    content: "fn test() {}".to_string(),
-                },
-            },
-            crate::planner::PlanStep {
-                description: "Delete file".to_string(),
-                operation: crate::planner::PlanOperation::Delete {
-                    name: "old.rs".to_string(),
-                    file: None,
-                },
-            },
-        ];
-
-        let previews = mutator.preview(&steps).await.unwrap();
-
-        assert_eq!(previews.len(), 2);
-        assert!(previews[0].contains("Create"));
-        assert!(previews[0].contains("fn test() {}"));
-        assert!(previews[1].contains("Delete"));
-    }
-
-    #[tokio::test]
-    async fn test_mutator_with_forge_stores_forge() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = forge_core::ForgeBuilder::new()
-            .path(temp_dir.path())
-            .db_path(temp_dir.path().join("test.db"))
-            .build()
-            .await
-            .unwrap();
-
-        let mutator = Mutator::with_forge(forge);
-        assert!(mutator.forge.is_some());
     }
 }

@@ -1,6 +1,6 @@
 use crate::chat::providers::adapter::LlmProviderAdapter;
 use crate::chat::providers::mock::MockChatProvider;
-use crate::chat::providers::ChatProvider;
+use crate::chat::providers::{chat_structured, ChatProvider};
 use crate::chat::stream::StreamEvent;
 use crate::chat::tools::types::ToolDef;
 use crate::chat::types::{ChatMessage, ContentBlock, LlmError, Role};
@@ -643,7 +643,7 @@ async fn anthropic_mock_streaming_tool_call() {
 }
 
 #[tokio::test]
-async fn mock_provider_default_stream_returns_error() {
+async fn mock_provider_stream_emits_tokens_and_done() {
     use futures::StreamExt;
 
     let mock = MockChatProvider::from_text("hello");
@@ -652,8 +652,86 @@ async fn mock_provider_default_stream_returns_error() {
 
     let stream = mock.chat_stream(&messages, &[], &config);
     let events: Vec<StreamEvent> = stream.collect().await;
-    assert_eq!(events.len(), 1);
-    assert!(
-        matches!(&events[0], StreamEvent::Error(msg) if msg.contains("streaming not supported"))
-    );
+
+    let has_token = events
+        .iter()
+        .any(|e| matches!(e, StreamEvent::Token(t) if t == "hello"));
+    let has_done = events.iter().any(|e| matches!(e, StreamEvent::Done));
+    assert!(has_token, "should emit Token event: {:?}", events);
+    assert!(has_done, "should emit Done event: {:?}", events);
+}
+
+#[tokio::test]
+async fn chat_structured_parses_json() {
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    struct Result {
+        answer: String,
+        confidence: f64,
+    }
+
+    let mock = MockChatProvider::from_text(r#"{"answer":"yes","confidence":0.95}"#);
+    let config = LlmConfig::new("test");
+    let messages = vec![ChatMessage::user("Is this a test?")];
+
+    let result: Result = chat_structured(&mock, &messages, &config).await.unwrap();
+    assert_eq!(result.answer, "yes");
+    assert!((result.confidence - 0.95).abs() < 0.001);
+}
+
+#[tokio::test]
+async fn chat_structured_strips_code_fence() {
+    #[derive(serde::Deserialize, Debug)]
+    struct Item {
+        name: String,
+    }
+
+    let mock = MockChatProvider::from_text("```json\n{\"name\":\"test\"}\n```");
+    let config = LlmConfig::new("test");
+    let messages = vec![ChatMessage::user("Give me JSON")];
+
+    let result: Item = chat_structured(&mock, &messages, &config).await.unwrap();
+    assert_eq!(result.name, "test");
+}
+
+#[tokio::test]
+async fn chat_structured_plain_code_fence() {
+    #[derive(serde::Deserialize, Debug)]
+    struct Val {
+        x: i32,
+    }
+
+    let mock = MockChatProvider::from_text("```\n{\"x\":42}\n```");
+    let config = LlmConfig::new("test");
+    let messages = vec![ChatMessage::user("val")];
+
+    let result: Val = chat_structured(&mock, &messages, &config).await.unwrap();
+    assert_eq!(result.x, 42);
+}
+
+#[tokio::test]
+async fn chat_structured_invalid_json_returns_parse_error() {
+    let mock = MockChatProvider::from_text("not json at all");
+    let config = LlmConfig::new("test");
+    let messages = vec![ChatMessage::user("broken")];
+
+    let result: std::result::Result<serde_json::Value, LlmError> =
+        chat_structured(&mock, &messages, &config).await;
+    match result.unwrap_err() {
+        LlmError::Parse(msg) => assert!(msg.contains("parse error")),
+        other => panic!("expected Parse error, got {other}"),
+    }
+}
+
+#[tokio::test]
+async fn chat_structured_provider_error_propagates() {
+    let mock = MockChatProvider::from_text("ok").with_error(LlmError::Http("fail".to_string()));
+    let config = LlmConfig::new("test");
+    let messages = vec![ChatMessage::user("hi")];
+
+    let result: std::result::Result<serde_json::Value, LlmError> =
+        chat_structured(&mock, &messages, &config).await;
+    match result.unwrap_err() {
+        LlmError::Http(msg) => assert_eq!(msg, "fail"),
+        other => panic!("expected Http error, got {other}"),
+    }
 }

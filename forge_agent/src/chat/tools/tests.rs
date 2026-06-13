@@ -1,4 +1,4 @@
-use crate::chat::tools::builtins::{FileReadTool, FileWriteTool, ShellExecTool};
+use crate::chat::tools::builtins::{FileReadTool, FileWriteTool, GraphQueryTool, ShellExecTool};
 use crate::chat::tools::registry::{AsyncTool, BuiltinToolRegistry, ToolRegistry};
 use crate::chat::tools::types::{ToolCall, ToolDef, ToolOutput};
 
@@ -180,4 +180,168 @@ impl AsyncTool for EchoTool {
             }),
         )
     }
+}
+
+async fn create_indexed_forge(dir: &std::path::Path, source: &str) -> forge_core::Forge {
+    let src_dir = dir.join("src");
+    tokio::fs::create_dir_all(&src_dir)
+        .await
+        .expect("create src");
+    tokio::fs::write(src_dir.join("lib.rs"), source)
+        .await
+        .expect("write lib.rs");
+    let forge = forge_core::ForgeBuilder::new()
+        .path(dir)
+        .db_path(dir.join("test-graph.db"))
+        .build()
+        .await
+        .expect("forge build");
+    forge.graph().index().await.expect("index");
+    forge
+}
+
+#[tokio::test]
+async fn graph_query_find_symbol() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn my_func() -> i32 { 42 }\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "find_symbol", "name": "my_func"}))
+        .await
+        .expect("call");
+    assert!(result.contains("my_func"));
+    assert!(result.contains("Found 1 symbol(s)"));
+}
+
+#[tokio::test]
+async fn graph_query_find_symbol_empty() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn other() {}\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "find_symbol", "name": "nonexistent"}))
+        .await
+        .expect("call");
+    assert!(result.contains("No symbols found"));
+}
+
+#[tokio::test]
+async fn graph_query_callers_of() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(
+        dir.path(),
+        "fn helper() -> i32 { 1 }\nfn caller() -> i32 { helper() }\n",
+    )
+    .await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "callers_of", "name": "helper"}))
+        .await
+        .expect("call");
+    assert!(result.contains("caller"));
+    assert!(result.contains("Found"));
+}
+
+#[tokio::test]
+async fn graph_query_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn my_func() -> i32 { 42 }\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "references", "name": "my_func"}))
+        .await
+        .expect("call");
+    assert!(result.contains("reference") || result.contains("No references"));
+}
+
+#[tokio::test]
+async fn graph_query_cycles() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn a() { b() }\nfn b() { a() }\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "cycles"}))
+        .await
+        .expect("call");
+    assert!(result.contains("Cycle") || result.contains("No cycles"));
+}
+
+#[tokio::test]
+async fn graph_query_impact_analysis() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(
+        dir.path(),
+        "fn base() -> i32 { 1 }\nfn mid() -> i32 { base() }\nfn top() -> i32 { mid() }\n",
+    )
+    .await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "impact_analysis", "name": "base", "max_hops": 2}))
+        .await
+        .expect("call");
+    assert!(result.contains("impacted") || result.contains("No impacted"));
+}
+
+#[tokio::test]
+async fn graph_query_unknown_command() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn foo() {}\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "invalid_query"}))
+        .await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Unknown graph command"));
+}
+
+#[tokio::test]
+async fn graph_query_missing_command() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn foo() {}\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool.call(serde_json::json!({})).await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Missing 'command'"));
+}
+
+#[tokio::test]
+async fn graph_query_missing_name_for_find_symbol() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn foo() {}\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let result = tool
+        .call(serde_json::json!({"command": "find_symbol"}))
+        .await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Missing 'name'"));
+}
+
+#[tokio::test]
+async fn graph_query_definition_has_command_enum() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn foo() {}\n").await;
+    let tool = GraphQueryTool::new(forge);
+    let def = tool.definition();
+    assert_eq!(def.name, "graph_query");
+    let enum_vals = def.parameters["properties"]["command"]["enum"]
+        .as_array()
+        .expect("enum array");
+    assert!(enum_vals.iter().any(|v| v == "find_symbol"));
+    assert!(enum_vals.iter().any(|v| v == "callers_of"));
+    assert!(enum_vals.iter().any(|v| v == "references"));
+    assert!(enum_vals.iter().any(|v| v == "cycles"));
+    assert!(enum_vals.iter().any(|v| v == "impact_analysis"));
+}
+
+#[tokio::test]
+async fn registry_with_graph_tool() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let forge = create_indexed_forge(dir.path(), "fn foo() {}\n").await;
+    let tools = crate::chat::tools::default_builtin_tools_with_graph(dir.path(), forge);
+    let mut registry = BuiltinToolRegistry::new();
+    registry.register_many(tools);
+    assert!(registry.has_tool("file_read"));
+    assert!(registry.has_tool("file_write"));
+    assert!(registry.has_tool("shell_exec"));
+    assert!(registry.has_tool("graph_query"));
 }

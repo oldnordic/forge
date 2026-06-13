@@ -1,9 +1,14 @@
-use crate::chat::types::{ChatMessage, Role};
+use crate::chat::memory::ConversationStore;
+use crate::chat::types::{ChatMessage, Role, Usage};
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct Conversation {
     messages: Vec<ChatMessage>,
     max_messages: Option<usize>,
+    session_id: Option<String>,
+    store: Option<Arc<dyn ConversationStore>>,
+    accumulated_usage: Usage,
 }
 
 impl Conversation {
@@ -11,6 +16,9 @@ impl Conversation {
         Conversation {
             messages: Vec::new(),
             max_messages: None,
+            session_id: None,
+            store: None,
+            accumulated_usage: Usage::default(),
         }
     }
 
@@ -25,9 +33,37 @@ impl Conversation {
         self
     }
 
+    pub fn with_session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
+    }
+
+    pub fn with_store(mut self, store: Arc<dyn ConversationStore>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    pub fn record_usage(&mut self, usage: Usage) {
+        let acc = &mut self.accumulated_usage;
+        acc.prompt_tokens = Some(acc.prompt_tokens.unwrap_or(0) + usage.prompt_tokens.unwrap_or(0));
+        acc.completion_tokens =
+            Some(acc.completion_tokens.unwrap_or(0) + usage.completion_tokens.unwrap_or(0));
+        acc.total_tokens = Some(acc.total_tokens.unwrap_or(0) + usage.total_tokens.unwrap_or(0));
+        self.auto_save();
+    }
+
+    pub fn total_tokens(&self) -> u64 {
+        self.accumulated_usage.total_tokens.unwrap_or(0)
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
     pub fn push(&mut self, message: ChatMessage) {
         self.messages.push(message);
         self.enforce_limit();
+        self.auto_save();
     }
 
     pub fn messages(&self) -> &[ChatMessage] {
@@ -85,6 +121,12 @@ impl Conversation {
             if self.messages.len() > max {
                 self.truncate_to(max);
             }
+        }
+    }
+
+    fn auto_save(&self) {
+        if let (Some(store), Some(session_id)) = (&self.store, &self.session_id) {
+            let _ = store.save(session_id, &self.messages, &self.accumulated_usage);
         }
     }
 }

@@ -1,237 +1,229 @@
 # ForgeKit - Code Intelligence SDK for Rust
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/oldnordic/forge)
-[![Tests](https://img.shields.io/badge/tests-408%20passing-brightgreen)](https://github.com/oldnordic/forge)
 
-ForgeKit provides a unified SDK for code intelligence operations, integrating multiple tools into a single API with support for both SQLite and Native V3 backends.
+ForgeKit provides a unified SDK for code intelligence operations — graph queries, control flow analysis, safe code editing, and LLM-driven agent workflows — integrated through a single `Forge` instance backed by [magellan](https://github.com/oldnordic/magellan) code graphs.
 
-## Features
+## Workspace Structure
 
-**Core SDK:**
-- Graph queries: Symbol lookup, reference tracking, call graph navigation
-- Impact analysis: k-hop traversal to find affected symbols
-- Semantic search: Pattern-based code search via LLMGrep
-- Control flow analysis: CFG construction and analysis via Mirage
-- Dead code detection: Find unused functions and methods
-- Complexity metrics: Cyclomatic complexity and risk analysis
-- Safe code editing: Span-safe refactoring via Splice
-
-**Workflow Orchestration (v0.4):**
-- DAG-based task execution with dependency resolution
-- Parallel execution via fork-join pattern
-- State checkpointing and recovery
-- Cancellation tokens and timeout handling
-- Compensation-based rollback (saga pattern)
-- YAML workflow parser for declarative workflows
-- Tool registry with fallback handlers
-
-**Infrastructure:**
-- Dual backend support: SQLite (stable) or Native V3 (high performance)
-- Async-first: Built on Tokio
-- Type-safe error handling with thiserror
+| Crate | Purpose |
+|-------|---------|
+| `forge_core` | Core SDK: graph, search, CFG, edit, and analysis APIs |
+| `forge_runtime` | File watching, caching, and indexing coordination |
+| `forge_agent` | Agent loop, workflow DAG engine, chat providers, and ReAct agent |
 
 ## Quick Start
 
 ```rust
-use forge_core::{Forge, BackendKind};
+use forge_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Open a codebase with default backend (SQLite)
     let forge = Forge::open("./my-project").await?;
-    
-    // Find symbols
+
     let symbols = forge.graph().find_symbol("main").await?;
-    println!("Found: {:?}", symbols);
-    
-    // Find all callers of a function
+    for sym in &symbols {
+        println!("{} ({}): {}:{}", sym.name, sym.kind, sym.location.file_path.display(), sym.location.line_number);
+    }
+
     let callers = forge.graph().callers_of("my_function").await?;
     println!("Callers: {}", callers.len());
-    
-    // Impact analysis - what would break if we change this?
-    let impact = forge.graph()
+
+    let impacted = forge.graph()
         .impact_analysis("critical_function", Some(2))
         .await?;
-    println!("Affected symbols: {}", impact.len());
-    
+    for sym in impacted {
+        println!("{} (hop {}): {}", sym.name, sym.hop_distance, sym.file_path);
+    }
+
     Ok(())
 }
 ```
 
 ## Installation
 
-Add to your `Cargo.toml`:
+```toml
+[dependencies]
+forge-core = "0.3"
+```
+
+For the agent layer with LLM support:
 
 ```toml
 [dependencies]
-forge-core = "0.2"
+forge-agent = { version = "0.4", features = ["llm-ollama"] }
 ```
 
 ### Feature Flags
 
-**Storage Backends:**
-- `sqlite` - SQLite backend (default)
-- `native-v3` - Native V3 high-performance backend
+**`forge_core`:**
+- `sqlite` (default) — SQLite backend via sqlitegraph
 
-**Tool Integrations:**
-- `magellan-sqlite` / `magellan-v3` - Code indexing
-- `llmgrep-sqlite` / `llmgrep-v3` - Semantic search
-- `mirage-sqlite` / `mirage-v3` - CFG analysis
-- `splice-sqlite` / `splice-v3` - Code editing
+**`forge_agent`:**
+- `sqlite` (default) — SQLite backend
+- `llm-ollama` — Ollama chat provider (gates `reqwest`)
+- `llm-openai` — OpenAI chat provider (gates `reqwest`)
+- `llm-anthropic` — Anthropic chat provider (gates `reqwest`)
+- `envoy` — Multi-agent coordination via Envoy
 
-**Convenience Groups:**
-- `tools-sqlite` - All tools with SQLite
-- `tools-v3` - All tools with V3
-- `full-sqlite` / `full-v3` - Everything
+## Core SDK (`forge_core`)
 
-### Examples
+### Graph Queries
 
-```toml
-# Default: SQLite backend with all tools
-forge-core = "0.2"
-
-# Native V3 backend with all tools
-forge-core = { version = "0.2", features = ["full-v3"] }
-
-# Minimal: Just storage backends
-forge-core = { version = "0.2", default-features = false, features = ["sqlite"] }
-```
-
-## Workspace Structure
-
-| Crate | Purpose | Documentation |
-|-------|---------|---------------|
-| `forge_core` | Core SDK with graph, search, CFG, and edit APIs | [API Docs](docs/API.md) |
-| `forge_runtime` | Indexing, caching, and file watching | [Architecture](docs/ARCHITECTURE.md) |
-| `forge_agent` | Workflow orchestration and agent loop | [Manual](docs/MANUAL.md) |
-
-## Backend Comparison
-
-| Feature | SQLite | Native V3 |
-|---------|--------|-----------|
-| ACID Transactions | ✅ Full | ✅ WAL-based |
-| Raw SQL Access | ✅ Yes | ❌ No |
-| Dependencies | libsqlite3 | Pure Rust |
-| Performance | Fast | **10-20x faster** |
-| Tool Compatibility | All tools | All tools (v2.0.5+) |
-
-**Recommendation:** Use Native V3 for new projects. Use SQLite if you need raw SQL access.
-
-## Working Examples
-
-### Impact Analysis
-
-Find all symbols that would be affected by changing a function:
+All graph queries go through the magellan code graph database:
 
 ```rust
 let forge = Forge::open("./project").await?;
 
-// Find all symbols within 2 hops of "process_request"
-let impacted = forge.graph()
-    .impact_analysis("process_request", Some(2))
-    .await?;
-
-for symbol in impacted {
-    println!("{} ({} hops): {}", 
-        symbol.name, 
-        symbol.hop_distance,
-        symbol.file_path
-    );
-}
+let symbols = forge.graph().find_symbol("process_request").await?;
+let callers = forge.graph().callers_of("process_request").await?;
+let refs = forge.graph().references("MyStruct").await?;
+let cycles = forge.graph().cycles().await?;
+let impacted = forge.graph().impact_analysis("process_request", Some(2)).await?;
 ```
 
-### Dead Code Detection
-
-Find unused functions in your codebase:
+### Search
 
 ```rust
-let analysis = forge.analysis();
-
-let dead_code = analysis.find_dead_code().await?;
-for symbol in dead_code {
-    println!("Unused: {} in {}", symbol.name, symbol.location.file);
-}
-```
-
-### Complexity Analysis
-
-Calculate cyclomatic complexity:
-
-```rust
-let analysis = forge.analysis();
-
-// From source code
-let metrics = analysis.analyze_source_complexity(source_code);
-println!("Complexity: {} ({})", 
-    metrics.cyclomatic_complexity,
-    metrics.risk_level().as_str()
-);
+let search = forge.search();
+let results = search.pattern("fn.*test.*\\(").await?;
+let semantic = search.semantic("authentication logic").await?;
 ```
 
 ### Control Flow Analysis
 
 ```rust
 let cfg = forge.cfg();
-
-// Get dominator tree for a function
-let dominators = cfg.dominators(symbol_id).await?;
-
-// Find loops
+let doms = cfg.dominators(symbol_id).await?;
 let loops = cfg.loops(symbol_id).await?;
-
-// Enumerate paths
-let paths = cfg.paths(symbol_id)
-    .normal_only()
-    .max_length(10)
-    .execute()
-    .await?;
+let paths = cfg.paths(symbol_id).max_length(10).execute().await?;
 ```
 
-### Pattern Search
+### Analysis
 
 ```rust
-let search = forge.search();
-
-// Regex pattern search
-let results = search.pattern(r"fn.*test.*\(").await?;
-
-// Semantic search
-let results = search.semantic("authentication logic").await?;
+let analysis = forge.analysis();
+let dead = analysis.find_dead_code().await?;
+let metrics = analysis.analyze_source_complexity(source_code);
+println!("Complexity: {} ({:?})", metrics.cyclomatic_complexity, metrics.risk_level());
 ```
 
-## Documentation
+### Safe Editing
 
-- **[API Reference](docs/API.md)** - Complete API documentation
-- **[Architecture](docs/ARCHITECTURE.md)** - System design and internals
-- **[Manual](docs/MANUAL.md)** - User guide and tutorials
-- **[Contributing](docs/CONTRIBUTING.md)** - Contribution guidelines
-- **[Changelog](CHANGELOG.md)** - Version history
+```rust
+let edit = forge.edit();
+edit.rename_symbol("old_name", "new_name").await?;
+edit.delete_symbol(std::path::Path::new("src/lib.rs"), "unused_fn").await?;
+```
+
+## Agent Layer (`forge_agent`)
+
+### Fixed Pipeline (6-Phase)
+
+The deterministic agent loop follows Observe → Constrain → Plan → Mutate → Verify → Commit:
+
+```rust
+use forge_agent::Agent;
+
+let agent = Agent::new("./project").await?;
+let result = agent.run("Add error handling to the parser").await?;
+println!("Transaction: {}", result.transaction_id);
+```
+
+### ReAct Agent (LLM-Driven)
+
+An autonomous reasoning-and-acting loop where the LLM decides which tools to call:
+
+```rust
+use forge_agent::Agent;
+use forge_agent::chat::{OllamaChatProvider, ChatProvider};
+use forge_agent::llm::LlmConfig;
+
+let provider = std::sync::Arc::new(
+    OllamaChatProvider::new("http://localhost:11434".to_string())
+);
+let config = LlmConfig::new("qwen3.5-agent:latest".to_string());
+
+let agent = Agent::new("./project").await?
+    .with_chat_provider(provider, config);
+
+let answer = agent.run_react("Find all callers of process_request and explain the call chain").await?;
+println!("{}", answer);
+```
+
+The ReAct agent has access to these tools:
+- **file_read** — Read file contents (paths scoped to codebase, traversal blocked)
+- **file_write** — Write file contents (creates parent directories)
+- **shell_exec** — Execute shell commands (30s timeout, unsandboxed)
+- **graph_query** — Query the code graph when Forge SDK is available
+
+### Graph Query Tool
+
+The `graph_query` tool exposes the code graph to the LLM:
+
+| Command | Required Params | Description |
+|---------|----------------|-------------|
+| `find_symbol` | `name` | Find symbols by name |
+| `callers_of` | `name` | Find all callers of a symbol |
+| `references` | `name` | Find all cross-file references |
+| `cycles` | — | Detect call-graph cycles |
+| `impact_analysis` | `name`, `max_hops` (optional) | K-hop impact analysis |
+
+### Chat Providers
+
+| Provider | Feature Flag | Tool Calling | Streaming |
+|----------|-------------|--------------|-----------|
+| Ollama | `llm-ollama` | Yes | Token-by-token via NDJSON |
+| OpenAI | `llm-openai` | Yes | Token-by-token via SSE |
+| Anthropic | `llm-anthropic` | Yes | Token-by-token via SSE |
+
+### Workflow Engine
+
+DAG-based task execution with dependency resolution, parallel execution, checkpointing, compensation-based rollback, cancellation, and timeouts:
+
+```rust
+use forge_agent::workflow::{Workflow, WorkflowExecutor};
+
+let workflow = Workflow::new()
+    .add_task(graph_query_task)
+    .add_task(edit_task.depends_on(&[graph_query_task.id()]));
+
+let executor = WorkflowExecutor::new();
+let result = executor.execute(workflow).await?;
+```
+
+### Multi-Agent Coordination (Envoy)
+
+When the `envoy` feature is enabled, agents can register with an Envoy service for discovery, handoffs, and knowledge sharing via Atheneum.
 
 ## Tool Integrations
 
-ForgeKit integrates with these code intelligence tools:
+| Tool | Purpose | Used By |
+|------|---------|---------|
+| [magellan](https://github.com/oldnordic/magellan) | Code indexing, symbol extraction, call graph | `forge_core` graph/search modules |
+| [llmgrep](https://github.com/oldnordic/llmgrep) | Semantic and structural code search | `forge_core` search module |
+| [mirage-analyzer](https://crates.io/crates/mirage-analyzer) | CFG construction, dominance, loops, hotspots | `forge_core` CFG module |
+| [splice](https://github.com/oldnordic/splice) | Span-safe refactoring, rename, delete | `forge_core` edit module |
+| [sqlitegraph](https://crates.io/crates/sqlitegraph) | Typed graph storage over SQLite | Storage backend |
 
-| Tool | Purpose | Backend Support |
-|------|---------|-----------------|
-| [magellan](https://github.com/oldnordic/magellan) | Code indexing and graph queries | SQLite, V3 |
-| [llmgrep](https://github.com/oldnordic/llmgrep) | Semantic code search | SQLite, V3 |
-| [mirage-analyzer](https://crates.io/crates/mirage-analyzer) | CFG analysis | SQLite, V3 |
-| [splice](https://github.com/oldnordic/splice) | Span-safe editing | SQLite, V3 |
+## Known Limitations
+
+- **ShellExecTool is unsandboxed** — Executes arbitrary `sh -c` with full process privileges. No allowlist, no capability restriction.
+- **LlmProviderAdapter cannot support tool calling** — The legacy `LlmProvider` trait accepts only a flat prompt string. Use a native `ChatProvider` for agent workflows.
+- **Graph queries require a populated database** — If no magellan database exists or the codebase hasn't been indexed, graph methods return empty results. `Forge::open()` auto-indexes on first use when the graph is empty.
+
+## Documentation
+
+- **[API Reference](docs/API.md)** — Complete API documentation
+- **[Architecture](docs/ARCHITECTURE.md)** — System design and internals
+- **[Changelog](CHANGELOG.md)** — Version history
 
 ## License
 
-This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-- Issues: [GitHub Issues](https://github.com/oldnordic/forge/issues)
-- Discussions: [GitHub Discussions](https://github.com/oldnordic/forge/discussions)
+GPL-3.0 — see [LICENSE](LICENSE).
 
 ---
 
-**Current Version:** 0.4.0
+**Current Version:** 0.5.0 (unreleased)
 
-**Status:** The crate has not yet been published to crates.io. APIs may change until v1.0.
-
-**Compiler Warnings:** The project uses sqlitegraph 2.0.8 which has 61 intentional dead code warnings. These are kept for API completeness, feature-gated functionality, and future use - they do not indicate bugs or incomplete code.
+**Status:** Not published to crates.io. APIs may change until v1.0.

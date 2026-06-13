@@ -29,9 +29,10 @@
 
 use crate::workflow::executor::WorkflowExecutor;
 use crate::workflow::task::TaskId;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// Status of a workflow execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,13 +166,13 @@ impl WorkflowState {
 ///
 /// // Concurrent reads (tasks checking state)
 /// {
-///     let reader = state.read().unwrap();
+///     let reader = state.read();
 ///     assert_eq!(reader.status, WorkflowStatus::Running);
 /// }
 ///
 /// // Exclusive write (executor updating state)
 /// {
-///     let mut writer = state.write().unwrap();
+///     let mut writer = state.write();
 ///     writer.status = WorkflowStatus::Completed;
 /// }
 /// ```
@@ -194,16 +195,7 @@ impl ConcurrentState {
     /// # Returns
     ///
     /// A `RwLockReadGuard` that provides immutable access to the state.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn read(
-        &self,
-    ) -> Result<
-        std::sync::RwLockReadGuard<'_, WorkflowState>,
-        std::sync::PoisonError<std::sync::RwLockReadGuard<'_, WorkflowState>>,
-    > {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, WorkflowState> {
         self.inner.read()
     }
 
@@ -212,16 +204,7 @@ impl ConcurrentState {
     /// # Returns
     ///
     /// A `RwLockWriteGuard` that provides mutable access to the state.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn write(
-        &self,
-    ) -> Result<
-        std::sync::RwLockWriteGuard<'_, WorkflowState>,
-        std::sync::PoisonError<std::sync::RwLockWriteGuard<'_, WorkflowState>>,
-    > {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, WorkflowState> {
         self.inner.write()
     }
 
@@ -231,8 +214,8 @@ impl ConcurrentState {
     ///
     /// - `Some(guard)` if the lock was acquired immediately
     /// - `None` if the lock is held by a writer
-    pub fn try_read(&self) -> Option<std::sync::RwLockReadGuard<'_, WorkflowState>> {
-        self.inner.try_read().ok()
+    pub fn try_read(&self) -> Option<parking_lot::RwLockReadGuard<'_, WorkflowState>> {
+        self.inner.try_read()
     }
 
     /// Attempts to acquire a write lock without blocking.
@@ -241,8 +224,8 @@ impl ConcurrentState {
     ///
     /// - `Some(guard)` if the lock was acquired immediately
     /// - `None` if the lock is held by another reader or writer
-    pub fn try_write(&self) -> Option<std::sync::RwLockWriteGuard<'_, WorkflowState>> {
-        self.inner.try_write().ok()
+    pub fn try_write(&self) -> Option<parking_lot::RwLockWriteGuard<'_, WorkflowState>> {
+        self.inner.try_write()
     }
 
     /// Returns the number of strong references to the inner state.
@@ -271,7 +254,7 @@ mod concurrent_state_tests {
         let state = WorkflowState::new("workflow-1");
         let concurrent = ConcurrentState::new(state);
 
-        let reader = concurrent.read().unwrap();
+        let reader = concurrent.read();
         assert_eq!(reader.workflow_id, "workflow-1");
         assert_eq!(reader.status, WorkflowStatus::Pending);
     }
@@ -296,19 +279,19 @@ mod concurrent_state_tests {
 
         // Read initial state
         {
-            let reader = concurrent.read().unwrap();
+            let reader = concurrent.read();
             assert_eq!(reader.status, WorkflowStatus::Pending);
         }
 
         // Write new state
         {
-            let mut writer = concurrent.write().unwrap();
+            let mut writer = concurrent.write();
             writer.status = WorkflowStatus::Completed;
         }
 
         // Read updated state
         {
-            let reader = concurrent.read().unwrap();
+            let reader = concurrent.read();
             assert_eq!(reader.status, WorkflowStatus::Completed);
         }
     }
@@ -338,7 +321,7 @@ mod concurrent_state_tests {
         let barrier1 = Arc::clone(&barrier);
         handles.spawn(async move {
             barrier1.wait();
-            let reader = concurrent1.read().unwrap();
+            let reader = concurrent1.read();
             assert_eq!(reader.workflow_id, "workflow-1");
         });
 
@@ -347,7 +330,7 @@ mod concurrent_state_tests {
         let barrier2 = Arc::clone(&barrier);
         handles.spawn(async move {
             barrier2.wait();
-            let reader = concurrent2.read().unwrap();
+            let reader = concurrent2.read();
             assert_eq!(reader.status, WorkflowStatus::Running);
         });
 
@@ -358,7 +341,7 @@ mod concurrent_state_tests {
             barrier3.wait();
             // Small delay to let readers read first
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let mut writer = concurrent3.write().unwrap();
+            let mut writer = concurrent3.write();
             writer.status = WorkflowStatus::Completed;
         });
 
@@ -368,7 +351,7 @@ mod concurrent_state_tests {
         }
 
         // Verify final state
-        let reader = concurrent.read().unwrap();
+        let reader = concurrent.read();
         assert_eq!(reader.status, WorkflowStatus::Completed);
     }
 
@@ -385,7 +368,7 @@ mod concurrent_state_tests {
             handles.spawn(async move {
                 // Read (guard dropped before await)
                 {
-                    let _reader = concurrent_clone.read().unwrap();
+                    let _reader = concurrent_clone.read();
                 }
 
                 // Small delay
@@ -393,7 +376,7 @@ mod concurrent_state_tests {
 
                 // Write (if even number)
                 if i % 2 == 0 {
-                    let mut writer = concurrent_clone.write().unwrap();
+                    let mut writer = concurrent_clone.write();
                     writer.completed_tasks.push(TaskSummary::new(
                         format!("task-{}", i),
                         format!("Task {}", i),
@@ -409,7 +392,7 @@ mod concurrent_state_tests {
         }
 
         // Verify no corruption - should have 5 completed tasks (even numbers 0,2,4,6,8)
-        let reader = concurrent.read().unwrap();
+        let reader = concurrent.read();
         assert_eq!(reader.completed_tasks.len(), 5);
     }
 }

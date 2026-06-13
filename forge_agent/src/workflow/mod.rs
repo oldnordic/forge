@@ -11,9 +11,9 @@
 //! # Architecture
 //!
 //! The workflow system is built around three core components:
-//! - [`DAG`](crate::workflow::dag::Workflow): Directed acyclic graph for task representation
-//! - [`WorkflowTask`](crate::workflow::task::WorkflowTask): Async trait for task execution
-//! - [`WorkflowExecutor`](crate::workflow::executor::WorkflowExecutor): Sequential task executor
+//! - [`DAG`](dag::Workflow): Directed acyclic graph for task representation
+//! - [`WorkflowTask`]: Async trait for task execution
+//! - [`WorkflowExecutor`]: Sequential task executor
 //!
 //! # Cancellation and Timeouts
 //!
@@ -46,7 +46,7 @@
 //! }
 //! ```
 //!
-//! See [`examples`](crate::workflow::examples) for complete cancellation-aware task examples.
+//! See [`examples`] for complete cancellation-aware task examples.
 //!
 //! ## Timeouts
 //!
@@ -60,7 +60,7 @@
 //!     .with_workflow_timeout(WorkflowTimeout::from_secs(300));
 //! ```
 //!
-//! See [`timeout`](crate::workflow::timeout) module for timeout configuration options.
+//! See [`timeout`] module for timeout configuration options.
 //!
 //! # Quick Start
 //!

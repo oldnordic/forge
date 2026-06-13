@@ -12,7 +12,7 @@
 
 #[cfg(feature = "llm-ollama")]
 mod ollama {
-    use forge_agent::{llm::LlmProvider, OllamaProvider};
+    use forge_agent::{LlmProvider, OllamaProvider};
 
     async fn available() -> bool {
         reqwest::Client::new()
@@ -58,7 +58,7 @@ mod ollama {
 
 #[cfg(feature = "llm-openai")]
 mod openai {
-    use forge_agent::{llm::LlmProvider, OpenAiProvider};
+    use forge_agent::{LlmProvider, OpenAiProvider};
 
     fn api_key() -> Option<String> {
         std::env::var("OPENAI_API_KEY").ok()
@@ -124,7 +124,7 @@ mod openai {
 
 #[cfg(feature = "llm-anthropic")]
 mod anthropic {
-    use forge_agent::{llm::LlmProvider, AnthropicProvider};
+    use forge_agent::{AnthropicProvider, LlmProvider};
 
     fn api_key() -> Option<String> {
         std::env::var("ANTHROPIC_API_KEY").ok()

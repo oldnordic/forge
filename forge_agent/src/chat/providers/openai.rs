@@ -5,7 +5,6 @@ use crate::chat::types::{ChatMessage, ChatResponse, ContentBlock, LlmError, Role
 use crate::llm::LlmConfig;
 use async_trait::async_trait;
 use futures::Stream;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
@@ -452,143 +451,109 @@ impl ChatProvider for OpenAiChatProvider {
             None
         };
 
-        let stream = futures::stream::once(async move {
-            let request = OpenAiRequestOwned {
-                model,
-                messages: openai_messages,
-                tools: openai_tools,
-                response_format,
-                temperature,
-                max_tokens,
-                top_p,
-                stop,
-                stream: true,
-            };
+        let request = OpenAiRequestOwned {
+            model,
+            messages: openai_messages,
+            tools: openai_tools,
+            response_format,
+            temperature,
+            max_tokens,
+            top_p,
+            stop,
+            stream: true,
+        };
 
-            let resp = match client
-                .post(format!("{}/chat/completions", endpoint))
-                .bearer_auth(&api_key)
-                .json(&request)
-                .send()
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => return vec![StreamEvent::Error(e.to_string())],
-            };
+        let response_future = client
+            .post(format!("{}/chat/completions", endpoint))
+            .bearer_auth(&api_key)
+            .json(&request)
+            .send();
 
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return vec![StreamEvent::Error(format!("OpenAI {}: {}", status, body))];
-            }
+        struct OpenAiStreamState {
+            last_tool_index: Option<usize>,
+        }
 
-            let byte_stream = resp.bytes_stream();
-            let mut events = Vec::new();
-            let mut stream = Box::pin(byte_stream);
-            let mut buffer = String::new();
+        super::ndjson_stream::spawn_line_stream(
+            OpenAiStreamState {
+                last_tool_index: None,
+            },
+            response_future,
+            |state, line| {
+                let line = line.trim();
+                if !line.starts_with("data: ") {
+                    return Vec::new();
+                }
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    let mut events = Vec::new();
+                    if let Some(idx) = state.last_tool_index.take() {
+                        events.push(StreamEvent::ToolCallEnd { index: idx });
+                    }
+                    events.push(StreamEvent::Done);
+                    return events;
+                }
 
-            loop {
-                match stream.next().await {
-                    Some(Ok(chunk)) => {
-                        buffer.push_str(&String::from_utf8_lossy(&chunk));
-                        while let Some(pos) = buffer.find("\n\n") {
-                            let block = buffer[..pos].to_string();
-                            buffer = buffer[pos + 2..].to_string();
+                let parsed: OpenAiStreamChunk = match serde_json::from_str(data) {
+                    Ok(p) => p,
+                    Err(_) => return Vec::new(),
+                };
 
-                            for line in block.lines() {
-                                let line = line.trim();
-                                if !line.starts_with("data: ") {
-                                    continue;
+                let mut events = Vec::new();
+
+                if let Some(usage) = parsed.usage {
+                    events.push(StreamEvent::Usage(Usage {
+                        prompt_tokens: usage.prompt_tokens,
+                        completion_tokens: usage.completion_tokens,
+                        total_tokens: usage.total_tokens,
+                    }));
+                }
+
+                for choice in parsed.choices {
+                    if let Some(content) = &choice.delta.content {
+                        if !content.is_empty() {
+                            events.push(StreamEvent::Token(content.clone()));
+                        }
+                    }
+                    if let Some(tool_calls) = choice.delta.tool_calls {
+                        for tc in tool_calls {
+                            let idx = tc.index.unwrap_or(0);
+                            if let Some(id) = tc.id {
+                                if let Some(prev_idx) = state.last_tool_index.take() {
+                                    events.push(StreamEvent::ToolCallEnd { index: prev_idx });
                                 }
-                                let data = &line[6..];
-                                if data == "[DONE]" {
-                                    events.push(StreamEvent::Done);
-                                    return events;
-                                }
-
-                                let parsed: OpenAiStreamChunk = match serde_json::from_str(data) {
-                                    Ok(p) => p,
-                                    Err(_) => continue,
-                                };
-
-                                if let Some(usage) = parsed.usage {
-                                    events.push(StreamEvent::Usage(Usage {
-                                        prompt_tokens: usage.prompt_tokens,
-                                        completion_tokens: usage.completion_tokens,
-                                        total_tokens: usage.total_tokens,
-                                    }));
-                                }
-
-                                for choice in parsed.choices {
-                                    if let Some(content) = &choice.delta.content {
-                                        if !content.is_empty() {
-                                            events.push(StreamEvent::Token(content.clone()));
-                                        }
-                                    }
-                                    if let Some(tool_calls) = choice.delta.tool_calls {
-                                        for tc in tool_calls {
-                                            let idx = tc.index.unwrap_or(0);
-                                            if let Some(id) = tc.id {
-                                                let name = tc
-                                                    .function
-                                                    .as_ref()
-                                                    .and_then(|f| f.name.clone())
-                                                    .unwrap_or_default();
-                                                events.push(StreamEvent::ToolCallStart {
-                                                    index: idx,
-                                                    id,
-                                                    name,
-                                                });
-                                            }
-                                            if let Some(func) = &tc.function {
-                                                if let Some(args) = &func.arguments {
-                                                    if !args.is_empty() {
-                                                        events.push(
-                                                            StreamEvent::ToolCallArgumentDelta {
-                                                                index: idx,
-                                                                delta: args.clone(),
-                                                            },
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if choice.finish_reason.is_some() {
-                                        let has_active_tool = events.iter().any(|e| {
-                                            matches!(
-                                                e,
-                                                StreamEvent::ToolCallStart { .. }
-                                                    | StreamEvent::ToolCallArgumentDelta { .. }
-                                            )
+                                let name = tc
+                                    .function
+                                    .as_ref()
+                                    .and_then(|f| f.name.clone())
+                                    .unwrap_or_default();
+                                events.push(StreamEvent::ToolCallStart {
+                                    index: idx,
+                                    id,
+                                    name,
+                                });
+                                state.last_tool_index = Some(idx);
+                            }
+                            if let Some(func) = &tc.function {
+                                if let Some(args) = &func.arguments {
+                                    if !args.is_empty() {
+                                        events.push(StreamEvent::ToolCallArgumentDelta {
+                                            index: idx,
+                                            delta: args.clone(),
                                         });
-                                        if has_active_tool {
-                                            if let Some(&StreamEvent::ToolCallStart {
-                                                index, ..
-                                            }) = events.iter().rev().find(|e| {
-                                                matches!(e, StreamEvent::ToolCallStart { .. })
-                                            }) {
-                                                events.push(StreamEvent::ToolCallEnd { index });
-                                            }
-                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    Some(Err(e)) => {
-                        events.push(StreamEvent::Error(e.to_string()));
-                        return events;
-                    }
-                    None => {
-                        events.push(StreamEvent::Done);
-                        return events;
+                    if choice.finish_reason.is_some() {
+                        if let Some(idx) = state.last_tool_index.take() {
+                            events.push(StreamEvent::ToolCallEnd { index: idx });
+                        }
                     }
                 }
-            }
-        })
-        .flat_map(futures::stream::iter);
 
-        Box::pin(stream)
+                events
+            },
+        )
     }
 }

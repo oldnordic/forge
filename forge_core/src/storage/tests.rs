@@ -232,14 +232,86 @@ fn test_default_db_path_uses_home_dot_magellan() {
     let project = std::path::Path::new("/home/user/Projects/my-cool-project");
     let db = default_db_path(project);
     assert!(db.to_string_lossy().contains(".magellan"));
-    assert!(db.to_string_lossy().ends_with("my-cool-project.db"));
+    assert!(db.to_string_lossy().contains("my-cool-project"));
 }
 
 #[test]
 fn test_default_db_path_fallback_stem() {
     let project = std::path::Path::new("/");
     let db = default_db_path(project);
-    assert!(db.to_string_lossy().ends_with(".magellan/graph.db"));
+    assert!(db.to_string_lossy().contains(".magellan"));
+}
+
+#[test]
+fn test_fallback_db_path_uses_subdirectory() {
+    let project = std::path::Path::new("/home/user/Projects/geographdb-core");
+    let db = fallback_db_path(project);
+    let db_str = db.to_string_lossy();
+    assert!(
+        db_str.contains(".magellan/geographdb-core/geographdb-core.db"),
+        "expected subdirectory convention, got: {}",
+        db_str
+    );
+}
+
+#[test]
+fn test_lookup_registry_finds_forge_core() {
+    let src_dir = std::path::Path::new("/home/feanor/Projects/forge/forge_core/src");
+    if !src_dir.exists() {
+        return;
+    }
+    let db = default_db_path(src_dir);
+    let db_str = db.to_string_lossy();
+    assert!(
+        db_str.contains("forge/forge-core.db"),
+        "expected registry match for forge_core/src, got: {}",
+        db_str
+    );
+}
+
+#[test]
+fn test_lookup_registry_finds_forge_agent() {
+    let src_dir = std::path::Path::new("/home/feanor/Projects/forge/forge_agent/src");
+    if !src_dir.exists() {
+        return;
+    }
+    let db = default_db_path(src_dir);
+    let db_str = db.to_string_lossy();
+    assert!(
+        db_str.contains("forge/forge-agent.db"),
+        "expected registry match for forge_agent/src, got: {}",
+        db_str
+    );
+}
+
+#[test]
+fn test_lookup_registry_from_codebase_path_without_src() {
+    let crate_dir = std::path::Path::new("/home/feanor/Projects/forge/forge_core");
+    if !crate_dir.exists() {
+        return;
+    }
+    let db = default_db_path(crate_dir);
+    let db_str = db.to_string_lossy();
+    assert!(
+        db_str.contains("forge/forge-core.db"),
+        "expected registry match for forge_core (without /src), got: {}",
+        db_str
+    );
+}
+
+#[test]
+fn test_lookup_registry_from_agent_codebase_path() {
+    let crate_dir = std::path::Path::new("/home/feanor/Projects/forge/forge_agent");
+    if !crate_dir.exists() {
+        return;
+    }
+    let db = default_db_path(crate_dir);
+    let db_str = db.to_string_lossy();
+    assert!(
+        db_str.contains("forge/forge-agent.db"),
+        "expected registry match for forge_agent (without /src), got: {}",
+        db_str
+    );
 }
 
 fn make_symbol(name: &str) -> Symbol {

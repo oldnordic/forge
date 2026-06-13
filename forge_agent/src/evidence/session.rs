@@ -1,5 +1,6 @@
 use crate::evidence::recorder::EvidenceRecorder;
 use crate::evidence::types::*;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,7 +29,7 @@ pub struct SessionMetrics {
 
 pub struct ForgeSession {
     recorder: Arc<dyn EvidenceRecorder>,
-    metrics: Arc<std::sync::RwLock<SessionMetrics>>,
+    metrics: Arc<RwLock<SessionMetrics>>,
     prompt_sequence: AtomicU32,
     tool_call_count: AtomicU32,
     file_write_count: AtomicU32,
@@ -36,7 +37,7 @@ pub struct ForgeSession {
     test_run_count: AtomicU32,
     total_input_tokens: AtomicU64,
     total_output_tokens: AtomicU64,
-    total_cost_usd: Arc<std::sync::Mutex<f64>>,
+    total_cost_usd: Arc<Mutex<f64>>,
 }
 
 impl ForgeSession {
@@ -75,7 +76,7 @@ impl ForgeSession {
 
         let session = Self {
             recorder,
-            metrics: Arc::new(std::sync::RwLock::new(metrics)),
+            metrics: Arc::new(RwLock::new(metrics)),
             prompt_sequence: AtomicU32::new(0),
             tool_call_count: AtomicU32::new(0),
             file_write_count: AtomicU32::new(0),
@@ -83,7 +84,7 @@ impl ForgeSession {
             test_run_count: AtomicU32::new(0),
             total_input_tokens: AtomicU64::new(0),
             total_output_tokens: AtomicU64::new(0),
-            total_cost_usd: Arc::new(std::sync::Mutex::new(0.0)),
+            total_cost_usd: Arc::new(Mutex::new(0.0)),
         };
 
         let recorder = session.recorder.clone();
@@ -111,11 +112,11 @@ impl ForgeSession {
     }
 
     pub fn session_id(&self) -> String {
-        self.metrics.read().unwrap().session_id.clone()
+        self.metrics.read().session_id.clone()
     }
 
     pub async fn end(&self, exit_status: &str) {
-        let mut m = self.metrics.write().unwrap();
+        let mut m = self.metrics.write();
         m.ended_at = Some(chrono::Utc::now().to_rfc3339());
         m.exit_status = Some(exit_status.to_string());
         m.prompt_count = self.prompt_sequence.load(Ordering::Relaxed);
@@ -125,7 +126,7 @@ impl ForgeSession {
         m.test_run_count = self.test_run_count.load(Ordering::Relaxed);
         m.total_input_tokens = self.total_input_tokens.load(Ordering::Relaxed);
         m.total_output_tokens = self.total_output_tokens.load(Ordering::Relaxed);
-        m.total_cost_usd = *self.total_cost_usd.lock().unwrap();
+        m.total_cost_usd = *self.total_cost_usd.lock();
     }
 
     pub fn record_prompt(&self, record: PromptRecord) {
@@ -141,7 +142,7 @@ impl ForgeSession {
                 .fetch_add(tokens, Ordering::Relaxed);
         }
         if let Some(cost) = r.cost_usd {
-            *self.total_cost_usd.lock().unwrap() += cost;
+            *self.total_cost_usd.lock() += cost;
         }
 
         let session_id = self.session_id();

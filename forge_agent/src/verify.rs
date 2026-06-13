@@ -239,7 +239,6 @@ impl Verifier {
             passed,
             diagnostics: all_diagnostics,
             suggestions,
-            changed_files: Vec::new(),
         })
     }
 
@@ -253,6 +252,11 @@ impl Verifier {
         changed_files: &[std::path::PathBuf],
         diffs: &[String],
     ) -> Result<VerificationReport> {
+        tracing::info!(
+            "Verifying {} changed files in {}",
+            changed_files.len(),
+            working_dir.display()
+        );
         let mut all_diagnostics = Vec::new();
 
         let compile_diags = self.compile_check(working_dir).await?;
@@ -286,7 +290,6 @@ impl Verifier {
             passed,
             diagnostics: all_diagnostics,
             suggestions,
-            changed_files: changed_files.to_vec(),
         })
     }
 
@@ -366,8 +369,6 @@ pub struct VerificationReport {
     pub diagnostics: Vec<Diagnostic>,
     /// LLM-generated fix suggestions (None if no LLM or no errors)
     pub suggestions: Option<String>,
-    /// Files that were changed before verification (empty for full-project verify)
-    pub changed_files: Vec<std::path::PathBuf>,
 }
 
 /// Diagnostic message.
@@ -473,10 +474,7 @@ mod tests {
             .await;
 
         assert!(result.is_ok(), "verify_changes should succeed");
-        let report = result.unwrap();
         // Cargo check on empty dir will have errors, but method ran
-        assert!(!report.changed_files.is_empty());
-        assert_eq!(report.changed_files[0], PathBuf::from("src/lib.rs"));
     }
 
     #[tokio::test]

@@ -1,7 +1,6 @@
 //! LLM provider integration.
 //!
 //! Implements the `LlmProvider` trait for multiple backends:
-//! - `MockProvider`      — canned responses for tests
 //! - `OllamaProvider`    — local Ollama server (`llm-ollama` feature)
 //! - `OpenAiProvider`    — OpenAI chat completions API (`llm-openai` feature)
 //! - `AnthropicProvider` — Anthropic Messages API (`llm-anthropic` feature)
@@ -14,6 +13,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Async text-completion contract shared by all LLM backends.
+///
+/// ## Stability
+///
+/// This trait is part of the stable SDK contract. Breaking changes to the
+/// signature will be accompanied by a major version bump.
 #[async_trait::async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Return a completion for the given user prompt and optional system prompt.
@@ -34,6 +38,12 @@ pub struct LlmConfig {
     pub stop: Vec<String>,
     #[serde(default)]
     pub json_mode: bool,
+    #[serde(default = "default_max_tool_output_bytes")]
+    pub max_tool_output_bytes: usize,
+}
+
+fn default_max_tool_output_bytes() -> usize {
+    8192
 }
 
 impl LlmConfig {
@@ -45,6 +55,7 @@ impl LlmConfig {
             top_p: None,
             stop: Vec::new(),
             json_mode: false,
+            max_tool_output_bytes: default_max_tool_output_bytes(),
         }
     }
 
@@ -64,13 +75,13 @@ impl LlmConfig {
     }
 }
 
-// ── Mock ──────────────────────────────────────────────────────────────────────
-
-/// Canned-response provider for unit tests.
+/// Canned-response provider for tests.
+#[cfg(test)]
 pub struct MockProvider {
     response: String,
 }
 
+#[cfg(test)]
 impl MockProvider {
     pub fn new(response: impl Into<String>) -> Self {
         Self {
@@ -79,6 +90,7 @@ impl MockProvider {
     }
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl LlmProvider for MockProvider {
     async fn complete(&self, _prompt: &str, _system: Option<&str>) -> Result<String, String> {

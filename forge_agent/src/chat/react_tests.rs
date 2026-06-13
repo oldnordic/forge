@@ -2,10 +2,14 @@ use std::sync::Arc;
 
 use crate::chat::providers::mock::MockChatProvider;
 use crate::chat::react::{AgentError, ReActLoop};
+use crate::chat::retrieval::{CodeRetriever, CodeSnippet, RetrievalSource};
+use crate::chat::stream::ReactStreamEvent;
 use crate::chat::tools::registry::BuiltinToolRegistry;
 use crate::chat::tools::types::ToolDef;
 use crate::llm::LlmConfig;
 use async_trait::async_trait;
+use futures::StreamExt;
+use std::path::PathBuf;
 struct EchoTool;
 
 #[async_trait]
@@ -95,7 +99,7 @@ async fn react_provider_error_propagates() {
     let registry = BuiltinToolRegistry::new();
     let config = LlmConfig::new("test-model");
 
-    let react = ReActLoop::new(Arc::new(provider), registry, config);
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_step_retries(0);
     let result = react.run("Test").await;
 
     match result.unwrap_err() {
@@ -104,6 +108,87 @@ async fn react_provider_error_propagates() {
         }
         other => panic!("expected Provider error, got {other}"),
     }
+}
+
+#[tokio::test]
+async fn react_provider_error_retries_then_succeeds() {
+    let provider = MockChatProvider::from_text("recovered")
+        .with_error(crate::chat::types::LlmError::Http("transient".to_string()));
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_step_retries(2);
+    let result = react.run("Test retry").await;
+
+    assert_eq!(result.unwrap(), "recovered");
+}
+
+#[tokio::test]
+async fn react_provider_error_exhausts_retries() {
+    let provider = MockChatProvider::from_text("never reached")
+        .with_error(crate::chat::types::LlmError::Http("fail 1".to_string()))
+        .with_error(crate::chat::types::LlmError::Http("fail 2".to_string()))
+        .with_error(crate::chat::types::LlmError::Http("fail 3".to_string()));
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_step_retries(2);
+    let result = react.run("Test retry limit").await;
+
+    match result.unwrap_err() {
+        AgentError::Provider(err) => {
+            assert!(err.to_string().contains("fail 3"));
+        }
+        other => panic!("expected Provider error after retries exhausted, got {other}"),
+    }
+}
+
+#[tokio::test]
+async fn react_verifier_rejects_answer() {
+    let provider =
+        MockChatProvider::from_text("bad answer").with_text("good answer with magic word");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let verifier: crate::chat::react::VerifierFn = Arc::new(|answer| answer.contains("magic word"));
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_verifier(verifier);
+    let result = react.run("Tell me something").await;
+
+    assert_eq!(result.unwrap(), "good answer with magic word");
+}
+
+#[tokio::test]
+async fn react_verifier_rejects_all_hits_max_iterations() {
+    let provider = MockChatProvider::from_text("always bad");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let verifier: crate::chat::react::VerifierFn = Arc::new(|_| false);
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config)
+        .with_verifier(verifier)
+        .with_max_iterations(3);
+    let result = react.run("Never passes").await;
+
+    match result.unwrap_err() {
+        AgentError::MaxIterations => {}
+        other => panic!("expected MaxIterations, got {other}"),
+    }
+}
+
+#[tokio::test]
+async fn react_verifier_accepts_first_try() {
+    let provider = MockChatProvider::from_text("perfect magic answer");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let verifier: crate::chat::react::VerifierFn = Arc::new(|answer| answer.contains("magic"));
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_verifier(verifier);
+    let result = react.run("Say magic").await;
+
+    assert_eq!(result.unwrap(), "perfect magic answer");
 }
 
 #[tokio::test]
@@ -241,4 +326,184 @@ async fn react_live_ollama_tool_calling() {
             panic!("Live ReAct unexpected error: {e}");
         }
     }
+}
+
+#[tokio::test]
+async fn react_stream_text_only() {
+    let provider = MockChatProvider::from_text("Hello streaming");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
+    let events: Vec<ReactStreamEvent> = react.run_stream("Say hi").collect().await;
+
+    let has_iteration = events
+        .iter()
+        .any(|e| matches!(e, ReactStreamEvent::IterationStart { .. }));
+    assert!(has_iteration, "should have IterationStart event");
+
+    let has_token = events.iter().any(|e| {
+        matches!(
+            e,
+            ReactStreamEvent::LlmEvent(crate::chat::stream::StreamEvent::Token(_))
+        )
+    });
+    assert!(has_token, "should have Token event");
+
+    let answer = events.iter().find_map(|e| match e {
+        ReactStreamEvent::Answer(a) => Some(a.clone()),
+        _ => None,
+    });
+    assert_eq!(answer.as_deref(), Some("Hello streaming"));
+}
+
+#[tokio::test]
+async fn react_stream_tool_call_then_answer() {
+    let provider = MockChatProvider::from_text("final stream answer")
+        .with_tool_call("echo", serde_json::json!({"msg": "hi"}));
+    let registry = echo_registry();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
+    let events: Vec<ReactStreamEvent> = react.run_stream("Echo hi").collect().await;
+
+    let tool_executed: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            ReactStreamEvent::ToolExecuted { name, success, .. } => Some((name.clone(), *success)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tool_executed.len(), 1);
+    assert_eq!(tool_executed[0].0, "echo");
+    assert!(tool_executed[0].1);
+
+    let answer = events.iter().find_map(|e| match e {
+        ReactStreamEvent::Answer(a) => Some(a.clone()),
+        _ => None,
+    });
+    assert_eq!(answer.as_deref(), Some("final stream answer"));
+}
+
+#[tokio::test]
+async fn react_stream_max_iterations() {
+    let provider = MockChatProvider::from_text("never finish")
+        .with_tool_call("echo", serde_json::json!({"msg": "loop"}))
+        .with_tool_call("echo", serde_json::json!({"msg": "loop"}))
+        .with_tool_call("echo", serde_json::json!({"msg": "loop"}));
+    let registry = echo_registry();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config).with_max_iterations(2);
+    let events: Vec<ReactStreamEvent> = react.run_stream("Loop").collect().await;
+
+    let has_max = events
+        .iter()
+        .any(|e| matches!(e, ReactStreamEvent::MaxIterationsReached));
+    assert!(has_max, "should emit MaxIterationsReached");
+
+    let has_answer = events
+        .iter()
+        .any(|e| matches!(e, ReactStreamEvent::Answer(_)));
+    assert!(
+        !has_answer,
+        "should not emit Answer when max iterations reached"
+    );
+}
+
+#[tokio::test]
+async fn react_stream_multiple_iterations() {
+    let provider = MockChatProvider::from_text("done")
+        .with_tool_call("echo", serde_json::json!({"msg": "step 1"}))
+        .with_tool_call("echo", serde_json::json!({"msg": "step 2"}));
+    let registry = echo_registry();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
+    let events: Vec<ReactStreamEvent> = react.run_stream("Multi-step").collect().await;
+
+    let iterations: Vec<usize> = events
+        .iter()
+        .filter_map(|e| match e {
+            ReactStreamEvent::IterationStart { iteration } => Some(*iteration),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        iterations.len() >= 3,
+        "should have at least 3 iterations (2 tool calls + 1 final), got {}",
+        iterations.len()
+    );
+
+    let tool_count = events
+        .iter()
+        .filter(|e| matches!(e, ReactStreamEvent::ToolExecuted { .. }))
+        .count();
+    assert_eq!(tool_count, 2, "should have 2 tool executions");
+
+    let answer = events.iter().find_map(|e| match e {
+        ReactStreamEvent::Answer(a) => Some(a.clone()),
+        _ => None,
+    });
+    assert_eq!(answer.as_deref(), Some("done"));
+}
+
+struct FixedRetriever {
+    snippets: Vec<CodeSnippet>,
+}
+
+#[async_trait]
+impl CodeRetriever for FixedRetriever {
+    async fn retrieve(&self, _query: &str, top_k: usize) -> Vec<CodeSnippet> {
+        self.snippets.iter().take(top_k).cloned().collect()
+    }
+}
+
+#[tokio::test]
+async fn react_with_retriever_injects_context() {
+    let snippets = vec![CodeSnippet {
+        file: PathBuf::from("src/lib.rs"),
+        line: 1,
+        content: "pub fn hello() {}".to_string(),
+        score: 0.9,
+        source: RetrievalSource::File,
+    }];
+    let retriever = FixedRetriever { snippets };
+
+    let provider = MockChatProvider::from_text("I see the hello function");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let react =
+        ReActLoop::new(Arc::new(provider), registry, config).with_retriever(Arc::new(retriever));
+    let result = react.run("Find hello").await;
+
+    assert_eq!(result.unwrap(), "I see the hello function");
+}
+
+#[tokio::test]
+async fn react_with_empty_retriever_still_works() {
+    let retriever = FixedRetriever { snippets: vec![] };
+
+    let provider = MockChatProvider::from_text("no context needed");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let react =
+        ReActLoop::new(Arc::new(provider), registry, config).with_retriever(Arc::new(retriever));
+    let result = react.run("Test").await;
+
+    assert_eq!(result.unwrap(), "no context needed");
+}
+
+#[tokio::test]
+async fn react_without_retriever_works() {
+    let provider = MockChatProvider::from_text("no retrieval");
+    let registry = BuiltinToolRegistry::new();
+    let config = LlmConfig::new("test-model");
+
+    let react = ReActLoop::new(Arc::new(provider), registry, config);
+    let result = react.run("Test").await;
+
+    assert_eq!(result.unwrap(), "no retrieval");
 }

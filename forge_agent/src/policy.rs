@@ -189,80 +189,6 @@ impl PolicyViolation {
     }
 }
 
-/// Policy composition: All policies must pass.
-#[derive(Clone, Debug)]
-pub struct AllPolicies {
-    /// The policies to validate
-    pub policies: Vec<Policy>,
-}
-
-impl AllPolicies {
-    /// Creates a new AllPolicies composition.
-    pub fn new(policies: Vec<Policy>) -> Self {
-        Self { policies }
-    }
-
-    /// Validates all policies.
-    pub async fn validate(&self, forge: &Forge, diff: &Diff) -> Result<PolicyReport> {
-        let mut all_violations = Vec::new();
-
-        for policy in &self.policies {
-            let report = policy.validate(forge, diff).await?;
-            all_violations.extend(report.violations);
-        }
-
-        let n = self.policies.len();
-        Ok(PolicyReport {
-            policy: Policy::custom("All", format!("All {n} policies must pass"), |_| vec![]),
-            violations: all_violations.clone(),
-            passed: all_violations.is_empty(),
-        })
-    }
-}
-
-/// Policy composition: At least one policy must pass.
-#[derive(Clone, Debug)]
-pub struct AnyPolicy {
-    /// The policies to validate
-    pub policies: Vec<Policy>,
-}
-
-impl AnyPolicy {
-    /// Creates a new AnyPolicy composition.
-    pub fn new(policies: Vec<Policy>) -> Self {
-        Self { policies }
-    }
-
-    /// Validates that at least one policy passes.
-    pub async fn validate(&self, forge: &Forge, diff: &Diff) -> Result<PolicyReport> {
-        let mut all_violations = Vec::new();
-        let mut any_passed = false;
-
-        for policy in &self.policies {
-            let report = policy.validate(forge, diff).await?;
-            if report.passed {
-                any_passed = true;
-            }
-            all_violations.extend(report.violations);
-        }
-
-        let n = self.policies.len();
-        Ok(PolicyReport {
-            policy: Policy::custom(
-                "Any",
-                format!("At least one of {n} policies must pass"),
-                |_| vec![],
-            ),
-            violations: if any_passed {
-                Vec::new()
-            } else {
-                all_violations.clone()
-            },
-            passed: any_passed,
-        })
-    }
-}
-
 /// A diff representing code changes.
 ///
 /// This is a simplified representation - in production, this would be
@@ -505,51 +431,6 @@ mod tests {
         let report = policy.validate(&forge, &diff).await.unwrap();
 
         assert!(!report.passed);
-    }
-
-    #[tokio::test]
-    async fn test_all_policies() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-
-        let diff = Diff {
-            file_path: PathBuf::from("test.rs"),
-            original: "".to_string(),
-            modified: "pub fn safe() {}".to_string(),
-            changes: vec![],
-        };
-
-        let policies = vec![Policy::NoUnsafeInPublicAPI, Policy::PreserveTests];
-
-        let all = AllPolicies::new(policies);
-        let report = all.validate(&forge, &diff).await.unwrap();
-
-        assert!(report.passed);
-    }
-
-    #[tokio::test]
-    async fn test_any_policy() {
-        let temp_dir = TempDir::new().unwrap();
-        let forge = Forge::open(temp_dir.path()).await.unwrap();
-
-        let diff = Diff {
-            file_path: PathBuf::from("test.rs"),
-            original: "".to_string(),
-            modified: "pub unsafe fn dangerous() {}".to_string(),
-            changes: vec![],
-        };
-
-        let policies = vec![
-            Policy::NoUnsafeInPublicAPI,
-            Policy::custom("AlwaysPass", "Always passes", |_| vec![]),
-        ];
-
-        let any = AnyPolicy::new(policies);
-        let report = any.validate(&forge, &diff).await.unwrap();
-
-        // NoUnsafeInPublicAPI fails on `pub unsafe fn`, but AlwaysPass has no violations.
-        // AnyPolicy passes when at least one policy passes.
-        assert!(report.passed);
     }
 
     #[tokio::test]

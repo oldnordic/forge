@@ -370,6 +370,84 @@ impl EnvoyClient {
         Ok(Some(val))
     }
 
+    /// Claim a pending handoff by ID.
+    pub async fn claim_handoff(&self, handoff_id: i64) -> Result<(), String> {
+        let url = self.url(&format!("/atheneum/handoffs/{}/claim", handoff_id));
+        let resp = self
+            .post_auth(&url, &serde_json::Value::Object(serde_json::Map::new()))
+            .await?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            Err(format!("claim_handoff {status}: {body}"))
+        }
+    }
+
+    /// Record a bench run evidence entry.
+    pub async fn forge_bench_run(
+        &self,
+        session_id: &str,
+        bench_name: &str,
+        mean_ns: Option<i64>,
+        median_ns: Option<i64>,
+        p95_ns: Option<i64>,
+        is_regression: bool,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({
+            "session_id": session_id,
+            "bench_name": bench_name,
+            "mean_ns": mean_ns,
+            "median_ns": median_ns,
+            "p95_ns": p95_ns,
+            "is_regression": is_regression,
+        });
+        let resp = self
+            .post_auth(&self.url("/atheneum/bench-runs"), &body)
+            .await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("forge_bench_run: {}", resp.status()))
+        }
+    }
+
+    /// Query atheneum event log.
+    pub async fn query_events(
+        &self,
+        session_id: Option<&str>,
+        event_type: Option<&str>,
+        limit: Option<i64>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let mut params = vec![];
+        if let Some(sid) = session_id {
+            params.push(format!("session_id={}", sid));
+        }
+        if let Some(et) = event_type {
+            params.push(format!("event_type={}", et));
+        }
+        if let Some(l) = limit {
+            params.push(format!("limit={}", l));
+        }
+        let url = if params.is_empty() {
+            self.url("/atheneum/events")
+        } else {
+            format!("{}?{}", self.url("/atheneum/events"), params.join("&"))
+        };
+        let resp = self.get_auth(&url).await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("query_events {status}: {body}"));
+        }
+        resp.json::<Vec<serde_json::Value>>()
+            .await
+            .map_err(|e| format!("query_events parse: {e}"))
+    }
+
     // ── Forge Evidence Methods ────────────────────────────────────────────────
 
     pub async fn forge_prompt(

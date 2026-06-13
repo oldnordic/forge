@@ -4,7 +4,7 @@
 
 #[cfg(feature = "llm-ollama")]
 mod ollama_tests {
-    use forge_agent::{llm::LlmProvider, OllamaProvider};
+    use forge_agent::{LlmProvider, OllamaProvider};
 
     const MODEL: &str = "qwen3.5:latest";
 

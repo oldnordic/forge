@@ -47,7 +47,7 @@ impl EditResult {
 /// Edit module for span-safe refactoring.
 pub struct EditModule {
     store: std::sync::Arc<crate::storage::UnifiedGraphStore>,
-    undo_stack: std::sync::Mutex<Vec<PendingUndo>>,
+    undo_stack: parking_lot::Mutex<Vec<PendingUndo>>,
     undo_capacity: usize,
 }
 
@@ -55,7 +55,7 @@ impl EditModule {
     pub fn new(store: std::sync::Arc<crate::storage::UnifiedGraphStore>) -> Self {
         Self {
             store,
-            undo_stack: std::sync::Mutex::new(Vec::new()),
+            undo_stack: parking_lot::Mutex::new(Vec::new()),
             undo_capacity: 100,
         }
     }

@@ -75,17 +75,6 @@ impl Committer {
 
         Ok(status.success())
     }
-
-    pub fn generate_summary(&self, steps: &[crate::planner::PlanStep]) -> String {
-        let mut summary = String::from("Applied ");
-        for (i, step) in steps.iter().enumerate() {
-            if i > 0 {
-                summary.push_str(", ");
-            }
-            summary.push_str(&step.description);
-        }
-        summary
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -103,30 +92,6 @@ mod tests {
     #[tokio::test]
     async fn test_committer_creation() {
         let _committer = Committer::new();
-    }
-
-    #[tokio::test]
-    async fn test_generate_summary() {
-        let committer = Committer::new();
-        let steps = vec![
-            crate::planner::PlanStep {
-                description: "Step 1".to_string(),
-                operation: crate::planner::PlanOperation::Inspect {
-                    symbol_id: forge_core::types::SymbolId(1),
-                    symbol_name: "test".to_string(),
-                },
-            },
-            crate::planner::PlanStep {
-                description: "Step 2".to_string(),
-                operation: crate::planner::PlanOperation::Inspect {
-                    symbol_id: forge_core::types::SymbolId(2),
-                    symbol_name: "test2".to_string(),
-                },
-            },
-        ];
-        let summary = committer.generate_summary(&steps);
-        assert!(summary.contains("Step 1"));
-        assert!(summary.contains("Step 2"));
     }
 
     #[tokio::test]

@@ -153,9 +153,18 @@ impl AgentLoop {
             .map_err(|e| crate::AgentError::PlanningFailed(e.to_string()))?;
 
         if !conflicts.is_empty() {
+            let details: Vec<String> = conflicts
+                .iter()
+                .map(|c| match &c.reason {
+                    crate::planner::ConflictReason::OverlappingRegion { start, end } => {
+                        format!("{} at lines {}-{}", c.file, start, end)
+                    }
+                })
+                .collect();
             return Err(crate::AgentError::PlanningFailed(format!(
-                "Found {} conflicts in plan",
-                conflicts.len()
+                "Found {} conflicts in plan: {}",
+                conflicts.len(),
+                details.join("; ")
             )));
         }
 
@@ -518,18 +527,7 @@ impl AgentLoop {
             }
         }
 
-        let phase = match error {
-            // nosemgrep: llm-giant-match
-            crate::AgentError::ObservationFailed(_) => "Observe",
-            crate::AgentError::PolicyViolation(_) => "Constrain",
-            crate::AgentError::PlanningFailed(_) => "Plan",
-            crate::AgentError::MutationFailed(_) => "Mutate",
-            crate::AgentError::VerificationFailed(_) => "Verify",
-            crate::AgentError::CommitFailed(_) => "Commit",
-            crate::AgentError::ForgeError(_) => "Forge",
-            crate::AgentError::WorkflowFailed(_) => "Workflow",
-            crate::AgentError::ReActFailed(_) => "ReAct",
-        };
+        let phase = error.phase_label();
 
         if let Err(e) = self
             .audit_log
