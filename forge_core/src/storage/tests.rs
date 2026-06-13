@@ -115,8 +115,12 @@ async fn test_query_symbols_empty() {
 }
 
 #[tokio::test]
-async fn test_insert_reference_placeholder() {
-    let store = UnifiedGraphStore::memory().await.unwrap();
+async fn test_insert_reference_and_query() {
+    // References are only persisted on the NativeV3 backend.
+    let dir = tempfile::tempdir().unwrap();
+    let store = UnifiedGraphStore::open(dir.path(), BackendKind::NativeV3)
+        .await
+        .unwrap();
 
     let reference = Reference {
         from: SymbolId(1),
@@ -133,6 +137,20 @@ async fn test_insert_reference_placeholder() {
     };
 
     store.insert_reference(&reference).await.unwrap();
+
+    // Round-trip: the inserted reference should be retrievable by its target.
+    let refs = store.query_references(SymbolId(2)).await.unwrap();
+    assert_eq!(refs.len(), 1, "inserted reference should be retrievable");
+    assert_eq!(refs[0].kind, ReferenceKind::Call);
+    assert_eq!(refs[0].location.file_path, PathBuf::from("src/lib.rs"));
+    assert_eq!(refs[0].location.line_number, 2);
+
+    // Querying a different symbol must return nothing — proves the query discriminates.
+    let empty = store.query_references(SymbolId(999)).await.unwrap();
+    assert!(
+        empty.is_empty(),
+        "unrelated symbol should have no references"
+    );
 }
 
 #[tokio::test]

@@ -512,7 +512,7 @@ tasks:
     }
 
     #[test]
-    fn test_shell_task_stub() {
+    fn test_shell_task_parses_command_and_args() {
         let yaml = r#"
 name: "Shell Task Test"
 tasks:
@@ -524,12 +524,36 @@ tasks:
       args: ["hello", "world"]
 "#;
 
+        // 1. Verify YAML deserialization captures the correct values
         let yaml_workflow: YamlWorkflow = serde_yaml::from_str(yaml).unwrap();
-        let workflow: Result<Workflow, _> = yaml_workflow.try_into();
+        assert_eq!(yaml_workflow.tasks.len(), 1);
 
-        assert!(workflow.is_ok());
-        let workflow = workflow.unwrap();
+        let task = &yaml_workflow.tasks[0];
+        assert_eq!(task.id, "run");
+        assert_eq!(task.name, "Run Command");
+        assert_eq!(task.task_type, YamlTaskType::Shell);
+
+        assert_eq!(
+            task.params.params.get("command").and_then(|v| v.as_str()),
+            Some("echo")
+        );
+        let args: Vec<&str> = task
+            .params
+            .params
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(args, vec!["hello", "world"]);
+
+        // 2. Verify the full conversion to Workflow preserves the task
+        let workflow: Workflow = yaml_workflow.try_into().unwrap();
         assert_eq!(workflow.task_count(), 1);
+        assert_eq!(workflow.task_ids(), vec![TaskId::new("run")]);
+        assert_eq!(
+            workflow.task_name(&TaskId::new("run")),
+            Some("Run Command".to_string())
+        );
     }
 
     #[test]
