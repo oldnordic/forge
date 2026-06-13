@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known Limitations
 
-- **88 dead-code warnings in `workflow/` internal modules** — composability primitives (ConditionalTask, ParallelTasks, TryCatchTask, PlanGraph, KnowledgeExplorer, SemgrepRunner, fallback handlers, dead task types) are implemented but have zero inbound callers. `cargo clippy -D warnings` fails on these. Not yet deleted (conservative cleanup).
+- **88 dead-code warnings in `workflow/` internal modules** — RESOLVED. `cargo clippy --all-targets --all-features -- -D warnings` now passes clean. Dead composability primitives and unused task types cleaned per zero-tolerance policy.
 - **`workflow/executor/tests.rs` exceeds 1K LOC** — 1347 lines, needs modularization
 - **3 TODOs in `workflow/`** — `timeout.rs`, `combinators.rs` (2×). All in dead-code area.
 - **14 runtime `.unwrap()` calls in production code** — all `Mutex::lock().unwrap()` in `MockEvidenceRecorder` (6), `ForgeSession` (4), `ShellTask` (2), workflow examples (2). Standard for non-poison-aware code but should be `.expect("invariant: ...")`.
@@ -101,6 +101,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Code Modularization** (quality maintenance):
   - `lib.rs` (1184 LOC) split: `Agent` struct + all impls + `load_llm_from_forge_toml` extracted to `agent.rs`. `lib.rs` becomes slim crate root with module declarations, type definitions, and re-exports. Internal fields/methods use `pub(crate)` visibility for test and runtime_integration access.
   - `atheneum_tool.rs` (1070 LOC) split: 27 command handlers extracted into `atheneum_tool/handlers.rs` (714 LOC), tests into `atheneum_tool/tests.rs` (269 LOC), struct + dispatch + definition remain in `atheneum_tool/mod.rs` (193 LOC). All under 1K LOC limit.
+  - `workflow/executor.rs` split into `executor/` package: `mod.rs` (struct + `new()` + builder), `serial.rs` (`execute` path), `parallel.rs` (`execute_parallel` + `execute_task` + fork-join helpers), `audit.rs`, `result.rs` (`WorkflowResult`), `tests.rs`.
+  - `workflow/tasks.rs` split into `tasks/` package: one file per task type — `graph_query.rs`, `agent_loop.rs`, `shell.rs`, `file_edit.rs`, `tool.rs` — plus `mod.rs` and `tests.rs`.
+  - `workflow/tools.rs` split into `tools/` package: `types.rs` (Tool/ToolInvocation/ToolResult/ToolError), `fallback.rs` (FallbackHandler/RetryFallback/SkipFallback/ChainFallback), `process.rs` (ProcessGuard + Drop + ToolCompensation From impl), `registry.rs` (ToolRegistry).
+  - `workflow/loop.rs` split into `agent_loop/` package: `types.rs` (AgentPhase/AgentLoopCheckpoint/LoopResult/DiscoveryStore trait), `phases.rs` (6 phase functions), `mod.rs` (AgentLoop struct + `run()` dispatcher).
+  - `planner.rs` split into `planner/` package: `types.rs` (PlanStep/PlanOperation/ImpactEstimate/Conflict/RollbackStep), `parsing.rs` (`parse_llm_steps`/`json_value_to_step`/`detect_intent`).
+  - `workflow/checkpoint/mod.rs` split: validation logic (ValidationStatus, ValidationCheckpoint, ValidationResult, RollbackRecommendation, `validate_checkpoint`, `can_proceed`, `requires_rollback`, `extract_confidence`) extracted to `checkpoint/validation.rs`; service logic remains in `checkpoint/service.rs`.
+  - `workflow/rollback.rs` split into `rollback/` package: `tool_compensation.rs` (ToolCompensation), `compensation_registry.rs` (CompensationRegistry), `engine.rs` (RollbackEngine + strategies).
+  - `forge_core/src/cfg/` modularized: `DominatorTree` extracted to `cfg/dominators.rs`; `PathBuilder` + `Path` merged into `cfg/paths.rs` (renamed from `path_builder.rs`); `cfg/types.rs` now holds only `Loop`.
+  - `forge_core/src/analysis/` modularized: `operations.rs` renamed to `analysis/diff.rs` (Diff + EditOperation + Insert/Delete/Rename operations); 5 impact-analysis types (ImpactData, ImpactAnalysis, CrossReferences, ReferenceChain, CallChain) extracted to `analysis/impact.rs`.
+
+- **Test Quality** (vacuous-stub replacement):
+  - 4 test stubs that passed vacuously (0 CFG blocks, proving nothing) replaced with real behavioral assertions: `test_parallel_tasks_both_execute` (shared side-effect log proves both fork-join tasks ran), `test_shell_task_parses_command_and_args` (verifies parsed SHELL task type/command/args at YAML level), `test_insert_reference_and_query` (NativeV3 round-trip: insert reference, query, discriminating negative), `test_shell_command_task_executes_command` (file side-effect proves `touch` ran + failure-path test for invalid command). Net +1 test from the added failure-path case.
 
 - **DB Path Registry Integration** (`forge_core/src/storage/mod.rs`):
   - `default_db_path()` now reads `~/.config/magellan/registry.toml` to resolve the correct DB for a project, matching the magellan service convention (`~/.magellan/<group>/<crate>.db`).
