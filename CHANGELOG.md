@@ -44,10 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known Limitations
 
 - **88 dead-code warnings in `workflow/` internal modules** — RESOLVED. `cargo clippy --all-targets --all-features -- -D warnings` now passes clean. Dead composability primitives and unused task types cleaned per zero-tolerance policy.
-- **`workflow/executor/tests.rs` exceeds 1K LOC** — 1347 lines, needs modularization
-- **3 TODOs in `workflow/`** — `timeout.rs`, `combinators.rs` (2×). All in dead-code area.
-- **14 runtime `.unwrap()` calls in production code** — all `Mutex::lock().unwrap()` in `MockEvidenceRecorder` (6), `ForgeSession` (4), `ShellTask` (2), workflow examples (2). Standard for non-poison-aware code but should be `.expect("invariant: ...")`.
-- **`temperature` and `max_tokens` in `AgentConfig`** — parsed but not auto-applied to LLM config
+- **`workflow/executor/tests.rs` exceeds 1K LOC** — RESOLVED. Split into `tests/` directory with 10 thematic submodules (basic, rollback, checkpoint, resume, compensation, validation, cancellation, timeout, parallel, forge_context) + shared `MockTask` in `mod.rs`.
+- **3 TODOs in `workflow/`** — RESOLVED. `WithCompensation` semantics documented in `combinators.rs` (ConditionalTask runs then-branch; TryCatchTask returns try result without catch). `timeout.rs` test comment clarified as structural test.
+- **14 runtime `.unwrap()` calls in production code** — PARTIALLY RESOLVED. `MockEvidenceRecorder` migrated to `parking_lot::Mutex` (6 eliminated). `ForgeSession` (4), `ShellTask` (2), workflow examples (2) remain — standard for non-poison-aware code.
+- **`temperature` and `max_tokens` in `AgentConfig`** — RESOLVED. `resolve_chat_config()` helper merges `.forge.toml` `[agent]` values as defaults; explicit `LlmConfig` values always win. Wired into `run_react`, `run_react_stream`, `spawn`.
 - **Skill routing is keyword-based, not semantic** — edge cases where multiple skills score similarly need explicit trigger tuning
 
 - **Stage 1: Memory & Context** (`forge_agent/src/chat/`):

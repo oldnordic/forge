@@ -85,8 +85,9 @@ impl WorkflowTask for ConditionalTask {
                 }
             }
             TaskResult::WithCompensation { .. } => {
-                // For now, treat WithCompensation as Success and execute then task
-                // TODO: Consider if compensation should propagate
+                // WithCompensation is a success result with an attached
+                // rollback action. Run the then branch. Compensation is
+                // tracked by the rollback engine at the workflow level.
                 self.then_task.execute(context).await
             }
         }
@@ -160,9 +161,10 @@ impl WorkflowTask for TryCatchTask {
                 self.catch_task.execute(context).await
             }
             Ok(TaskResult::WithCompensation { .. }) => {
-                // For now, execute catch task on compensation result
-                // TODO: Consider if compensation should execute before catch
-                self.catch_task.execute(context).await
+                // WithCompensation is a success result with an attached
+                // rollback action. The try task succeeded, so return its
+                // result directly without running the catch branch.
+                try_result
             }
             Err(_) => {
                 // Execute catch task on error
