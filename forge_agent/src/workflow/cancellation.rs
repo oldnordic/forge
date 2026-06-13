@@ -68,7 +68,7 @@ use tokio::sync::Notify;
 
 /// Thread-safe cancellation token.
 ///
-/// Wraps an Arc<AtomicBool> for thread-safe cancellation state.
+/// Wraps an `Arc<AtomicBool>` for thread-safe cancellation state.
 /// Tokens can be cheaply cloned and shared across tasks.
 ///
 /// # Cooperative Cancellation
@@ -140,11 +140,11 @@ impl CancellationToken {
         self.cancelled.load(Ordering::SeqCst)
     }
 
-    /// Polls the cancellation state - semantic alias for [`is_cancelled()`].
+    /// Polls the cancellation state - semantic alias for [`Self::is_cancelled()`].
     ///
     /// This method is intended for use in long-running loops where tasks
     /// cooperatively check for cancellation. The naming makes the intent
-    /// clearer than [`is_cancelled()`] in polling contexts.
+    /// clearer than [`Self::is_cancelled()`] in polling contexts.
     ///
     /// # Example
     ///
@@ -192,7 +192,7 @@ impl CancellationToken {
 
     /// Returns a Future that completes when this token is cancelled.
     ///
-    /// This is equivalent to [`wait_until_cancelled()`] but returns a named future type
+    /// This is equivalent to [`Self::wait_until_cancelled()`] but returns a named future type
     /// that can be stored and passed around.
     ///
     /// # Example

@@ -35,7 +35,7 @@ pub struct Watcher {
     sender: mpsc::UnboundedSender<WatchEvent>,
     /// The underlying notify watcher (kept alive to continue watching).
     #[allow(clippy::type_complexity)]
-    inner: Arc<std::sync::Mutex<Option<notify::RecommendedWatcher>>>,
+    inner: Arc<parking_lot::Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 impl Watcher {
@@ -49,7 +49,7 @@ impl Watcher {
         Self {
             _store: store,
             sender,
-            inner: Arc::new(std::sync::Mutex::new(None)),
+            inner: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -116,7 +116,7 @@ impl Watcher {
         watcher.watch(&path, RecursiveMode::Recursive)?;
 
         // Store the watcher to keep it alive
-        *self.inner.lock().unwrap() = Some(watcher);
+        *self.inner.lock() = Some(watcher);
 
         Ok(())
     }

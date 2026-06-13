@@ -2,9 +2,9 @@
 //!
 //! Provides high-level API for Forge agent integration
 
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
 
 use chrono::Utc;
 
@@ -184,12 +184,12 @@ impl CheckpointService {
 
     /// Check if service is running
     pub fn is_running(&self) -> bool {
-        *self.running.read().unwrap()
+        *self.running.read()
     }
 
     /// Stop the service
     pub fn stop(&self) {
-        *self.running.write().unwrap() = false;
+        *self.running.write() = false;
     }
 
     /// Create a new session
@@ -197,7 +197,7 @@ impl CheckpointService {
         let session_id = SessionId::new();
         let info = SessionInfo { auto_config: None };
 
-        self.sessions.write().unwrap().insert(session_id, info);
+        self.sessions.write().insert(session_id, info);
         Ok(session_id)
     }
 
@@ -265,7 +265,7 @@ impl CheckpointService {
         session_id: &SessionId,
         config: AutoCheckpointConfig,
     ) -> Result<()> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write();
         if let Some(info) = sessions.get_mut(session_id) {
             info.auto_config = Some(config);
             Ok(())
@@ -305,7 +305,7 @@ impl CheckpointService {
     ) -> Result<tokio::sync::mpsc::Receiver<CheckpointEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(100); // Buffer up to 100 events
 
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock();
         subscribers.entry(*session_id).or_default().push(tx);
 
         Ok(rx)
@@ -320,7 +320,7 @@ impl CheckpointService {
             CheckpointEvent::Compacted { session_id, .. } => *session_id,
         };
 
-        let subscribers = self.subscribers.lock().unwrap();
+        let subscribers = self.subscribers.lock();
         if let Some(subs) = subscribers.get(&session_id) {
             for tx in subs {
                 // Best-effort delivery (try_send is non-blocking)
@@ -372,7 +372,7 @@ impl CheckpointService {
             }
             CheckpointCommand::Delete { checkpoint_id } => {
                 // Delete from all sessions (simplified)
-                let sessions = self.sessions.read().unwrap();
+                let sessions = self.sessions.read();
                 for session_id in sessions.keys() {
                     let manager = self.get_manager(*session_id);
                     let _ = manager.delete(&checkpoint_id);
@@ -416,7 +416,7 @@ impl CheckpointService {
         annotation: CheckpointAnnotation,
     ) -> Result<()> {
         // Verify checkpoint exists
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         let mut found = false;
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
@@ -434,7 +434,7 @@ impl CheckpointService {
         }
 
         // Store annotation
-        let mut annotations = self.annotations.write().unwrap();
+        let mut annotations = self.annotations.write();
         annotations
             .entry(*checkpoint_id)
             .or_default()
@@ -448,8 +448,8 @@ impl CheckpointService {
         &self,
         checkpoint_id: &CheckpointId,
     ) -> Result<AnnotatedCheckpoint> {
-        let sessions = self.sessions.read().unwrap();
-        let annotations = self.annotations.read().unwrap();
+        let sessions = self.sessions.read();
+        let annotations = self.annotations.read();
 
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
@@ -471,7 +471,7 @@ impl CheckpointService {
 
     /// Get service metrics
     pub fn metrics(&self) -> Result<ServiceMetrics> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         let total_checkpoints: usize = sessions
             .keys()
             .map(|session_id| {
@@ -518,7 +518,7 @@ impl CheckpointService {
         start_seq: u64,
         end_seq: u64,
     ) -> Result<Vec<CheckpointSummary>> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         let mut all_checkpoints = Vec::new();
 
         for session_id in sessions.keys() {
@@ -541,7 +541,7 @@ impl CheckpointService {
     /// Returns a JSON-serializable export containing all checkpoints
     /// and the current global sequence number.
     pub fn export_all_checkpoints(&self) -> Result<String> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         let mut all_checkpoints: Vec<TemporalCheckpoint> = Vec::new();
 
         for session_id in sessions.keys() {
@@ -638,7 +638,7 @@ impl CheckpointService {
         }
 
         // Validate recent checkpoints from all sessions
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         let mut checked = 0;
         let mut invalid = 0;
 
@@ -681,7 +681,7 @@ impl CheckpointService {
     /// Performs a full validation of all checkpoints in the system.
     /// Returns a report with validation statistics.
     pub fn validate_all_checkpoints(&self) -> Result<ValidationReport> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         let mut valid = 0;
         let mut invalid = 0;
         let mut skipped = 0;
@@ -722,7 +722,7 @@ impl CheckpointService {
         checkpoint_id: CheckpointId,
     ) -> Result<Option<crate::hypothesis::types::HypothesisState>> {
         // Search for the checkpoint across all sessions
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read();
         for session_id in sessions.keys() {
             let manager = self.get_manager(*session_id);
             if let Some(checkpoint) = manager.get(&checkpoint_id)? {

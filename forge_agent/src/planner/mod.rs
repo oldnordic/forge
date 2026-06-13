@@ -396,14 +396,13 @@ Output ONLY a JSON array. No explanation.";
         for (file, regions) in &file_regions {
             for i in 0..regions.len() {
                 for j in (i + 1)..regions.len() {
-                    let (idx1, start1, end1) = regions[i];
-                    let (idx2, start2, end2) = regions[j];
+                    let (_, start1, end1) = regions[i];
+                    let (_, start2, end2) = regions[j];
 
                     // Two intervals [start1,end1) and [start2,end2) overlap
                     // when start1 < end2 && start2 < end1
                     if start1 < end2 && start2 < end1 {
                         conflicts.push(Conflict {
-                            step_indices: vec![idx1, idx2],
                             file: file.clone(),
                             reason: ConflictReason::OverlappingRegion {
                                 start: start1.min(start2),

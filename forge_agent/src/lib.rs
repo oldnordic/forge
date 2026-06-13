@@ -15,62 +15,42 @@
 
 use std::path::PathBuf;
 
-// Observation module (Phase 4 - Task 1)
+pub(crate) mod agent_loop;
+pub(crate) mod audit;
+pub(crate) mod commit;
+pub(crate) mod llm;
+pub(crate) mod mutate;
 pub mod observe;
-
-// Policy module (Phase 4 - Task 2)
-pub mod policy;
-
-// Planning module (Phase 4 - Task 3)
-pub mod planner;
-
-// Mutation module (Phase 4 - Task 4)
-pub mod mutate;
-
-// Verification module (Phase 4 - Task 5)
-pub mod verify;
-
-// Commit module (Phase 4 - Task 6)
-pub mod commit;
-
-// Loop module (Phase 3 - Task 1)
-pub mod agent_loop;
-
-// Audit module (Phase 3 - Task 2)
-pub mod audit;
-
-// Workflow module (Phase 8 - Plan 1)
+pub(crate) mod planner;
+pub(crate) mod policy;
+pub(crate) mod verify;
 pub mod workflow;
-
-// LLM provider module
-pub mod llm;
 #[cfg(feature = "llm-anthropic")]
 pub use llm::AnthropicProvider;
 #[cfg(feature = "llm-ollama")]
 pub use llm::OllamaProvider;
 #[cfg(feature = "llm-openai")]
 pub use llm::OpenAiProvider;
+pub use llm::{LlmConfig, LlmProvider};
 
-// Chat types and conversation
 pub mod chat;
 
-// Envoy coordination module
+pub mod prelude;
+
 #[cfg(feature = "envoy")]
 pub mod envoy;
 
-// Evidence recording module
 #[cfg(feature = "envoy")]
 pub mod evidence;
 
-// Context composition module
-pub mod context;
+pub(crate) mod context;
+pub(crate) mod generate;
 
-// Code generation from natural language descriptions
-pub mod generate;
 pub use generate::{GeneratedCode, Generator};
 
 /// Error types for agent operations.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum AgentError {
     /// Observation phase failed
     #[error("Observation failed: {0}")]
@@ -109,8 +89,53 @@ pub enum AgentError {
     ReActFailed(String),
 }
 
+impl AgentError {
+    pub fn phase_label(&self) -> &'static str {
+        match self {
+            AgentError::ObservationFailed(_) => "Observe",
+            AgentError::PolicyViolation(_) => "Constrain",
+            AgentError::PlanningFailed(_) => "Plan",
+            AgentError::MutationFailed(_) => "Mutate",
+            AgentError::VerificationFailed(_) => "Verify",
+            AgentError::CommitFailed(_) => "Commit",
+            AgentError::ForgeError(_) => "Forge",
+            AgentError::WorkflowFailed(_) => "Workflow",
+            AgentError::ReActFailed(_) => "ReAct",
+        }
+    }
+}
+
 /// Result type for agent operations.
 pub type Result<T> = std::result::Result<T, AgentError>;
+
+/// A handle to a spawned agent task. Await to get the result.
+pub struct AgentTask {
+    handle: tokio::task::JoinHandle<std::result::Result<String, String>>,
+}
+
+impl std::fmt::Debug for AgentTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentTask").finish_non_exhaustive()
+    }
+}
+
+impl AgentTask {
+    pub async fn await_result(self) -> std::result::Result<String, AgentError> {
+        self.handle
+            .await
+            .map_err(|e| AgentError::ReActFailed(format!("spawned task failed: {e}")))?
+            .map_err(AgentError::ReActFailed)
+    }
+}
+
+impl std::future::IntoFuture for AgentTask {
+    type Output = std::result::Result<String, AgentError>;
+    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Self::Output> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.await_result())
+    }
+}
 
 // Re-export policy module
 pub use policy::{Policy, PolicyReport, PolicyValidator, PolicyViolation};
@@ -180,746 +205,29 @@ pub struct CommitResult {
     pub files_committed: Vec<PathBuf>,
 }
 
-/// Reads the `[llm]` section from `.forge.toml` in `project_path` and builds a provider.
-/// Returns `None` if the file is absent, the section is missing, or the provider type is
-/// not compiled in.
-#[cfg(any(
-    feature = "llm-ollama",
-    feature = "llm-openai",
-    feature = "llm-anthropic"
-))]
-fn load_llm_from_forge_toml(
-    project_path: &std::path::Path,
-) -> Option<std::sync::Arc<dyn llm::LlmProvider>> {
-    #[derive(serde::Deserialize)]
-    struct LlmSection {
-        provider: String,
-        // Used by all three LLM branches — always present when this function is compiled.
-        model: String,
-        // Only consumed by the ollama and openai branches; absent from the struct when
-        // neither feature is active so serde simply ignores the key in the TOML file.
-        #[cfg(any(feature = "llm-ollama", feature = "llm-openai"))]
-        url: Option<String>,
-        // Only consumed by the openai and anthropic branches.
-        #[cfg(any(feature = "llm-openai", feature = "llm-anthropic"))]
-        api_key: Option<String>,
-    }
-    #[derive(serde::Deserialize)]
-    struct ForgeToml {
-        llm: Option<LlmSection>,
-    }
-    let text = std::fs::read_to_string(project_path.join(".forge.toml")).ok()?;
-    let parsed: ForgeToml = toml::from_str(&text).ok()?;
-    let cfg = parsed.llm?;
-    match cfg.provider.as_str() {
-        #[cfg(feature = "llm-ollama")]
-        "ollama" => {
-            let endpoint = cfg
-                .url
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
-            Some(std::sync::Arc::new(llm::OllamaProvider::new(
-                endpoint, cfg.model,
-            )))
-        }
-        #[cfg(feature = "llm-openai")]
-        "openai" => {
-            let api_key = cfg.api_key?;
-            let url = cfg
-                .url
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            Some(std::sync::Arc::new(llm::OpenAiProvider::new(
-                url, cfg.model, api_key,
-            )))
-        }
-        #[cfg(feature = "llm-anthropic")]
-        "anthropic" => {
-            let api_key = cfg.api_key?;
-            Some(std::sync::Arc::new(llm::AnthropicProvider::new(
-                cfg.model, api_key,
-            )))
-        }
-        _ => None,
-    }
-}
+// Agent implementation (split from lib.rs for 1K LOC modularization)
+mod agent;
+pub use agent::Agent;
 
-#[cfg(not(any(
-    feature = "llm-ollama",
-    feature = "llm-openai",
-    feature = "llm-anthropic"
-)))]
-fn load_llm_from_forge_toml(
-    _project_path: &std::path::Path,
-) -> Option<std::sync::Arc<dyn llm::LlmProvider>> {
-    None
-}
+mod builder;
+pub use builder::{agent_builder, AgentBuilder, NeedsProvider, Ready};
 
-/// Agent for deterministic AI-driven code operations.
-///
-/// The agent follows a strict loop:
-/// 1. Observe: Gather context from the graph
-/// 2. Constrain: Apply policy rules
-/// 3. Plan: Generate execution steps
-/// 4. Mutate: Apply changes
-/// 5. Verify: Validate results
-/// 6. Commit: Finalize transaction
-///
-/// # Runtime Integration
-///
-/// The agent can integrate with `ForgeRuntime` for coordinated file watching
-/// and caching:
-///
-/// ```ignore
-/// let (agent, mut runtime) = Agent::with_runtime("./project").await?;
-/// let result = agent.run_with_runtime(&mut runtime, "refactor function").await?;
-/// ```
-///
-pub struct Agent {
-    /// Path to the codebase
-    codebase_path: PathBuf,
-    /// Forge SDK instance for graph queries
-    forge: Option<forge_core::Forge>,
-    /// Optional LLM provider for semantic operations
-    pub(crate) llm: Option<std::sync::Arc<dyn llm::LlmProvider>>,
-    /// Optional chat provider for ReAct agent loop
-    chat_provider: Option<std::sync::Arc<dyn chat::ChatProvider>>,
-    /// Chat config (model, temperature, etc.) for ReAct loop
-    chat_config: Option<llm::LlmConfig>,
-    /// Optional envoy client for multi-agent coordination
-    #[cfg(feature = "envoy")]
-    pub(crate) envoy: Option<std::sync::Arc<envoy::EnvoyClient>>,
-    /// Optional evidence recording session
-    #[cfg(feature = "envoy")]
-    pub(crate) session: Option<std::sync::Arc<evidence::ForgeSession>>,
-    /// Policies enforced during the constraint phase
-    policies: Vec<policy::Policy>,
-}
+pub(crate) mod agent_config;
+pub(crate) mod orchestrate;
+pub use agent_config::AgentConfig;
+pub use orchestrate::{OrchestrateResult, Orchestrator};
 
-impl Agent {
-    /// Creates a new agent for the given codebase.
-    ///
-    /// # Arguments
-    ///
-    /// * `codebase_path` - Path to the codebase
-    pub async fn new(codebase_path: impl AsRef<std::path::Path>) -> Result<Self> {
-        let path = codebase_path.as_ref().to_path_buf();
+pub(crate) mod transaction;
 
-        // Try to initialize Forge SDK
-        let forge = forge_core::Forge::open(&path).await.ok();
-
-        // Load LLM provider from .forge.toml [llm] section
-        let llm = load_llm_from_forge_toml(&path);
-
-        // Load envoy config from .forge.toml
-        #[cfg(feature = "envoy")]
-        let envoy = {
-            let config_path = path.join(".forge.toml");
-            envoy::EnvoyConfig::from_file(&config_path)
-                .ok()
-                .flatten()
-                .map(|c| std::sync::Arc::new(envoy::EnvoyClient::new(c)))
-        };
-
-        #[cfg(feature = "envoy")]
-        let project_name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_str()
-            .unwrap_or("unknown")
-            .to_string();
-
-        #[cfg(feature = "envoy")]
-        let session: Option<std::sync::Arc<evidence::ForgeSession>> = envoy.as_ref().map(|c| {
-            std::sync::Arc::new(evidence::ForgeSession::new(
-                c.clone() as std::sync::Arc<dyn evidence::EvidenceRecorder>,
-                &project_name,
-                "forge",
-                None,
-            ))
-        });
-
-        Ok(Self {
-            codebase_path: path,
-            forge,
-            llm,
-            chat_provider: None,
-            chat_config: None,
-            #[cfg(feature = "envoy")]
-            envoy,
-            #[cfg(feature = "envoy")]
-            session,
-            policies: Vec::new(),
-        })
-    }
-
-    /// Sets the LLM provider for semantic operations.
-    pub fn with_llm(mut self, provider: std::sync::Arc<dyn llm::LlmProvider>) -> Self {
-        self.llm = Some(provider);
-        self
-    }
-
-    /// Sets the policies enforced during the constraint phase.
-    pub fn with_policies(mut self, policies: Vec<policy::Policy>) -> Self {
-        self.policies = policies;
-        self
-    }
-
-    /// Sets a chat provider and config for the ReAct agent loop.
-    ///
-    /// When configured, `run_react()` will use this provider instead of
-    /// the default `AgentLoop` 6-phase pipeline.
-    pub fn with_chat_provider(
-        mut self,
-        provider: std::sync::Arc<dyn chat::ChatProvider>,
-        config: llm::LlmConfig,
-    ) -> Self {
-        self.chat_provider = Some(provider);
-        self.chat_config = Some(config);
-        self
-    }
-
-    /// Sets the envoy client for multi-agent coordination.
-    #[cfg(feature = "envoy")]
-    pub fn with_envoy(mut self, client: envoy::EnvoyClient) -> Self {
-        self.envoy = Some(std::sync::Arc::new(client));
-        self
-    }
-
-    /// Connects to envoy and registers this agent. Returns the agent ID.
-    #[cfg(feature = "envoy")]
-    pub async fn connect_envoy(&self) -> std::result::Result<String, String> {
-        let client = self
-            .envoy
-            .as_ref()
-            .ok_or_else(|| "envoy not configured".to_string())?;
-        client.register().await
-    }
-
-    /// Observes the codebase to gather context for a query.
-    ///
-    /// # Arguments
-    ///
-    /// * `query` - The natural language query or request
-    pub async fn observe(&self, query: &str) -> Result<Observation> {
-        let forge = self
-            .forge
-            .as_ref()
-            .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
-
-        let mut observer = observe::Observer::new(forge.clone());
-        if let Some(ref llm) = self.llm {
-            observer = observer.with_llm(llm.clone());
-        }
-        #[cfg(feature = "envoy")]
-        if let Some(ref envoy) = self.envoy {
-            observer = observer.with_knowledge_source(envoy.clone());
-        }
-        let obs = observer.gather(query).await?;
-
-        Ok(obs)
-    }
-
-    /// Applies policy constraints to the observation.
-    ///
-    /// # Arguments
-    ///
-    /// * `observation` - The observation to constrain
-    /// * `policies` - The policies to validate
-    pub async fn constrain(
-        &self,
-        observation: Observation,
-        policies: Vec<policy::Policy>,
-    ) -> Result<ConstrainedPlan> {
-        let forge = self.forge.as_ref().ok_or_else(|| {
-            AgentError::ObservationFailed(
-                "Forge SDK not available for policy validation".to_string(),
-            )
-        })?;
-
-        // Create a validator
-        let validator = policy::PolicyValidator::new(forge.clone());
-
-        let diff = policy::Diff {
-            file_path: std::path::PathBuf::from(&observation.query),
-            original: String::new(),
-            modified: format!("query: {}", observation.query),
-            changes: Vec::new(),
-        };
-
-        // Validate policies
-        let report = validator.validate(&diff, &policies).await?;
-
-        Ok(ConstrainedPlan {
-            observation,
-            policy_violations: report.violations,
-        })
-    }
-
-    /// Generates an execution plan from the constrained observation.
-    pub async fn plan(&self, constrained: ConstrainedPlan) -> Result<ExecutionPlan> {
-        // Create planner
-        let planner_instance = planner::Planner::new();
-
-        // Convert observation to the planner's format
-        let obs = observe::Observation {
-            query: constrained.observation.query.clone(),
-            symbols: vec![],
-            summary: None,
-        };
-
-        // Generate steps
-        let steps = planner_instance.generate_steps(&obs).await?;
-
-        // Estimate impact
-        let impact = planner_instance.estimate_impact(&steps).await?;
-
-        // Detect conflicts
-        let conflicts = planner_instance.detect_conflicts(&steps)?;
-
-        if !conflicts.is_empty() {
-            return Err(AgentError::PlanningFailed(format!(
-                "Found {} conflicts in plan",
-                conflicts.len()
-            )));
-        }
-
-        // Order steps based on dependencies
-        let mut ordered_steps = steps;
-        planner_instance.order_steps(&mut ordered_steps)?;
-
-        // Generate rollback plan
-        let rollback = planner_instance.generate_rollback(&ordered_steps);
-
-        Ok(ExecutionPlan {
-            steps: ordered_steps,
-            estimated_impact: planner::ImpactEstimate {
-                affected_files: impact.affected_files,
-                complexity: impact.complexity,
-            },
-            rollback_plan: rollback,
-        })
-    }
-
-    /// Executes the mutation phase of the plan.
-    pub async fn mutate(&self, plan: ExecutionPlan) -> Result<MutationResult> {
-        // Verify forge is available
-        self.forge
-            .as_ref()
-            .ok_or_else(|| AgentError::MutationFailed("Forge SDK not available".to_string()))?;
-
-        let mut mutator = mutate::Mutator::new();
-        mutator.begin_transaction().await?;
-
-        for step in &plan.steps {
-            mutator.apply_step(step).await?;
-        }
-
-        Ok(MutationResult {
-            modified_files: vec![],
-            diffs: vec!["Transaction completed".to_string()],
-        })
-    }
-
-    /// Verifies the mutation result, scoped to changed files.
-    pub async fn verify(&self, result: MutationResult) -> Result<VerificationResult> {
-        let verifier = verify::Verifier::new();
-        let report = if result.modified_files.is_empty() {
-            verifier.verify(&self.codebase_path).await?
-        } else {
-            verifier
-                .verify_changes(&self.codebase_path, &result.modified_files, &result.diffs)
-                .await?
-        };
-
-        Ok(VerificationResult {
-            passed: report.passed,
-            diagnostics: report
-                .diagnostics
-                .iter()
-                .map(|d| d.message.clone())
-                .collect(),
-            suggestions: report.suggestions,
-        })
-    }
-
-    /// Commits the verified mutation.
-    pub async fn commit(&self, result: VerificationResult) -> Result<CommitResult> {
-        let committer = commit::Committer::new();
-        let files: Vec<std::path::PathBuf> = result
-            .diagnostics
-            .iter()
-            .filter_map(|d| {
-                // Parse diagnostics to extract file paths
-                // Format: "file:line:col: message"
-                d.split(':')
-                    .next()
-                    .map(|s| std::path::PathBuf::from(s.trim()))
-            })
-            .collect();
-
-        let message = format!("forge: apply changes ({} files)", files.len());
-        let commit_report = committer
-            .finalize(&self.codebase_path, &files, &message)
-            .await?;
-
-        Ok(CommitResult {
-            transaction_id: commit_report.transaction_id,
-            files_committed: commit_report.files_committed,
-        })
-    }
-
-    /// Runs the full agent loop: Observe -> Constrain -> Plan -> Mutate -> Verify -> Commit
-    ///
-    /// This is the main entry point for executing a complete agent operation.
-    /// Each phase receives the output of the previous phase, and failures
-    /// trigger rollback with audit trail entries.
-    ///
-    /// # Arguments
-    ///
-    /// * `query` - The natural language query or request
-    ///
-    /// # Returns
-    ///
-    /// Returns `LoopResult` with transaction ID, modified files, and audit trail.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use forge_agent::Agent;
-    ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let agent = Agent::new(".").await?;
-    /// let result = agent.run("Add error handling to the parser").await?;
-    /// println!("Transaction ID: {}", result.transaction_id);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn run(&self, query: &str) -> Result<LoopResult> {
-        let forge = self
-            .forge
-            .as_ref()
-            .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
-
-        // Create fresh loop state (no state leakage between runs)
-        let mut agent_loop = agent_loop::AgentLoop::new(std::sync::Arc::new(forge.clone()));
-
-        // Pass LLM provider to agent loop if configured
-        if let Some(ref llm) = self.llm {
-            agent_loop = agent_loop.with_llm(llm.clone());
-        }
-
-        #[cfg(feature = "envoy")]
-        if let Some(ref envoy) = self.envoy {
-            agent_loop = agent_loop.with_discovery_store(envoy.clone());
-        }
-
-        #[cfg(feature = "envoy")]
-        if let Some(ref session) = self.session {
-            agent_loop = agent_loop.with_session(session.clone());
-        }
-
-        if !self.policies.is_empty() {
-            agent_loop = agent_loop.with_policies(self.policies.clone());
-        }
-
-        agent_loop.run(query).await
-    }
-
-    /// Runs the ReAct agent loop: an LLM-driven autonomous cycle of
-    /// reasoning and tool-calling.
-    ///
-    /// Unlike `run()` (fixed 6-phase pipeline), the ReAct loop lets the
-    /// LLM decide which tools to call and when to stop, up to a maximum
-    /// number of iterations.
-    ///
-    /// Requires a `ChatProvider` configured via `with_chat_provider()`.
-    /// Uses `BuiltinToolRegistry` with file_read, file_write, and
-    /// shell_exec tools scoped to the codebase path.
-    ///
-    /// Returns the LLM's final text answer on success.
-    pub async fn run_react(&self, query: &str) -> Result<String> {
-        let provider = self.chat_provider.as_ref().ok_or_else(|| {
-            AgentError::ReActFailed(
-                "no ChatProvider configured; use with_chat_provider()".to_string(),
-            )
-        })?;
-        let config = self
-            .chat_config
-            .as_ref()
-            .ok_or_else(|| {
-                AgentError::ReActFailed(
-                    "no LlmConfig configured; use with_chat_provider()".to_string(),
-                )
-            })?
-            .clone();
-
-        let mut registry = chat::BuiltinToolRegistry::new();
-        registry.register_many(chat::default_builtin_tools(&self.codebase_path));
-
-        let react = chat::ReActLoop::new(std::sync::Arc::clone(provider), registry, config)
-            .with_system_prompt(format!(
-                "You are an autonomous coding agent. You have tools to read files, \
-                 write files, and execute shell commands. Your workspace is: {}",
-                self.codebase_path.display()
-            ));
-
-        react
-            .run(query)
-            .await
-            .map_err(|e| AgentError::ReActFailed(format!("{e}")))
-    }
-
-    /// Executes a workflow DAG, injecting this agent's Forge SDK into every task context.
-    ///
-    /// Tasks like `AgentLoopTask` and `GraphQueryTask` require forge in their context;
-    /// this method ensures they receive it without the caller needing to wire it manually.
-    pub async fn run_workflow(
-        &self,
-        workflow: workflow::Workflow,
-    ) -> Result<workflow::WorkflowResult> {
-        let forge = self
-            .forge
-            .as_ref()
-            .ok_or_else(|| AgentError::ObservationFailed("Forge SDK not available".to_string()))?;
-        workflow::WorkflowExecutor::new(workflow)
-            .with_forge(std::sync::Arc::new(forge.clone()))
-            .execute()
-            .await
-            .map_err(|e| AgentError::WorkflowFailed(e.to_string()))
-    }
-}
-
-// Transaction module (Phase 3 - Plan 3)
-pub mod transaction;
-
-// Re-export transaction types
 pub use transaction::{FileSnapshot, Transaction, TransactionState};
 
-// Runtime integration module (Phase 3 - Plan 4)
-pub mod runtime_integration;
+pub(crate) mod runtime_integration;
 
 // Re-export runtime types for convenience
 pub use forge_runtime::{ForgeRuntime, RuntimeConfig, RuntimeStats};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod orchestrate_tests;
 
-    #[tokio::test]
-    async fn test_agent_creation() {
-        let temp = tempfile::tempdir().unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-
-        assert_eq!(agent.codebase_path, temp.path());
-    }
-
-    #[tokio::test]
-    async fn test_agent_with_runtime() {
-        let temp = tempfile::tempdir().unwrap();
-        let (_agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
-
-        assert_eq!(runtime.codebase_path(), temp.path());
-    }
-
-    #[tokio::test]
-    async fn test_agent_runtime_stats() {
-        let temp = tempfile::tempdir().unwrap();
-        let (_agent, runtime) = Agent::with_runtime(temp.path()).await.unwrap();
-
-        let stats = runtime.stats();
-        assert!(!stats.watch_active); // Not started
-    }
-
-    #[tokio::test]
-    async fn test_agent_backward_compatibility() {
-        // Agent should work without runtime (backward compatibility)
-        let temp = tempfile::tempdir().unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-
-        // Agent should be functional standalone
-        assert_eq!(agent.codebase_path, temp.path());
-    }
-
-    #[tokio::test]
-    async fn test_agent_with_llm_provider() {
-        let temp = tempfile::tempdir().unwrap();
-        let mock = std::sync::Arc::new(llm::MockProvider::new("mocked LLM response"));
-        let agent = Agent::new(temp.path()).await.unwrap().with_llm(mock);
-
-        assert!(agent.llm.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_agent_without_llm_provider() {
-        let temp = tempfile::tempdir().unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-
-        assert!(agent.llm.is_none());
-    }
-
-    #[cfg(feature = "envoy")]
-    #[tokio::test]
-    async fn test_agent_with_envoy() {
-        let temp = tempfile::tempdir().unwrap();
-        let config = envoy::EnvoyConfig {
-            url: "http://localhost:9999".to_string(),
-            agent_name: "test-forge".to_string(),
-        };
-        let client = envoy::EnvoyClient::new(config);
-        let agent = Agent::new(temp.path()).await.unwrap().with_envoy(client);
-
-        assert!(agent.envoy.is_some());
-    }
-
-    #[cfg(feature = "envoy")]
-    #[tokio::test]
-    async fn test_agent_without_envoy() {
-        let temp = tempfile::tempdir().unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-
-        // No .forge.toml → no envoy
-        assert!(agent.envoy.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_agent_run_workflow_passes_forge() {
-        use crate::workflow::dag::Workflow;
-        use crate::workflow::task::{TaskContext, TaskError, TaskId, TaskResult, WorkflowTask};
-        use async_trait::async_trait;
-
-        struct ForgeCheckTask;
-        #[async_trait]
-        impl WorkflowTask for ForgeCheckTask {
-            async fn execute(
-                &self,
-                ctx: &TaskContext,
-            ) -> std::result::Result<TaskResult, TaskError> {
-                if ctx.forge.is_some() {
-                    Ok(TaskResult::Success)
-                } else {
-                    Err(TaskError::ExecutionFailed("no forge".to_string()))
-                }
-            }
-            fn id(&self) -> TaskId {
-                TaskId::new("forge-check")
-            }
-            fn name(&self) -> &str {
-                "ForgeCheckTask"
-            }
-        }
-
-        let temp = tempfile::tempdir().unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-
-        let mut workflow = Workflow::new();
-        workflow.add_task(Box::new(ForgeCheckTask));
-
-        let result = agent.run_workflow(workflow).await;
-        assert!(result.is_ok(), "run_workflow failed: {:?}", result.err());
-        assert!(result.unwrap().success);
-    }
-
-    #[cfg(feature = "llm-ollama")]
-    #[tokio::test]
-    async fn test_llm_config_loaded_from_forge_toml() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            temp.path().join(".forge.toml"),
-            "[llm]\nprovider = \"ollama\"\nmodel = \"llama3\"\nurl = \"http://localhost:11434\"\n",
-        )
-        .unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-        assert!(
-            agent.llm.is_some(),
-            "LLM provider should be loaded from .forge.toml"
-        );
-    }
-
-    #[cfg(feature = "envoy")]
-    #[tokio::test]
-    async fn test_envoy_client_implements_discovery_store() {
-        let config = envoy::EnvoyConfig {
-            url: "http://localhost:9999".to_string(),
-            agent_name: "test-forge".to_string(),
-        };
-        let client = std::sync::Arc::new(envoy::EnvoyClient::new(config));
-        // Verify EnvoyClient can be coerced to DiscoveryStore
-        let store: std::sync::Arc<dyn crate::agent_loop::DiscoveryStore> = client.clone();
-        // Fire-and-forget: should not panic even when server is unreachable
-        store
-            .store(
-                "Symbol",
-                "test_symbol",
-                serde_json::json!({"file": "test.rs"}),
-            )
-            .await;
-    }
-
-    #[tokio::test]
-    async fn test_run_react_without_provider_errors() {
-        let temp = tempfile::tempdir().unwrap();
-        let agent = Agent::new(temp.path()).await.unwrap();
-
-        let result = agent.run_react("do something").await;
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AgentError::ReActFailed(msg) => {
-                assert!(msg.contains("no ChatProvider"));
-            }
-            other => panic!("expected ReActFailed, got {other}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_with_chat_provider_configures_agent() {
-        let temp = tempfile::tempdir().unwrap();
-        let provider = std::sync::Arc::new(chat::MockChatProvider::from_text("hello"));
-        let config = llm::LlmConfig::new("test-model");
-
-        let agent = Agent::new(temp.path())
-            .await
-            .unwrap()
-            .with_chat_provider(provider, config);
-
-        assert!(agent.chat_provider.is_some());
-        assert!(agent.chat_config.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_run_react_returns_answer() {
-        let temp = tempfile::tempdir().unwrap();
-
-        let provider = std::sync::Arc::new(chat::MockChatProvider::from_text("The answer is 42"));
-        let config = llm::LlmConfig::new("test-model");
-
-        let agent = Agent::new(temp.path())
-            .await
-            .unwrap()
-            .with_chat_provider(provider, config);
-
-        let answer = agent.run_react("What is the answer?").await;
-        assert!(answer.is_ok(), "run_react failed: {:?}", answer.err());
-        assert_eq!(answer.unwrap(), "The answer is 42");
-    }
-
-    #[tokio::test]
-    async fn test_run_react_tool_call_then_answer() {
-        let temp = tempfile::tempdir().unwrap();
-
-        let provider = std::sync::Arc::new(
-            chat::MockChatProvider::from_text("The file contains rust code")
-                .with_tool_call("file_read", serde_json::json!({"path": "test.txt"})),
-        );
-        let config = llm::LlmConfig::new("test-model");
-
-        std::fs::write(temp.path().join("test.txt"), "hello from test").unwrap();
-
-        let agent = Agent::new(temp.path())
-            .await
-            .unwrap()
-            .with_chat_provider(provider, config);
-
-        let answer = agent.run_react("Read test.txt").await;
-        assert!(answer.is_ok(), "run_react failed: {:?}", answer.err());
-        assert_eq!(answer.unwrap(), "The file contains rust code");
-    }
-}
+#[cfg(test)]
+mod tests;

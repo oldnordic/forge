@@ -140,7 +140,8 @@ impl WorkflowExecutor {
                         match result {
                             Ok(Ok((task_id, task_name))) => {
                                 self.completed_tasks.insert(task_id.clone());
-                                if let Ok(mut state) = concurrent_state.write() {
+                                {
+                                    let mut state = concurrent_state.write();
                                     state.completed_tasks.push(TaskSummary::new(
                                         task_id.as_str(),
                                         &task_name,
@@ -187,7 +188,8 @@ impl WorkflowExecutor {
                     match result {
                         Ok(Ok((task_id, task_name))) => {
                             self.completed_tasks.insert(task_id.clone());
-                            if let Ok(mut state) = concurrent_state.write() {
+                            {
+                                let mut state = concurrent_state.write();
                                 state.completed_tasks.push(TaskSummary::new(
                                     task_id.as_str(),
                                     &task_name,
@@ -268,7 +270,8 @@ impl WorkflowExecutor {
             self.create_checkpoint(&workflow_id, layer_index).await;
         }
 
-        if let Ok(mut state) = concurrent_state.write() {
+        {
+            let mut state = concurrent_state.write();
             state.status = crate::workflow::state::WorkflowStatus::Completed;
         }
 

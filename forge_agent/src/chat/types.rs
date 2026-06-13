@@ -11,6 +11,7 @@ pub enum Role {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ContentBlock {
     Text {
         text: String,
@@ -74,6 +75,7 @@ impl ContentBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ChatMessage {
     pub role: Role,
     pub content: Vec<ContentBlock>,
@@ -137,6 +139,7 @@ impl ChatMessage {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Usage {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
@@ -144,6 +147,7 @@ pub struct Usage {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ChatResponse {
     pub message: ChatMessage,
     pub usage: Usage,
@@ -151,7 +155,24 @@ pub struct ChatResponse {
     pub finish_reason: Option<String>,
 }
 
+impl ChatResponse {
+    pub fn new(message: ChatMessage, usage: Usage, model: impl Into<String>) -> Self {
+        ChatResponse {
+            message,
+            usage,
+            model: model.into(),
+            finish_reason: None,
+        }
+    }
+
+    pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
+        self.finish_reason = Some(reason.into());
+        self
+    }
+}
+
 #[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LlmError {
     #[error("HTTP request failed: {0}")]
     Http(String),

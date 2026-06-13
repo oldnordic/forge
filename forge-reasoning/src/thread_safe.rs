@@ -4,9 +4,11 @@
 //! to enable multi-threaded checkpoint operations.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use chrono::Utc;
+use parking_lot::Mutex;
 
 use crate::checkpoint::{
     CheckpointId, CheckpointSummary, CompactionPolicy, DebugStateSnapshot, SessionId,
@@ -43,43 +45,43 @@ impl ThreadSafeStorage {
 
     /// Store a checkpoint
     pub fn store(&self, checkpoint: &TemporalCheckpoint) -> Result<()> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.store(checkpoint)
     }
 
     /// Get checkpoint by ID
     pub fn get(&self, id: CheckpointId) -> Result<TemporalCheckpoint> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.get(id)
     }
 
     /// Get latest checkpoint for session
     pub fn get_latest(&self, session_id: SessionId) -> Result<Option<TemporalCheckpoint>> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.get_latest(session_id)
     }
 
     /// List checkpoints by session
     pub fn list_by_session(&self, session_id: SessionId) -> Result<Vec<CheckpointSummary>> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.list_by_session(session_id)
     }
 
     /// List checkpoints by tag
     pub fn list_by_tag(&self, tag: &str) -> Result<Vec<CheckpointSummary>> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.list_by_tag(tag)
     }
 
     /// Delete checkpoint
     pub fn delete(&self, id: CheckpointId) -> Result<()> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.delete(id)
     }
 
     /// Get maximum sequence number across all checkpoints
     pub fn get_max_sequence(&self) -> Result<u64> {
-        let storage = self.inner.lock().expect("Storage lock poisoned");
+        let storage = self.inner.lock();
         storage.get_max_sequence()
     }
 }
@@ -102,7 +104,7 @@ unsafe impl Sync for ThreadSafeStorage {}
 pub struct ThreadSafeCheckpointManager {
     storage: ThreadSafeStorage,
     session_id: SessionId,
-    sequence_counter: Mutex<u64>,
+    sequence_counter: AtomicU64,
     last_checkpoint_time: Mutex<chrono::DateTime<Utc>>,
 }
 
@@ -112,18 +114,14 @@ impl ThreadSafeCheckpointManager {
         Self {
             storage,
             session_id,
-            sequence_counter: Mutex::new(0),
+            sequence_counter: AtomicU64::new(0),
             last_checkpoint_time: Mutex::new(Utc::now()),
         }
     }
 
     /// Create a manual checkpoint with auto-generated sequence
     pub fn checkpoint(&self, message: impl Into<String>) -> Result<CheckpointId> {
-        let seq = {
-            let mut counter = self.sequence_counter.lock().expect("Counter poisoned");
-            *counter += 1;
-            *counter
-        };
+        let seq = self.sequence_counter.fetch_add(1, Ordering::Relaxed) + 1;
         self.checkpoint_with_sequence(message, seq)
     }
 
@@ -147,8 +145,7 @@ impl ThreadSafeCheckpointManager {
         self.update_last_checkpoint_time();
 
         // Update local counter to track sequences
-        let mut counter = self.sequence_counter.lock().expect("Counter poisoned");
-        *counter = (*counter).max(sequence);
+        self.sequence_counter.fetch_max(sequence, Ordering::Relaxed);
 
         Ok(checkpoint.id)
     }
@@ -159,11 +156,7 @@ impl ThreadSafeCheckpointManager {
         message: impl Into<String>,
         tags: Vec<String>,
     ) -> Result<CheckpointId> {
-        let seq = {
-            let mut counter = self.sequence_counter.lock().expect("Counter poisoned");
-            *counter += 1;
-            *counter
-        };
+        let seq = self.sequence_counter.fetch_add(1, Ordering::Relaxed) + 1;
         self.checkpoint_with_tags_and_sequence(message, tags, seq)
     }
 
@@ -189,8 +182,7 @@ impl ThreadSafeCheckpointManager {
         self.update_last_checkpoint_time();
 
         // Update local counter to track sequences
-        let mut counter = self.sequence_counter.lock().expect("Counter poisoned");
-        *counter = (*counter).max(sequence);
+        self.sequence_counter.fetch_max(sequence, Ordering::Relaxed);
 
         Ok(checkpoint.id)
     }
@@ -202,10 +194,7 @@ impl ThreadSafeCheckpointManager {
     ) -> Result<Option<CheckpointId>> {
         let should_checkpoint = match trigger {
             crate::checkpoint::AutoTrigger::SignificantTimePassed => {
-                let last = *self
-                    .last_checkpoint_time
-                    .lock()
-                    .expect("Time lock poisoned");
+                let last = *self.last_checkpoint_time.lock();
                 Utc::now().signed_duration_since(last).num_minutes() > 5
             }
             _ => true,
@@ -215,11 +204,7 @@ impl ThreadSafeCheckpointManager {
             return Ok(None);
         }
 
-        let seq = {
-            let mut counter = self.sequence_counter.lock().expect("Counter poisoned");
-            *counter += 1;
-            *counter
-        };
+        let seq = self.sequence_counter.fetch_add(1, Ordering::Relaxed) + 1;
 
         self.auto_checkpoint_with_sequence(trigger, seq)
     }
@@ -244,8 +229,7 @@ impl ThreadSafeCheckpointManager {
         self.update_last_checkpoint_time();
 
         // Update local counter to track sequences
-        let mut counter = self.sequence_counter.lock().expect("Counter poisoned");
-        *counter = (*counter).max(sequence);
+        self.sequence_counter.fetch_max(sequence, Ordering::Relaxed);
 
         Ok(Some(checkpoint.id))
     }
@@ -372,10 +356,7 @@ impl ThreadSafeCheckpointManager {
     }
 
     fn update_last_checkpoint_time(&self) {
-        *self
-            .last_checkpoint_time
-            .lock()
-            .expect("Time lock poisoned") = Utc::now();
+        *self.last_checkpoint_time.lock() = Utc::now();
     }
 }
 

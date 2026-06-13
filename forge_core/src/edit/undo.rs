@@ -32,7 +32,7 @@ impl super::EditModule {
 
     pub async fn undo(&self) -> Result<UndoResult> {
         let op = {
-            let mut stack = self.undo_stack.lock().unwrap();
+            let mut stack = self.undo_stack.lock();
             if stack.is_empty() {
                 return Ok(UndoResult::Empty);
             }
@@ -80,19 +80,19 @@ impl super::EditModule {
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.undo_stack.lock().unwrap().is_empty()
+        !self.undo_stack.lock().is_empty()
     }
 
     pub fn undo_depth(&self) -> usize {
-        self.undo_stack.lock().unwrap().len()
+        self.undo_stack.lock().len()
     }
 
     pub fn clear_undo_stack(&self) {
-        self.undo_stack.lock().unwrap().clear();
+        self.undo_stack.lock().clear();
     }
 
     pub(crate) fn push_undo(&self, op: UndoableOp) {
-        let mut stack = self.undo_stack.lock().unwrap();
+        let mut stack = self.undo_stack.lock();
         if stack.len() >= self.undo_capacity {
             stack.remove(0);
         }

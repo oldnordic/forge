@@ -108,7 +108,7 @@ pub struct ShellCommandTask {
     name: String,
     config: ShellCommandConfig,
     /// Last spawned process ID (for compensation)
-    last_pid: Arc<std::sync::Mutex<Option<u32>>>,
+    last_pid: Arc<parking_lot::Mutex<Option<u32>>>,
 }
 
 impl ShellCommandTask {
@@ -124,7 +124,7 @@ impl ShellCommandTask {
             id,
             name,
             config: ShellCommandConfig::new(command),
-            last_pid: Arc::new(std::sync::Mutex::new(None)),
+            last_pid: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -140,7 +140,7 @@ impl ShellCommandTask {
             id,
             name,
             config,
-            last_pid: Arc::new(std::sync::Mutex::new(None)),
+            last_pid: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -192,7 +192,7 @@ impl WorkflowTask for ShellCommandTask {
         let child = cmd.spawn().map_err(TaskError::Io)?;
 
         if let Some(pid) = child.id() {
-            let mut last_pid = self.last_pid.lock().unwrap();
+            let mut last_pid = self.last_pid.lock();
             *last_pid = Some(pid);
         }
 
@@ -228,7 +228,7 @@ impl WorkflowTask for ShellCommandTask {
     }
 
     fn compensation(&self) -> Option<CompensationAction> {
-        let pid_guard = self.last_pid.lock().unwrap();
+        let pid_guard = self.last_pid.lock();
         if let Some(pid) = *pid_guard {
             Some(CompensationAction::undo(format!(
                 "Terminate spawned process: {}",

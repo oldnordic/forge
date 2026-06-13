@@ -11,6 +11,154 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SDK Builder** (`forge_agent/src/builder.rs`):
+  - `AgentBuilder<NeedsProvider>` → `.chat_provider(provider, config)` → `AgentBuilder<Ready>` → `.build()` → `Agent`
+  - Type-state pattern enforces required configuration (chat provider + config) at compile time
+  - Optional: `.max_iterations()`, `.step_retries()`, `.retrieval_top_k()`, `.hooks()`, `.skills()`, `.verifier()`, `.retriever()`, `.event_bus()`, `.policies()`, `.system_prompt()`
+  - `Agent::builder(path)` convenience method returns the builder
+  - 5 builder tests: produces agent, applies config, defaults match `Agent::new()`, `Agent::builder()` method, hooks+verifier passthrough
+
+- **SDK Prelude** (`forge_agent::prelude`):
+  - 22 stable types: `Agent`, `AgentBuilder`, `agent_builder`, `NeedsProvider`, `Ready`, `AsyncTool`, `BuiltinToolRegistry`, `ChatMessage`, `ChatProvider`, `ChatResponse`, `CodeRetriever`, `ContentBlock`, `EventBus`, `HookConfig`, `LlmError`, `SkillRegistry`, `StepEvent`, `ToolDef`, `ToolOutput`, `ToolRegistry`, `VerifierFn`, `LlmConfig`, `LlmProvider`, `AgentError`, `AgentTask`, `Result`
+
+- **Stability contract** on public traits:
+  - `AsyncTool`, `ToolRegistry`, `ChatProvider`, `CodeRetriever`, `LlmProvider` — doc comments with stability commitment: breaking changes accompanied by major version bump
+  - `#[non_exhaustive]` on all public data types: `ToolDef`, `ToolCall`, `ToolOutput`, `ChatMessage`, `ChatResponse`, `ContentBlock`, `Usage`, `LlmError`, `StepEvent`, `HookConfig`, `HookEvent`, `HookSpec`, `HookGroup`, `AgentError`
+  - `ChatResponse::new()` + `with_finish_reason()` constructors added (struct literal blocked by `#[non_exhaustive]`)
+
+- **Public SDK surface** (`forge_agent/src/lib.rs`):
+  - `LlmConfig`, `LlmProvider` re-exported at crate root (no longer need `forge_agent::llm::*`)
+  - 15 internal modules changed to `pub(crate)`: `agent_loop`, `audit`, `commit`, `llm`, `mutate`, `planner`, `policy`, `verify`, `workflow`, `context`, `generate`, `agent_config`, `orchestrate`, `transaction`, `runtime_integration`
+  - 4 modules remain `pub`: `chat` (contract surface), `observe`, `envoy` (feature-gated), `evidence` (feature-gated)
+  - All examples and integration tests updated to use crate-root imports
+
+### Changed
+
+- **`cargo check -p forge-agent --all-targets --all-features` now passes** — was 16 errors (private module access, missing trait methods)
+- **`cargo clippy --all-targets --all-features`**: 0 clippy lint warnings
+- **`llm::MockProvider` gated behind `#[cfg(test)]`** — was `pub` but only used by tests; no longer generates dead-code warnings in release builds
+- **Examples updated**: `minimal_agent`, `debug_react`, `orchestration` now use `forge_agent::LlmConfig` and `forge_agent::LlmProvider` instead of `forge_agent::llm::*`
+- **Integration tests updated**: `ollama_integration`, `llm_providers_integration`, `full_workflow` now use crate-root imports
+- **`debug_react` example**: added `_ => {}` catchall for `#[non_exhaustive]` ContentBlock match
+
+### Known Limitations
+
+- **88 dead-code warnings in `workflow/` internal modules** — composability primitives (ConditionalTask, ParallelTasks, TryCatchTask, PlanGraph, KnowledgeExplorer, SemgrepRunner, fallback handlers, dead task types) are implemented but have zero inbound callers. `cargo clippy -D warnings` fails on these. Not yet deleted (conservative cleanup).
+- **`workflow/executor/tests.rs` exceeds 1K LOC** — 1347 lines, needs modularization
+- **3 TODOs in `workflow/`** — `timeout.rs`, `combinators.rs` (2×). All in dead-code area.
+- **14 runtime `.unwrap()` calls in production code** — all `Mutex::lock().unwrap()` in `MockEvidenceRecorder` (6), `ForgeSession` (4), `ShellTask` (2), workflow examples (2). Standard for non-poison-aware code but should be `.expect("invariant: ...")`.
+- **`temperature` and `max_tokens` in `AgentConfig`** — parsed but not auto-applied to LLM config
+- **Skill routing is keyword-based, not semantic** — edge cases where multiple skills score similarly need explicit trigger tuning
+
+- **Stage 1: Memory & Context** (`forge_agent/src/chat/`):
+  - `ConversationStore` trait + `FileConversationStore` (JSON per session) in `memory.rs` — 9 tests
+  - `ContextWindow` with `TrimStrategy` (SlidingWindow, KeepSystemAndRecent) and `estimate_tokens()` in `context_window.rs` — 9 tests
+  - `PromptTemplate` with `{variable}` injection, `FewShotExample`, `PromptLibrary` with `.md`/`.json` dir loading in `prompts.rs` — 10 tests
+  - `ToolOutput::truncated(max_bytes)` + `truncate_tool_output()` — auto-truncation in ReAct loop via `LlmConfig.max_tool_output_bytes` (default 8KB) — 5 tests
+  - `Conversation` gains `with_session_id()`, `with_store()`, `record_usage()`, `total_tokens()`, auto-save on push
+
+- **Stage 2: Error Recovery & Reliability** (`forge_agent/src/chat/`):
+  - `ReActLoop::with_step_retries(n)` — LLM errors caught, error context fed back to conversation, loop continues until consecutive errors exceed threshold (default 2). `step_retries(0)` for immediate fail (backward compat). — 3 tests
+  - `VerifierFn` + `ReActLoop::with_verifier()` — optional callback validates final answer; rejected answers trigger re-prompt. — 3 tests
+  - `chat_structured<T: DeserializeOwned>(provider, messages, config)` — free function (preserves `dyn ChatProvider` object safety) that calls provider with no tools, strips markdown code fences (`json`/`JSON`/bare), parses response as `T`. Returns `LlmError::Parse` on failure. — 5 tests
+  - `RetryProvider` extended with `ContextTrimmer` type, `with_context_trimmer()`, automatic message trimming on `ContextLengthExceeded`. Default trimmer removes oldest non-system message. Stops retrying if trim doesn't reduce message count. — 5 tests
+  - `AgentError::ReActFailed` variant added
+
+- **Stage 3: RAG Pipeline** (`forge_agent/src/chat/retrieval.rs`):
+  - `CodeRetriever` trait: `async fn retrieve(&self, query: &str, top_k: usize) -> Vec<CodeSnippet>` — object-safe, `Send + Sync`
+  - `CodeSnippet` struct: file path, line number, content (with context lines), relevance score, `RetrievalSource` (File/Graph/Knowledge). `Display` impl for injection into prompts.
+  - `FileCodeRetriever` — keyword-based search over source files. Multi-term scoring with definition bonuses (`fn`/`struct`/`impl`). Configurable context lines. Skips `target/`, `.git/`, `.forge/`, `.magellan/`, `node_modules/`. — 15 tests
+  - `AtheneumRetriever` (behind `atheneum` feature) — queries `atheneum::graph::AtheneumGraph::query_knowledge()`, formats discoveries and handoffs as `CodeSnippet`s via `spawn_blocking`
+  - `ReActLoop::with_retriever()` + `with_retrieval_top_k()` (default 5) — auto-injects matching snippets as system context before user message in both `run()` and `run_stream()`. — 3 tests
+
+- **Stage 4: Agent Composition** (`forge_agent/src/`):
+  - `Agent` passthrough methods: `with_verifier()`, `with_retriever()`, `with_retrieval_top_k()`, `with_max_iterations()`, `with_step_retries()`. All wired through `run_react()`, `run_react_stream()`, and `spawn()`. `VerifierFn` changed from `Box` to `Arc` for `&self` compatibility. — 6 tests
+  - `Agent::spawn()` — spawns ReAct loop as `tokio::spawn` task, returns `AgentTask` handle with `IntoFuture` + `Debug` impl. Agents run concurrently. — 2 tests
+  - `Orchestrator` (`orchestrate.rs`) — `add_agent()`, `add_agent_with_id()`, `run_sequential()` (chain output→input, stop-on-error), `run_parallel()` (all agents same query, fail-fast), `run_parallel_allow_partial()` (collect successes + failures). `OrchestrateResult` with `is_success()`, `agent_id()`, `result()`, `error()`. `AgentFuture` type alias. — 7 tests
+  - `AgentConfig` (`agent_config.rs`) — loads from `[agent]` section in `.forge.toml`. Fields: `max_iterations`, `step_retries`, `retrieval_top_k`, `system_prompt`, `tools` (allowlist), `temperature`, `max_tokens`. Of these, `max_iterations`, `step_retries`, `retrieval_top_k`, and `system_prompt` are applied automatically during `Agent::new()`. `temperature` and `max_tokens` are parsed and stored but not yet wired to the LLM config (requires caller to read from `AgentConfig` and pass to `with_chat_provider()`). Tool allowlist filters registered tools via `BuiltinToolRegistry::retain()`. — 10 unit tests + 4 integration tests
+  - `BuiltinToolRegistry::retain()` — filters tools by name predicate, invalidates definition cache.
+
+- **Stage 5: Observability & DX** (`forge_agent/src/chat/`):
+  - `EventBus` + `AgentEvent` (`events.rs`) — typed pub/sub event system for agent lifecycle observability. `subscribe()` registers async callbacks, `emit()` fires to all subscribers. `Clone` shares subscriber list. 11 event variants: `SessionStarted`, `IterationStarted`, `LlmResponseReceived`, `LlmError`, `ToolCallStarted`, `ToolCallCompleted`, `RetrievalInjected`, `VerificationFailed`, `AnswerProduced`, `MaxIterationsReached`. — 6 unit tests + 1 integration test
+  - `ReActLoop::with_event_bus()` — wires EventBus into `run()`, `run_stream()`, and `spawn()`. Events emitted at every lifecycle point. `Agent::with_event_bus()` propagates to all ReAct paths.
+  - `TokenTracker` (`token_tracker.rs`) — `attach(&EventBus)` subscribes to `LlmResponseReceived` and accumulates `prompt_tokens`, `completion_tokens`, `total_tokens`, `llm_calls`. Uses `std::sync::Mutex` for synchronous subscriber safety. — 5 tests
+  - `RecordingTool` + `FailingTool` (`testing.rs`) — mock tools for agent unit tests. `RecordingTool` captures all calls with arguments and outputs. `FailingTool` always returns an error. — 5 tests
+  - `tracing` integration — `info_span!("react_loop")` around `ReActLoop::run()`, `debug!` at iteration start, LLM response, tool calls, answer. `warn!` on error recovery and max iterations.
+
+- **Stage 6: Security & Sandboxing** (`forge_agent/src/chat/sandbox.rs`, `agent_config.rs`, `builtins.rs`):
+  - `Sandbox` — regex-based command and path blocking. `with_blocked_commands(patterns)`, `with_blocked_paths(patterns)`. `is_command_allowed()`, `is_path_allowed()`. `SharedSandbox` type alias for `Arc<Mutex<Option<Sandbox>>>`. `Sandbox::from_config()` reads from `[agent]` section. — 6 unit tests
+  - `AgentConfig` extended with `denied_tools` (deny takes precedence over allow), `blocked_commands` (regex patterns for shell), `blocked_paths` (regex patterns for file access). — 3 new tests
+  - `ShellExecTool`, `FileReadTool`, `FileWriteTool` gain optional `SharedSandbox` field via `with_sandbox()`. Sandbox checked before execution. — 4 integration tests
+  - `default_builtin_tools_sandboxed()` and `default_builtin_tools_with_graph_sandboxed()` — new constructors that inject sandbox into all sandbox-aware tools.
+  - `Agent::build_tool_registry()` auto-detects sandbox config and uses sandboxed constructors when needed.
+
+- **Stage 7: Documentation & Examples**:
+  - Fixed 8 pre-existing rustdoc warnings in `workflow/` module: unresolved links (`is_cancelled`, `wait_until_cancelled`), redundant explicit link targets, unclosed HTML tag (`<AtomicBool>`). `cargo doc` now produces zero warnings.
+  - `examples/minimal_agent.rs` — High-level SDK usage: create agent, attach EventBus + TokenTracker, run ReAct loop, print usage stats. Requires `llm-ollama`.
+  - `examples/orchestration.rs` — Multi-agent sequential orchestration with Orchestrator builder pattern. Requires `llm-ollama`.
+  - `examples/sandbox_config.rs` — Standalone sandbox demo: blocked commands (sudo, rm -rf, curl|sh) and blocked paths (.env, id_rsa, credentials). No LLM required.
+
+- **Code Modularization** (quality maintenance):
+  - `lib.rs` (1184 LOC) split: `Agent` struct + all impls + `load_llm_from_forge_toml` extracted to `agent.rs`. `lib.rs` becomes slim crate root with module declarations, type definitions, and re-exports. Internal fields/methods use `pub(crate)` visibility for test and runtime_integration access.
+  - `atheneum_tool.rs` (1070 LOC) split: 27 command handlers extracted into `atheneum_tool/handlers.rs` (714 LOC), tests into `atheneum_tool/tests.rs` (269 LOC), struct + dispatch + definition remain in `atheneum_tool/mod.rs` (193 LOC). All under 1K LOC limit.
+
+- **DB Path Registry Integration** (`forge_core/src/storage/mod.rs`):
+  - `default_db_path()` now reads `~/.config/magellan/registry.toml` to resolve the correct DB for a project, matching the magellan service convention (`~/.magellan/<group>/<crate>.db`).
+  - Handles both `src/` and non-`src/` paths, so `Forge::open("./forge/forge_core")` and `Forge::open("./forge/forge_core/src")` both resolve to `~/.magellan/forge/forge-core.db`.
+  - Falls back to `~/.magellan/<stem>/<stem>.db` (subdirectory convention) when no registry entry matches.
+  - Previously produced `~/.magellan/forge.db` (flat), which created a separate DB disconnected from the magellan-indexed data.
+  - 4 registry lookup tests + 2 fallback tests.
+
+- **Hook System** (`forge_agent/src/chat/hooks/`): Claude Code–compatible lifecycle hooks for policy enforcement.
+  - `HookEvent` enum: `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`
+  - `HookConfig` parsed from `.forge.toml` `[hooks]` section (TOML array-of-tables format matching Claude Code's `settings.json` schema)
+  - `HookRunner` executes shell commands with JSON context on stdin, respects timeout, exit code 0 = allow, exit code 2 = block
+  - `matcher` field on `HookGroup` — regex filter on tool name (e.g., `"Write|Edit"`, `"Bash"`)
+  - `ReActLoop::with_hooks()` — hooks fire at: SessionStart (before first LLM call), PreToolUse (before `registry.execute()`), PostToolUse (after), Stop (after answer or max iterations)
+  - `Agent::with_hooks()` builder method; hooks propagated to both `run_react()` and `run_react_stream()`
+  - 10 tests: empty runner, exit-0 allows, exit-2 blocks, matcher filtering, regex matcher, timeout, context JSON, multiple hooks, session start, blocked propagation
+
+- **Skill System** (`forge_agent/src/chat/hooks/skills/`): Claude Code–compatible skill discovery, loading, and injection.
+  - `SkillLoader` discovers `SKILL.md` files from multiple sources: `{project}/.forge/skills/` (project-local), `~/.forge/skills/` (user-level), `~/.claude/skills/`, and `~/.config/opencode/skills/`.
+  - YAML frontmatter parsing with `---` delimiters: `name`, `description` (quoted/unquoted/single-quoted), `depends_on` (inline `[a, b]` or list-style `- a` with recursive resolution).
+  - Implicit trigger extraction from descriptions when no explicit `Triggers:` line present.
+  - `SkillRegistry::rank_matching()` with confidence-threshold filtering (`MIN_CONFIDENCE_SCORE = 2.0`). Noisy/accidental matches rejected.
+  - `SkillRegistry::load_with_deps()` — recursive dependency resolution with cycle protection via seen-set.
+  - `SkillRegistry::rank_and_load(query, max_skills, max_bytes)` — byte-budget-capped loading. Respects `MAX_INJECTED_BYTES = 32KB`.
+  - `SkillManifest::match_score()` — weighted scoring across trigger keywords, name components, and description content. Minimum 3-char word length for substring matches to prevent short-word noise.
+  - `SkillContent::system_prompt_fragment_bounded(max_bytes)` — truncated fragment with truncation marker when skill exceeds per-slot budget.
+  - `SkillTool` — built-in tool exposing `list`, `load`, `search` for manual skill inspection.
+  - Auto-injection: `Agent::build_system_prompt_for_query(query)` classifies the task, ranks skills, loads top matches with deps (bounded), and appends to system prompt before first LLM call. Called by `run_react()`, `run_react_stream()`, and `spawn()`.
+  - Custom system prompts (`[agent] system_prompt = "..."` in `.forge.toml`) are included in the base prompt — skills are appended on top, not bypassed.
+  - 6 new direct tests: `test_build_system_prompt_for_query_injects_matched_skill`, `test_build_system_prompt_for_query_no_match_returns_base`, `test_build_system_prompt_for_query_custom_prompt_appends_skills`, `test_build_system_prompt_for_query_without_registry`, `test_routing_fix_bug_prefers_debugging_over_tdd`, `test_routing_verify_prefers_verification`.
+  - Known limitation: Routing is keyword-based, not semantic. Edge cases where multiple skills score similarly may need explicit trigger tuning in SKILL.md files.
+
+- **Atheneum Integration** (`forge_agent/src/chat/tools/atheneum_tool.rs`): Direct crate access to atheneum knowledge graph.
+  - Feature flag `atheneum` gates `dep:atheneum` (path dependency)
+  - **Discovery**: `store_discovery`, `query_knowledge`, `query_knowledge_in_project`
+  - **Handoff**: `store_handoff`, `get_pending_handoff`, `claim_handoff`
+  - **Evidence**: `record_session`, `end_session`, `record_evidence_prompt`, `record_evidence_tool_call`, `record_evidence_file_write`, `record_evidence_commit`, `record_evidence_test_run`, `record_evidence_fix_chain`, `record_evidence_bench_run`, `query_events`
+  - **Planning**: `create_task`, `update_task_status`, `find_task`, `list_tasks`, `add_requirement`, `mark_requirement_met`, `add_blocker`, `resolve_blocker`, `get_task_details`
+  - Auto-registered in `build_tool_registry()` when `.atheneum/atheneum.db` exists in project
+  - 12 tests: store+query, handoff round-trip, empty query, unknown command, session round-trip, evidence tool call, planning task lifecycle (create/find/update/list/requirement/blocker/details), query events, status/blocker parse validation, definition
+
+- **Envoy Integration** (`forge_agent/src/chat/tools/envoy_tool.rs`): Multi-agent coordination and evidence tracking via envoy HTTP.
+  - Feature flag `envoy` now also pulls in `dep:envoy` crate (typed message/handoff structures alongside existing reqwest HTTP transport)
+  - **Messaging**: `send_message`, `poll_messages`
+  - **Discovery**: `store_discovery`, `query_discoveries`, `query_knowledge`
+  - **Handoff**: `store_handoff`, `get_pending_handoff`, `claim_handoff`
+  - **Evidence**: `record_evidence_prompt`, `record_evidence_tool_call`, `record_evidence_file_write`, `record_evidence_commit`, `record_evidence_test_run`, `record_evidence_fix_chain`, `record_evidence_bench_run`, `query_events`
+  - `EnvoyClient` extended with `claim_handoff()`, `forge_bench_run()`, `query_events()` methods
+  - Auto-registered in `build_tool_registry()` when envoy client is configured
+  - 1 test: definition verification (HTTP tests require running envoy)
+
+- **Agent Wiring** (`forge_agent/src/lib.rs`):
+  - `Agent` struct extended with `hook_config: Option<HookConfig>` and `skill_registry: Option<Arc<SkillRegistry>>`
+  - `Agent::with_hooks()`, `Agent::with_skill_registry()` builder methods
+  - `build_tool_registry()` — constructs registry with builtin tools + graph + skill + atheneum + envoy based on configuration
+  - `build_system_prompt()` — dynamically includes tool descriptions for available capabilities
+  - `run_react()` and `run_react_stream()` use new builders; hooks injected into `ReActLoop`
+
 - **Chat & Tool-Calling SDK** (`forge_agent/src/chat/`): Model-agnostic SDK for LLM-driven agent workflows.
   - `ChatProvider` trait with `chat()` (request/response) and `chat_stream()` methods
   - `OllamaChatProvider` — Ollama `/api/chat` with tool calling and NDJSON streaming
@@ -26,8 +174,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `validate_tool_arguments()` — wired into `BuiltinToolRegistry::execute()` to reject calls with missing required parameters before dispatching to the tool
   - Feature flags: `llm-ollama`, `llm-openai`, `llm-anthropic` (each gates `dep:reqwest`)
   - `Agent::with_chat_provider()` + `Agent::run_react()` — LLM-driven autonomous agent as alternative to fixed 6-phase pipeline
+  - `Agent::run_react_stream()` — streaming variant yielding `ReactStreamEvent` (tokens, tool executions, answer) as they happen
+  - `ReactStreamEvent` enum — `LlmEvent`, `IterationStart`, `ToolExecuted`, `Answer`, `MaxIterationsReached`
+  - **`GraphQueryTool`** — built-in tool exposing `find_symbol`, `callers_of`, `references`, `cycles`, and `impact_analysis` via the Forge SDK graph. Registered in `run_react()` when Forge is available. 11 tests.
+- **README rewritten** — Honest documentation covering core SDK, agent layer, chat providers, graph query tool, workflow engine, known limitations. All examples verified against actual public APIs. Removed stale feature flags and inflated claims.
 
 ### Changed
+
+- **Unified execution core** — `run()` and `run_stream()` now share a single `run_core()` implementation. `StepEvent` is the single source of truth for all loop state transitions. `run()` is a thin wrapper (~5 LOC) that calls the core in batch mode. `run_stream()` is a thin wrapper (~10 LOC) that calls the core in streaming mode and maps `StepEvent` → `ReactStreamEvent`. Tool execution, hooks, verifier, error handling, event bus — all shared, zero duplication.
+- **`StepEvent` enum** (`step.rs`) — replaces scattered `EventBus::emit()` calls with a single `emit()` method that bridges to both `AgentEvent` (for EventBus subscribers) and `ReactStreamEvent` (for stream consumers). 188 LOC including adapters.
+- **`react.rs` reduced from 691 → 569 LOC** — extracted `call_llm_batch()`, `call_llm_stream()`, `execute_tools()` as helper methods. The `use_streaming` flag controls only the LLM call path; everything else is unified.
+- **Streaming `LlmResponseReceived` now includes accumulated usage** — `StreamEvent::Usage` events are accumulated during streaming and emitted as part of `StepEvent::LlmResponseReceived`, matching the batch path.
 
 - **`run_react()` returns `String`** — the LLM's final text answer, not a synthetic `LoopResult`. The ReAct loop does not create git transactions or track modified files.
 - **`LlmProviderAdapter` now errors on tool calls** — previously silently discarded tools and multi-turn history. Now returns `LlmError::Provider` if any tools are passed. Assistant and tool-result messages are flattened into the prompt for legacy providers.
@@ -37,95 +194,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Conversation::truncate_to()` preserves system messages** — when `keep` is less than the system message count, system messages are now kept rather than dropped.
 - **OpenAI tool-call argument parse failures are preserved** — malformed JSON from the LLM is kept as `{"_parse_error": "<raw>"}` instead of silently becoming `{}`.
 - **Anthropic content blocks include `type` field** — `Text` and `ToolUse` variants now serialize `"type": "text"` and `"type": "tool_use"` as required by the Anthropic API.
-- **Replaced petgraph with sqlitegraph TypedDiGraph** (from 0.4.0 cycle)
-- **Tool deps are now required** (from 0.4.0 cycle)
+- **True token-by-token streaming** — `chat_stream()` now uses a spawned task with `futures::channel::mpsc` to emit `StreamEvent`s as each line arrives from the HTTP byte stream. Previously collected all events into a `Vec` before emitting any (batch-then-yield). All three providers (Ollama NDJSON, OpenAI SSE, Anthropic SSE) converted to the new `spawn_line_stream` infrastructure. Stateful SSE parsing for Anthropic (tracks `event:` / `data:` across lines).
+- **`ReActLoop` now accepts `HookRunner`** — `with_hooks()` builder. Pre/post tool hooks fire around every `registry.execute()` call. SessionStart and Stop hooks fire at loop boundaries. `AgentError::HookBlocked` variant added.
+- **`ndjson_stream.rs` gated behind LLM feature flags** — no longer compiled when no LLM provider is active (eliminates phantom reqwest errors).
+- **`envoy` feature now includes `dep:envoy` crate** — typed envoy structures available alongside existing HTTP client.
+- **New feature flag `atheneum`** — gates `dep:atheneum` for direct knowledge graph access.
 
 ### Known Limitations
 
-- **Streaming is batch-then-yield** — `chat_stream()` on all three providers buffers the entire HTTP response before emitting events. This is not true token-by-token streaming. The API surface exists for future improvement but does not deliver incremental tokens today.
-- **`ShellExecTool` has no sandboxing** — the tool executes arbitrary `sh -c` commands with the full privileges of the process. No allowlist, no capability restriction. This is by design for an agent framework but should be documented to users.
+- **`ShellExecTool` has no sandboxing** — the tool executes arbitrary `sh -c` commands with the full privileges of the process. No allowlist, no capability restriction. This is by design for an agent framework but should be documented to users. The hook system can be used to block destructive commands via `PreToolUse` hooks with matcher `"shell_exec"`.
 - **`LlmProviderAdapter` cannot support tool calling** — the underlying `LlmProvider` trait only accepts a flat prompt string. Use a native `ChatProvider` for agent workflows.
+- **`SkillLoader` scans `~/.forge/skills/`** — user-level skills from the home directory are included in discovery. Tests use temp dirs and only check for presence of expected skills, not total count.
+- **`AtheneumTool` opens the database on every call** — no connection pooling. Performance-sensitive workloads should use the atheneum crate directly. Evidence and planning commands map directly to atheneum's `AtheneumGraph` methods with no additional validation beyond what the crate provides.
+- **`EnvoyTool` requires a running envoy server** — tests without a live server only verify tool definitions, not HTTP round-trips. Evidence commands delegate to `EnvoyClient` methods which POST to envoy's `/atheneum/*` bridge endpoints.
+- **`lib.rs` exceeds 1000 LOC** — RESOLVED. Agent struct extracted to `agent.rs` (755 LOC). `lib.rs` now ~340 LOC.
+
+### Dependencies
+
+- **thiserror 1.0 → 2.0** across all 3 crates that declare it (`forge-core`, `forge-agent`, `forge-reasoning`). `forge-runtime` has no thiserror dependency.
+- **sqlitegraph 3.0.7 → 3.2.5** — inherits SIMD HNSW, `parking_lot` locks, and streaming iterators from the upstream 3.2.x line.
+- **magellan 4.2 → 4.7** (`forge-core`).
+- **atheneum 0.1.3 → 0.5.0, envoy 0.1.0 → 0.2.0** (`forge-agent`, optional features). Migrated 8 param structs to the new atheneum API; fixed 3 `query_knowledge` call sites in `atheneum_tool/handlers.rs` and `chat/retrieval.rs`.
+- **splice 2.9, llmgrep 3.8, mirage-analyzer 1.8** (`forge-core`). tree-sitter version not bumped (blocked by mirage pin).
+- **rusqlite** — not upgraded; transitively pinned by sqlitegraph's own rusqlite requirement.
 
 ### Changed
 
-- **Tool deps are now required**: `magellan`, `llmgrep`, `mirage-analyzer`, `splice`, and `which` are no longer optional feature-gated dependencies. All `#[cfg(feature = "...")]` gates and empty-return fallback arms have been removed from `CfgModule`, `SearchModule`, `EditModule`, `GraphModule`, `indexing`, and `lib`. The `tools` feature flag is removed; `default = ["sqlite"]` is the only default feature.
-- **Replaced petgraph with sqlitegraph TypedDiGraph**: `forge_agent` and `forge-reasoning` no longer depend on petgraph. `DiGraph<N, E>` replaced with `TypedDiGraph<N, E>` from sqlitegraph 3.0.7. All algorithm calls (`toposort`, `tarjan_scc`, `is_cyclic_directed`, `Dfs`) now use sqlitegraph's typed_digraph::algo module. Bumped sqlitegraph to 3.0.7 across the workspace.
-- **Test robustness fix**: `test_low_confidence_bails_before_max_attempts` no longer depends on `cargo check` output format varying across environments. Checks confidence threshold regardless of pipeline outcome.
-
-### Added
-
-- **Tool forge API delegation**: `forge_core` modules now delegate to `splice::forge`, `llmgrep::forge`, and `mirage_analyzer::forge` convenience functions instead of reimplementing symbol resolution and backend construction internally.
-- **EditModule::delete_symbol()**: Deletes a symbol from a file via `splice::forge::delete_symbol_from_file`.
-- **EditModule::resolve_span()**: Resolves a symbol to its byte span via `splice::forge::resolve_symbol_span`.
-- **SearchModule::references()**: Finds all references to a symbol via `llmgrep::forge::search_references`.
-- **SearchModule::calls()**: Finds all calls involving a symbol via `llmgrep::forge::search_calls`.
-- **SearchModule::lookup()**: Looks up a symbol by FQN via `llmgrep::forge::lookup_symbol`.
-- **CfgModule::detect_cycles()**: Detects cycles in the call graph via `mirage_analyzer::forge::detect_cycles`.
-- **CfgModule::dead_symbols()**: Finds dead (unreachable) symbols via `mirage_analyzer::forge::find_dead_symbols`.
-- **CfgModule::reachable_symbols()**: Finds reachable symbols via `mirage_analyzer::forge::reachable_symbols`.
-- **CfgModule::callees()**: Gets outgoing calls for a function via `mirage_analyzer::forge::get_callees`.
-- **CfgModule::resolve_function()**: Resolves a function name to its database ID via `mirage_analyzer::forge::resolve_function`.
-- **CfgModule::database_status()**: Gets database status summary via `mirage_analyzer::forge::database_status`.
-- **New types**: `CycleReport`, `CallCycle`, `DeadSymbol`, `DatabaseStatus` in `cfg` module.
-- **Auto-indexing on `Forge::open()`**: `Forge::open()` and `Forge::open_with_backend()` now detect empty graph databases and auto-trigger `graph().index()` using magellan. This removes the manual indexing step for new projects.
-- **Mirage-powered CFG integration**: `CfgModule` now sources real CFG data from magellan's `cfg_blocks`/`cfg_edges` tables via mirage + direct rusqlite queries. `load_test_cfg()` helper added; `dominators()`, `loops()`, and `PathBuilder::execute()` use actual control-flow edges when available.
-- **`UnifiedGraphStore::needs_indexing()`**: Opens the sqlitegraph backend and checks `entity_ids().is_empty()` to determine if auto-indexing is required.
-- **Magellan-unified graph module**: All `GraphModule` methods (`find_symbol`, `callers_of`, `references`, `cycles`, `impact_analysis`) now delegate to `magellan::CodeGraph` directly. No more `#[cfg(feature)]` fallback arms. `graph/queries.rs` deleted entirely. DB path resolves to `~/.magellan/<stem>.db` via `default_db_path()`.
-- **Graph module Magellan unification v2**: `callers_of` replaced O(n) file iteration with targeted `search_symbols_by_name` + per-file `callers_of_symbol`. `cycles` now uses `detect_cycles()` returning `CycleReport` with real `SymbolInfo` members (FQN, file_path, kind). `impact_analysis` replaced raw sqlitegraph k-hop with magellan `CodeGraph` BFS, tracking correct hop distances. `Cycle` type upgraded from `Vec<SymbolId>` to `Vec<CycleMember>` with full metadata. `CycleMember` type added to `forge_core::types`. 4 new integration tests with real indexed code.
-- **`ForgeBuilder` with `db_path`/`db_dir` overrides**: `ForgeBuilder::db_path()` and `ForgeBuilder::db_dir()` allow explicit database path control for tests and non-standard setups.
-- **Real git commit integration**: `Committer::finalize` now runs `git add` + `git commit` via `tokio::process::Command`. `CommitReport` includes `git_committed: bool` and `files_committed: Vec<PathBuf>`. Non-fatal on missing git.
-- **Verification retry/fix loop**: `AgentLoop::run` retries failed verifications up to `max_fix_attempts` (default: 3). `Planner::generate_fix_steps` asks the LLM for fix steps using error diagnostics. Fix steps are deduplicated against previous attempts.
-- **`Generator` module for code generation**: `forge_agent::generate::Generator` takes a natural language description, gathers graph context via `Observer`, and calls the LLM. Supports plain code or JSON `{"path":"...","code":"..."}` envelope responses.
-- **Knowledge graph module** (`forge_core::knowledge`): `KnowledgeGraph` backed by sqlitegraph native-v3. Eight node types (symbol, file, discovery, issue, pattern, knowledge, hotspot, cfg_block), eleven edge types, traversal operations (callers_of, callees_of, correlated, affected_by), graph algorithms (shortest_path, reachability, k_hop), FTS5 bridge to Magellan DB, sync_symbols/sync_references, and `query()` entry point. `Forge::knowledge()` accessor.
-- **Workflow executor refactor**: Monolithic `executor.rs` (3340 lines) split into `executor/` directory with focused modules: `serial.rs`, `parallel.rs`, `result.rs`, `audit.rs`, `tests.rs`.
-- **Workflow submodule splits**: All workflow files over 1000 LOC split into focused submodules — `tools/` (fallback, process, registry), `plan/` (graph, types), `checkpoint/` (service, validation), `tasks/` (graph_query, agent_loop, shell, file_edit, tool), `rollback/` (tool_compensation, compensation_registry, engine), `dag/` (core, tests). No remaining workflow file exceeds 1000 LOC.
-- **Integration gap fixes**: KnowledgeGapAnalyzer, BeliefGraph dependencies, ToolRegistry, phase checkpoints, CachingLlmProvider, Policy::Custom, Agent::run_workflow(), WorkflowBuilder::build_executor(), KnowledgeExplorer with real sqlitegraph queries.
-- **Diff engine** (`forge_core::diff`): `UnifiedDiff::generate/apply/reverse/render/stats` via `similar` crate. Supports unified diff generation, idempotent apply, reverse application, and diff statistics. 14 tests.
-- **Structured diagnostics** (`forge_core::diagnostic`): `Diagnostic` builder pattern with `DiagnosticSeverity`, `DiagnosticSource`, `Location`, `FixSuggestion`, `TextEdit`, `RelatedInfo`. `DiagnosticParser` trait with `CargoDiagnosticParser` (JSON + rustc line format), `GoDiagnosticParser`, `GenericDiagnosticParser`. 11 tests.
-- **Build system abstraction** (`forge_core::build`): `BuildSystem` trait (detect/check/build/test/clean) with `CargoBuildSystem`, `GoBuildSystem`, `NpmBuildSystem`, `MakeBuildSystem`. `BuildModule` with `detect()` factory. `Forge::build()` returns `Option<BuildModule>`. 12 tests.
-- **Project scaffolding** (`forge_core::project`): `ProjectModule`, `ProjectScaffold`, `ProjectInfo`, `project_template()` with templates for Rust/Python/Java/C/TypeScript. `detect_project()` auto-detects language from directory contents. 10 tests.
-- **Dependency management** (`forge_core::dependency`): `DependencyModule` with `DependencyManifest`, `Dependency`, `DependencySource`. Parses and mutates Cargo.toml, package.json, go.mod. Add/remove dependency operations. 10 tests.
-- **Undo stack** (`forge_core::edit::undo`): `EditModule::undo()/can_undo()/undo_depth()/clear_undo_stack()` with bounded `Mutex<Vec<PendingUndo>>` (default 100). Hooked into `create_file`, `write_file`, `create_directory`. `ForgeBuilder::undo_capacity()` config. 6 tests.
-- **Streaming progress** (`forge_core::progress`): `ProgressSink` trait, `NoopProgress`, `ChannelProgress` (tokio unbounded channel), `ProgressEmitter` with `started/progress/completed/failed` methods. 6 tests.
-- **Workspace awareness** (`forge_core::workspace`): `Workspace::detect/open/project_for_path`. Cargo workspace member parsing, Go/Node/pnpm monorepo discovery, walk-up root detection. `Forge::as_workspace()` accessor. 9 tests.
-- **Multi-language identifiers** (`forge_core::edit::identifiers`): `identifier_spans(source, target, lang)` with `qualified_prefixes()` for Rust/Python/Java/C/Cpp/TypeScript/JavaScript/Go. `language_from_extension()` helper. 5 tests.
-- **File creation API**: `EditModule::create_file/create_directory/write_file` with `validate_relative_path` (rejects absolute paths, validates no path traversal). `ForgeError::PathNotAllowed/FileAlreadyExists`. 7 tests.
-- **Forge facade accessors**: `Forge::project()`, `Forge::dependency()`, `Forge::as_workspace()` for module access without manual construction.
-- **Agent integration — verify.rs**: `Verifier::compile_check/test_check` now delegates to `BuildModule::check/test` when a Forge instance is available, falling back to raw `cargo` commands otherwise.
-- **Agent integration — mutate.rs**: `Mutator::with_forge()` constructor. `PlanOperation::Create` uses `EditModule::create_file()` when forge is available for path validation and undo support.
-
-### Changed
-
-- **Edit module delegates to splice::forge**: `patch_symbol()` uses `llmgrep::forge::search_symbols` for file discovery then `splice::forge::patch_symbol_in_file` for each file. `rename_symbol()` delegates to `splice::forge::rename_symbol_across_files`. Removed ~160 LOC of manual magellan iteration and identifier_spans utilities.
-- **Search module delegates to llmgrep::forge**: `search_via_llmgrep()` replaced with `llmgrep::forge::search_symbols`/`search_symbols_regex` calls. Removed ~30 LOC of manual `Backend` + `SearchOptions` construction.
-- **Tree-sitter CFG extraction removed**: `CfgExtractor` in `treesitter/mod.rs` is no longer called by `cfg/mod.rs`. `CfgModule::index()` is now a no-op with documentation explaining that CFG data is populated by magellan during `GraphModule::index()`.
-- **Edit module: splice-only refactored**: `patch_symbol()` and `rename_symbol()` no longer fall back to naive file-system scanning or `String::replace_range`. They now require `graph.db` + magellan + splice features. Missing DB returns explicit error: `"graph.db not found; run forge.graph().index() first"`. Missing splice feature returns: `"splice feature not enabled"`.
-- **Edit module modularized**: `edit/mod.rs` split into `edit/mod.rs` (986 LOC), `edit/undo.rs` (99 LOC), `edit/identifiers.rs` (98 LOC). No file exceeds 1K LOC.
-- **Forge struct gains undo_capacity field**: `Forge { store, undo_capacity }` — `Forge::edit()` passes capacity through to `EditModule::with_undo_capacity()`.
-- **Verifier compiles/tests via BuildModule**: When forge is configured, structured diagnostics from `forge_core::diagnostic::Diagnostic` are converted to agent `Diagnostic` type. Falls back to raw `Command::new("cargo")` otherwise.
-- **Mutator create_file via EditModule**: When forge is configured, `PlanOperation::Create` delegates to `EditModule::create_file()` for path validation and undo tracking.
-- **`#[cfg(test)]` gating on helper functions**: `collect_files_recursive`, `find_symbol_span`, `find_definition_end`, `simple_word_replace` are now gated behind `#[cfg(test)]` since they are only used by unit tests after the splice-only refactor.
-- **Tree-sitter ecosystem bump**: `tree-sitter` 0.22 → 0.25, `tree-sitter-rust` 0.21 → 0.25, `tree-sitter-javascript` 0.21 → 0.25. Unblocks `ring` ≥ 0.17.12 which resolves RUSTSEC-2025-0009.
-- **Dependency bumps**: `magellan` 3.3.8 → 3.3.10, `mirage` 1.4.2 → 1.4.4, `splice` 2.6.9 → 2.6.11. All aligned on `cc` ≥ 1.2 for `ring` compatibility.
+- **`parking_lot` lock migration** — `std::sync::Mutex`/`RwLock` replaced with `parking_lot` equivalents in `forge-core` (`undo_stack`, `watcher`), `forge-reasoning` (`service.rs`, `thread_safe.rs`), and `forge-agent` (`evidence/session.rs`, `workflow/tasks/shell.rs`, `workflow/state.rs`). `ConcurrentState::read()` returns the guard directly instead of `Result<RwLockReadGuard>`. `tokio::sync` locks left intact (they guard across `.await`).
+- **`AtomicU64` counter** replaces `Mutex<u64>` in `forge-reasoning` `thread_safe.rs`.
+- **`cargo clippy --all-targets --all-features -- -D warnings`** passes clean (after dead-code cleanup below).
 
 ### Removed
 
-- **`graph/queries.rs`**: `GraphQueryEngine` and all associated fallback query logic deleted. Replaced by direct `magellan::CodeGraph` calls.
-- **All `#[cfg(feature = "magellan")]` / `#[cfg(not(...))]` guards in graph module**: Unconditional magellan dependency — feature flag removed from graph code path.
-- **`patch_symbol_via_files()`**: Removed entirely. Was doing recursive directory scan + naive string replacement.
-- **`rename_symbol_via_files()`**: Removed entirely. Was doing recursive directory scan + `simple_word_replace()`.
-- **`wave_08_treesitter_cfg` E2E tests**: Removed 18 E2E tests that tested the now-removed tree-sitter CFG extraction behavior. These are superseded by the magellan/mirage integration.
-
-### Fixed
-
-- **`test_runtime_error_handling` incorrect assertion**: Test claimed `Runtime::new` creates nonexistent directories, but `UnifiedGraphStore::open` explicitly rejects them. Fixed to first assert the error, then create the directory and assert success.
-- **`test_concurrent_state_stress_test` and `test_concurrent_state_thread_safety` deadlock**: Tests used `std::sync::Barrier` and `std::sync::RwLock` inside `tokio::spawn` with a single-threaded runtime, causing deadlock. Switched to `#[tokio::test(flavor = "multi_thread", worker_threads = 4)]`.
-- **forge-runtime `default-features = false` build break**: After magellan unification removed cfg guards from graph/search modules, forge-runtime (which disabled default features) could no longer compile. Changed to inherit forge-core's default features.
-- **`test_path_builder_filters` stale DB conflict**: Test now uses `tempfile::tempdir()` instead of `std::env::current_dir()` to avoid hitting the project's own `.magellan/forge.db` with schema version 5 vs supported 4.
-- **Clippy lints**: Resolved dead_code and unused variable warnings in `forge_agent/src/workflow/plan.rs`, `semgrep.rs`, `forge_core/src/graph/mod.rs`, and `indexing.rs`.
-- **`SemgrepRunner` dead_code suppression**: Removed `#[allow(dead_code)]`, prefixed unused fields with `_`.
-- **`edit/undo.rs` bare unwrap**: `stack.pop().unwrap()` replaced with `.expect("invariant: stack non-empty after is_empty check")`.
-- **`loop.rs` modularization**: Renamed `loop.rs` → `agent_loop.rs` (eliminated `r#loop` raw identifier), then split into `agent_loop/` directory: `mod.rs` (311), `types.rs` (30), `phases.rs` (546), `tests.rs` (627). All 6 reference sites updated.
+- **Dead-code cleanup** (zero-tolerance policy) — `cargo check --all-targets --all-features` and clippy now emit zero dead-code warnings:
+  - `Mutator`: removed `forge` field and the `with_forge`, `rollback`, `commit_transaction`, `preview` methods + tests. `Mutator::Create` arm now writes files directly via `tokio::fs`. Tests use `into_transaction().rollback()`/`.commit()`.
+  - `policy.rs`: deleted `AllPolicies` and `AnyPolicy` structs + impls + 2 tests (no inbound callers; `PolicyValidator` covers the same use case).
+  - `commit.rs`: deleted `generate_summary` method + test.
+  - `AuditError`: renamed `SerializationFailed` → `Serialization`.
+  - `ConflictReason`: deleted `CircularDependency` and `MissingDependency` variants (never constructed).
+  - `Conflict`: deleted `step_indices` field; conflict details folded into error messages.
+  - `VerificationReport`: deleted `changed_files` field; replaced with a `tracing::info!` log.
 
 ---
 

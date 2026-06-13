@@ -20,7 +20,7 @@ async fn main() {
     use forge_agent::chat::tools::registry::{AsyncTool, BuiltinToolRegistry, ToolRegistry};
     use forge_agent::chat::tools::types::{ToolCall, ToolDef};
     use forge_agent::chat::types::{ChatMessage, ContentBlock};
-    use forge_agent::llm::LlmConfig;
+    use forge_agent::LlmConfig;
 
     struct FileReadTool;
 
@@ -104,6 +104,7 @@ async fn main() {
                         content.chars().take(200).collect::<String>()
                     );
                 }
+                _ => {}
             }
         }
 

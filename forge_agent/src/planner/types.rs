@@ -39,7 +39,6 @@ pub struct ImpactEstimate {
 
 #[derive(Clone, Debug)]
 pub struct Conflict {
-    pub step_indices: Vec<usize>,
     pub file: String,
     pub reason: ConflictReason,
 }
@@ -47,8 +46,6 @@ pub struct Conflict {
 #[derive(Clone, Debug)]
 pub enum ConflictReason {
     OverlappingRegion { start: usize, end: usize },
-    CircularDependency,
-    MissingDependency,
 }
 
 #[derive(Clone, Debug)]

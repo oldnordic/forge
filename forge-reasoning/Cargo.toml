@@ -14,14 +14,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio = { workspace = true }
 tracing = "0.1"
-thiserror = "1.0"
+thiserror = "2.0"
 async-trait = "0.1"
 
 # SQLiteGraph - storage backend
-sqlitegraph = { version = "3.0.7", features = ["sqlite-backend"] }
+sqlitegraph = { version = "3.2.5", features = ["sqlite-backend"] }
 
 # Cryptographic hashing for data integrity
 sha2 = "0.10"

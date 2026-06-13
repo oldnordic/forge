@@ -3,12 +3,28 @@ use super::validation::validate_tool_arguments;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
+/// Contract for agent-callable tools.
+///
+/// Implement this trait to add custom tools to the agent's tool registry.
+///
+/// ## Stability
+///
+/// This trait is part of the stable SDK contract. Breaking changes to the
+/// signature will be accompanied by a major version bump.
 #[async_trait]
 pub trait AsyncTool: Send + Sync {
+    /// Execute the tool with the given JSON arguments.
     async fn call(&self, arguments: serde_json::Value) -> Result<String, String>;
+    /// Return the tool's JSON schema definition for the LLM.
     fn definition(&self) -> ToolDef;
 }
 
+/// Pluggable tool registry trait.
+///
+/// ## Stability
+///
+/// This trait is part of the stable SDK contract. Breaking changes to the
+/// signature will be accompanied by a major version bump.
 #[async_trait]
 pub trait ToolRegistry: Send + Sync {
     async fn execute(&self, call: &ToolCall) -> ToolOutput;
@@ -39,6 +55,14 @@ impl BuiltinToolRegistry {
         for tool in tools {
             self.register(tool);
         }
+    }
+
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.tools.retain(|name, _| f(name));
+        self.defs_cache = None;
     }
 }
 

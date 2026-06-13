@@ -5,7 +5,6 @@ use crate::chat::types::{ChatMessage, ChatResponse, ContentBlock, LlmError, Role
 use crate::llm::LlmConfig;
 use async_trait::async_trait;
 use futures::Stream;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
@@ -140,6 +139,8 @@ struct ChatMessageRaw {
     #[serde(default)]
     content: String,
     #[serde(default)]
+    thinking: Option<String>,
+    #[serde(default)]
     tool_calls: Option<Vec<OllamaToolCall>>,
 }
 
@@ -159,6 +160,9 @@ struct StreamChunkRaw {
 struct StreamMessageRaw {
     #[serde(default)]
     content: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    thinking: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<OllamaToolCall>>,
 }
@@ -361,8 +365,14 @@ impl ChatProvider for OllamaChatProvider {
 
         let mut content_blocks: Vec<ContentBlock> = Vec::new();
 
-        if !raw.message.content.is_empty() {
-            content_blocks.push(ContentBlock::text(raw.message.content));
+        let text_content = if raw.message.content.is_empty() {
+            raw.message.thinking.unwrap_or_default()
+        } else {
+            raw.message.content
+        };
+
+        if !text_content.is_empty() {
+            content_blocks.push(ContentBlock::text(text_content));
         }
 
         if let Some(tool_calls) = raw.message.tool_calls {
@@ -415,104 +425,64 @@ impl ChatProvider for OllamaChatProvider {
             format = Some(serde_json::json!("json"));
         }
 
-        let stream = futures::stream::once(async move {
-            let request = ChatRequestOwned {
-                model,
-                messages: ollama_messages,
-                tools: ollama_tools,
-                stream: true,
-                format,
-                options,
+        let request = ChatRequestOwned {
+            model,
+            messages: ollama_messages,
+            tools: ollama_tools,
+            stream: true,
+            format,
+            options,
+        };
+
+        let response_future = client
+            .post(format!("{}/api/chat", endpoint))
+            .json(&request)
+            .send();
+
+        super::ndjson_stream::spawn_line_stream((), response_future, |_, line| {
+            let parsed: StreamChunkRaw = match serde_json::from_str(line) {
+                Ok(p) => p,
+                Err(_) => return Vec::new(),
             };
-
-            let resp = match client
-                .post(format!("{}/api/chat", endpoint))
-                .json(&request)
-                .send()
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => return vec![StreamEvent::Error(e.to_string())],
-            };
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return vec![StreamEvent::Error(format!("Ollama {}: {}", status, body))];
-            }
-
-            let byte_stream = resp.bytes_stream();
             let mut events = Vec::new();
-            let mut stream = Box::pin(byte_stream);
-            let mut buffer = String::new();
-
-            loop {
-                match stream.next().await {
-                    Some(Ok(chunk)) => {
-                        buffer.push_str(&String::from_utf8_lossy(&chunk));
-                        while let Some(pos) = buffer.find('\n') {
-                            let line = buffer[..pos].trim().to_string();
-                            buffer = buffer[pos + 1..].to_string();
-                            if line.is_empty() {
-                                continue;
-                            }
-                            let parsed: StreamChunkRaw = match serde_json::from_str(&line) {
-                                Ok(p) => p,
-                                Err(_) => continue,
-                            };
-                            if parsed.done {
-                                if parsed.prompt_eval_count.is_some() || parsed.eval_count.is_some()
-                                {
-                                    events.push(StreamEvent::Usage(Usage {
-                                        prompt_tokens: parsed.prompt_eval_count,
-                                        completion_tokens: parsed.eval_count,
-                                        total_tokens: parsed
-                                            .prompt_eval_count
-                                            .zip(parsed.eval_count)
-                                            .map(|(p, c)| p + c),
-                                    }));
-                                }
-                                events.push(StreamEvent::Done);
-                                return events;
-                            }
-                            if let Some(msg) = parsed.message {
-                                if !msg.content.is_empty() {
-                                    events.push(StreamEvent::Token(msg.content));
-                                }
-                                if let Some(tool_calls) = msg.tool_calls {
-                                    for (i, tc) in tool_calls.into_iter().enumerate() {
-                                        let id = format!("ollama_call_{i}");
-                                        events.push(StreamEvent::ToolCallStart {
-                                            index: i,
-                                            id,
-                                            name: tc.function.name,
-                                        });
-                                        let args_str = tc.function.arguments.to_string();
-                                        if !args_str.is_empty() && args_str != "null" {
-                                            events.push(StreamEvent::ToolCallArgumentDelta {
-                                                index: i,
-                                                delta: args_str,
-                                            });
-                                        }
-                                        events.push(StreamEvent::ToolCallEnd { index: i });
-                                    }
-                                }
-                            }
+            if parsed.done {
+                if parsed.prompt_eval_count.is_some() || parsed.eval_count.is_some() {
+                    events.push(StreamEvent::Usage(Usage {
+                        prompt_tokens: parsed.prompt_eval_count,
+                        completion_tokens: parsed.eval_count,
+                        total_tokens: parsed
+                            .prompt_eval_count
+                            .zip(parsed.eval_count)
+                            .map(|(p, c)| p + c),
+                    }));
+                }
+                events.push(StreamEvent::Done);
+                return events;
+            }
+            if let Some(msg) = parsed.message {
+                if !msg.content.is_empty() {
+                    events.push(StreamEvent::Token(msg.content));
+                }
+                if let Some(tool_calls) = msg.tool_calls {
+                    for (i, tc) in tool_calls.into_iter().enumerate() {
+                        let id = format!("ollama_call_{i}");
+                        events.push(StreamEvent::ToolCallStart {
+                            index: i,
+                            id,
+                            name: tc.function.name,
+                        });
+                        let args_str = tc.function.arguments.to_string();
+                        if !args_str.is_empty() && args_str != "null" {
+                            events.push(StreamEvent::ToolCallArgumentDelta {
+                                index: i,
+                                delta: args_str,
+                            });
                         }
-                    }
-                    Some(Err(e)) => {
-                        events.push(StreamEvent::Error(e.to_string()));
-                        return events;
-                    }
-                    None => {
-                        events.push(StreamEvent::Done);
-                        return events;
+                        events.push(StreamEvent::ToolCallEnd { index: i });
                     }
                 }
             }
+            events
         })
-        .flat_map(futures::stream::iter);
-
-        Box::pin(stream)
     }
 }

@@ -31,15 +31,15 @@ use uuid::Uuid;
 pub enum AuditError {
     /// Failed to serialize audit event
     #[error("Serialization failed: {0}")]
-    SerializationFailed(#[from] serde_json::Error),
+    Serialization(#[from] serde_json::Error),
 
     /// Failed to write audit file
     #[error("Write failed: {0}")]
-    WriteFailed(#[from] std::io::Error),
+    Write(#[from] std::io::Error),
 
     /// Failed to create audit directory
     #[error("Directory creation failed: {0}")]
-    DirectoryFailed(String),
+    Directory(String),
 }
 
 /// Audit event for phase transitions.
@@ -299,7 +299,7 @@ impl AuditLog {
         // Create audit directory if it doesn't exist
         tokio::fs::create_dir_all(&self.audit_dir)
             .await
-            .map_err(|e| AuditError::DirectoryFailed(e.to_string()))?;
+            .map_err(|e| AuditError::Directory(e.to_string()))?;
 
         // Serialize events to JSON
         let json = serde_json::to_string_pretty(&self.events)?;
