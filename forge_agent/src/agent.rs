@@ -494,15 +494,7 @@ impl Agent {
                 "no ChatProvider configured; use with_chat_provider()".to_string(),
             )
         })?;
-        let config = self
-            .chat_config
-            .as_ref()
-            .ok_or_else(|| {
-                AgentError::ReActFailed(
-                    "no LlmConfig configured; use with_chat_provider()".to_string(),
-                )
-            })?
-            .clone();
+        let config = self.resolve_chat_config()?;
 
         let registry = self.build_tool_registry();
         let system_prompt = self.build_system_prompt_for_query(query).await;
@@ -546,15 +538,7 @@ impl Agent {
                 "no ChatProvider configured; use with_chat_provider()".to_string(),
             )
         })?;
-        let config = self
-            .chat_config
-            .as_ref()
-            .ok_or_else(|| {
-                AgentError::ReActFailed(
-                    "no LlmConfig configured; use with_chat_provider()".to_string(),
-                )
-            })?
-            .clone();
+        let config = self.resolve_chat_config()?;
 
         let registry = self.build_tool_registry();
         let system_prompt = self.build_system_prompt_for_query(&query_str).await;
@@ -594,15 +578,7 @@ impl Agent {
                 "no ChatProvider configured; use with_chat_provider()".to_string(),
             )
         })?;
-        let config = self
-            .chat_config
-            .as_ref()
-            .ok_or_else(|| {
-                AgentError::ReActFailed(
-                    "no LlmConfig configured; use with_chat_provider()".to_string(),
-                )
-            })?
-            .clone();
+        let config = self.resolve_chat_config()?;
 
         let registry = self.build_tool_registry();
         let query = query.into();
@@ -635,6 +611,35 @@ impl Agent {
             tokio::spawn(async move { react.run(&query).await.map_err(|e| format!("{e}")) });
 
         Ok(AgentTask { handle })
+    }
+
+    /// Returns the effective `LlmConfig` for ReAct execution.
+    ///
+    /// Values from `.forge.toml` `[agent]` section (`temperature`,
+    /// `max_tokens`) are applied as defaults — they only fill in fields
+    /// the caller left as `None` in the explicit `LlmConfig` passed to
+    /// `with_chat_provider`. Programmatic configuration always wins.
+    fn resolve_chat_config(&self) -> Result<llm::LlmConfig> {
+        let mut config = self
+            .chat_config
+            .as_ref()
+            .ok_or_else(|| {
+                AgentError::ReActFailed(
+                    "no LlmConfig configured; use with_chat_provider()".to_string(),
+                )
+            })?
+            .clone();
+
+        if let Some(ref agent_config) = self.agent_config {
+            if config.temperature.is_none() && agent_config.temperature.is_some() {
+                config.temperature = agent_config.temperature;
+            }
+            if config.max_tokens.is_none() && agent_config.max_tokens.is_some() {
+                config.max_tokens = agent_config.max_tokens;
+            }
+        }
+
+        Ok(config)
     }
 
     pub(crate) fn build_tool_registry(&self) -> chat::BuiltinToolRegistry {
@@ -798,5 +803,92 @@ impl Agent {
             .execute()
             .await
             .map_err(|e| AgentError::WorkflowFailed(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_agent(
+        chat_config: Option<llm::LlmConfig>,
+        agent_config: Option<AgentConfig>,
+    ) -> Agent {
+        Agent {
+            codebase_path: PathBuf::new(),
+            forge: None,
+            llm: None,
+            chat_provider: None,
+            chat_config,
+            #[cfg(feature = "envoy")]
+            envoy: None,
+            #[cfg(feature = "envoy")]
+            session: None,
+            policies: Vec::new(),
+            hook_config: None,
+            skill_registry: None,
+            verifier: None,
+            retriever: None,
+            retrieval_top_k: 5,
+            max_iterations: 10,
+            step_retries: 2,
+            agent_config,
+            custom_system_prompt: None,
+            event_bus: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_chat_config_applies_agent_defaults() {
+        // AgentConfig sets temperature/max_tokens, LlmConfig leaves them None.
+        // The agent_config values should be applied as defaults.
+        let agent = minimal_agent(
+            Some(llm::LlmConfig::new("test-model")),
+            Some(AgentConfig {
+                temperature: Some(0.5),
+                max_tokens: Some(2048),
+                ..Default::default()
+            }),
+        );
+        let config = agent.resolve_chat_config().unwrap();
+        assert_eq!(config.temperature, Some(0.5));
+        assert_eq!(config.max_tokens, Some(2048));
+    }
+
+    #[test]
+    fn test_resolve_chat_config_explicit_config_wins() {
+        // Both AgentConfig and LlmConfig set temperature/max_tokens.
+        // The explicit LlmConfig values must win.
+        let agent = minimal_agent(
+            Some(llm::LlmConfig {
+                temperature: Some(0.9),
+                max_tokens: Some(8192),
+                ..llm::LlmConfig::new("test-model")
+            }),
+            Some(AgentConfig {
+                temperature: Some(0.5),
+                max_tokens: Some(2048),
+                ..Default::default()
+            }),
+        );
+        let config = agent.resolve_chat_config().unwrap();
+        assert_eq!(config.temperature, Some(0.9));
+        assert_eq!(config.max_tokens, Some(8192));
+    }
+
+    #[test]
+    fn test_resolve_chat_config_no_agent_config_unchanged() {
+        // No AgentConfig — LlmConfig should pass through unmodified.
+        let agent = minimal_agent(Some(llm::LlmConfig::new("test-model")), None);
+        let config = agent.resolve_chat_config().unwrap();
+        assert_eq!(config.temperature, None);
+        assert_eq!(config.max_tokens, None);
+    }
+
+    #[test]
+    fn test_resolve_chat_config_no_chat_config_errors() {
+        // No chat_config at all — should return an error.
+        let agent = minimal_agent(None, None);
+        assert!(agent.resolve_chat_config().is_err());
     }
 }

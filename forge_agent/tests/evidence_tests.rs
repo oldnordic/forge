@@ -274,16 +274,13 @@ async fn test_mock_evidence_recorder() {
         )
         .await;
 
-    assert_eq!(recorder.prompts.lock().unwrap().len(), 1);
-    assert_eq!(recorder.tool_calls.lock().unwrap().len(), 1);
-    assert_eq!(recorder.file_writes.lock().unwrap().len(), 1);
+    assert_eq!(recorder.prompts.lock().len(), 1);
+    assert_eq!(recorder.tool_calls.lock().len(), 1);
+    assert_eq!(recorder.file_writes.lock().len(), 1);
 
+    assert_eq!(recorder.tool_calls.lock()[0].1.tool_name, "magellan_find");
     assert_eq!(
-        recorder.tool_calls.lock().unwrap()[0].1.tool_name,
-        "magellan_find"
-    );
-    assert_eq!(
-        recorder.tool_calls.lock().unwrap()[0].1.tool_category,
+        recorder.tool_calls.lock()[0].1.tool_category,
         ToolCategory::GroundedQuery
     );
 }
@@ -335,9 +332,9 @@ async fn test_forge_session_lifecycle() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let prompts = recorder.prompts.lock().unwrap();
-    let tool_calls = recorder.tool_calls.lock().unwrap();
-    let file_writes = recorder.file_writes.lock().unwrap();
+    let prompts = recorder.prompts.lock();
+    let tool_calls = recorder.tool_calls.lock();
+    let file_writes = recorder.file_writes.lock();
 
     assert!(prompts.len() >= 2, "should have init + recorded prompt");
     assert_eq!(tool_calls.len(), 1);
@@ -381,7 +378,7 @@ async fn test_session_token_accumulation() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let prompts = recorder.prompts.lock().unwrap();
+    let prompts = recorder.prompts.lock();
     let user_prompts: Vec<_> = prompts
         .iter()
         .filter(|(sid, _)| sid.starts_with("session-") || !sid.is_empty())

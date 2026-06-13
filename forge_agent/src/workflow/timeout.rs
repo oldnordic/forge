@@ -503,9 +503,9 @@ mod tests {
         // Execute workflow
         let result = executor.execute().await;
 
-        // In current implementation, tasks complete immediately
-        // This test verifies the structure is in place
-        // TODO: Update when actual task execution is implemented
+        // This is a structural test: verifies the timeout config is wired
+        // through the executor without panicking. Task-level timeout
+        // enforcement is exercised by the serial executor tests.
         assert!(result.is_ok());
     }
 
