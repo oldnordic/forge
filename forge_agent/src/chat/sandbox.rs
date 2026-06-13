@@ -71,10 +71,10 @@ impl Sandbox {
     }
 }
 
-pub type SharedSandbox = Arc<std::sync::Mutex<Option<Sandbox>>>;
+pub type SharedSandbox = Arc<parking_lot::Mutex<Option<Sandbox>>>;
 
 pub fn shared_sandbox(sandbox: Option<Sandbox>) -> SharedSandbox {
-    Arc::new(std::sync::Mutex::new(sandbox))
+    Arc::new(parking_lot::Mutex::new(sandbox))
 }
 
 #[cfg(test)]

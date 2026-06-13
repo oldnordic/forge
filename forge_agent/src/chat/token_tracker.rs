@@ -3,6 +3,7 @@
 //! Subscribes to `AgentEvent::LlmResponseReceived` events on the `EventBus`
 //! and maintains a running total of prompt, completion, and total tokens.
 
+use parking_lot::Mutex;
 use std::sync::Arc;
 
 use crate::chat::events::{AgentEvent, EventBus};
@@ -16,7 +17,7 @@ pub struct TokenUsage {
 }
 
 pub struct TokenTracker {
-    usage: Arc<std::sync::Mutex<TokenUsage>>,
+    usage: Arc<Mutex<TokenUsage>>,
 }
 
 impl std::fmt::Debug for TokenTracker {
@@ -36,7 +37,7 @@ impl Clone for TokenTracker {
 impl TokenTracker {
     pub fn new() -> Self {
         TokenTracker {
-            usage: Arc::new(std::sync::Mutex::new(TokenUsage::default())),
+            usage: Arc::new(Mutex::new(TokenUsage::default())),
         }
     }
 
@@ -44,7 +45,7 @@ impl TokenTracker {
         let usage = Arc::clone(&self.usage);
         bus.subscribe(move |event| {
             if let AgentEvent::LlmResponseReceived { usage: Some(u), .. } = event {
-                let mut guard = usage.lock().expect("invariant: token tracker lock");
+                let mut guard = usage.lock();
                 guard.prompt_tokens += u.prompt_tokens.unwrap_or(0);
                 guard.completion_tokens += u.completion_tokens.unwrap_or(0);
                 guard.total_tokens += u.total_tokens.unwrap_or(0);
@@ -55,24 +56,15 @@ impl TokenTracker {
     }
 
     pub async fn usage(&self) -> TokenUsage {
-        self.usage
-            .lock()
-            .expect("invariant: token tracker lock")
-            .clone()
+        self.usage.lock().clone()
     }
 
     pub async fn total_tokens(&self) -> u64 {
-        self.usage
-            .lock()
-            .expect("invariant: token tracker lock")
-            .total_tokens
+        self.usage.lock().total_tokens
     }
 
     pub async fn llm_calls(&self) -> u64 {
-        self.usage
-            .lock()
-            .expect("invariant: token tracker lock")
-            .llm_calls
+        self.usage.lock().llm_calls
     }
 }
 
