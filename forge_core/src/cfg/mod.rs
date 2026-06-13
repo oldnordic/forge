@@ -3,14 +3,14 @@
 //! This module provides CFG operations via Mirage integration.
 
 mod dominators;
-mod path_builder;
+mod paths;
 mod test_cfg;
 mod types;
 
 pub use dominators::DominatorTree;
-pub use path_builder::PathBuilder;
+pub use paths::{Path, PathBuilder};
 pub use test_cfg::TestCfg;
-pub use types::{Loop, Path};
+pub use types::Loop;
 
 use crate::error::Result;
 use crate::storage::UnifiedGraphStore;

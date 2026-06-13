@@ -2,7 +2,8 @@ use crate::types::BlockId;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::dominators::DominatorTree;
-use super::types::{Loop, Path};
+use super::paths::Path;
+use super::types::Loop;
 
 #[derive(Clone, Debug)]
 pub struct TestCfg {
