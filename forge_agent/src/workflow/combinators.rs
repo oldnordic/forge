@@ -383,17 +383,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_parallel_tasks_sequential_stub() {
+    async fn test_parallel_tasks_both_execute() {
+        // Each task records its ID in a shared log so we can prove both ran.
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let log1 = std::sync::Arc::clone(&log);
         let task1 = Box::new(FunctionTask::new(
             TaskId::new("task1"),
             "Task 1".to_string(),
-            |_ctx| async { Ok(TaskResult::Success) },
+            move |_ctx| {
+                let log = std::sync::Arc::clone(&log1);
+                async move {
+                    log.lock().unwrap().push("task1".to_string());
+                    Ok(TaskResult::Success)
+                }
+            },
         ));
 
+        let log2 = std::sync::Arc::clone(&log);
         let task2 = Box::new(FunctionTask::new(
             TaskId::new("task2"),
             "Task 2".to_string(),
-            |_ctx| async { Ok(TaskResult::Success) },
+            move |_ctx| {
+                let log = std::sync::Arc::clone(&log2);
+                async move {
+                    log.lock().unwrap().push("task2".to_string());
+                    Ok(TaskResult::Success)
+                }
+            },
         ));
 
         let parallel = ParallelTasks::new(vec![task1, task2]);
@@ -401,6 +418,12 @@ mod tests {
 
         let result = parallel.execute(&context).await.unwrap();
         assert_eq!(result, TaskResult::Success);
+
+        // Both tasks must have actually executed — the assertion that was missing.
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 2, "both parallel tasks should have executed");
+        assert!(log.contains(&"task1".to_string()));
+        assert!(log.contains(&"task2".to_string()));
     }
 
     #[tokio::test]

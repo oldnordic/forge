@@ -77,19 +77,44 @@ async fn test_graph_query_with_custom_id() {
 }
 
 #[tokio::test]
-async fn test_shell_command_task_stub() {
-    let config =
-        ShellCommandConfig::new("echo").args(vec!["hello".to_string(), "world".to_string()]);
+async fn test_shell_command_task_executes_command() {
+    // Run a shell command that writes a file — proves execution + args + working_dir.
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config = ShellCommandConfig::new("sh")
+        .args(vec![
+            "-c".to_string(),
+            "printf 'hello world' > marker.txt".to_string(),
+        ])
+        .working_dir(temp_dir.path());
     let task =
         ShellCommandTask::with_config(TaskId::new("shell_task"), "Shell Task".to_string(), config);
 
     assert_eq!(task.id(), TaskId::new("shell_task"));
-    assert_eq!(task.command(), "echo");
-    assert_eq!(task.args(), &["hello", "world"]);
+    assert_eq!(task.command(), "sh");
 
     let context = TaskContext::new("workflow_1", task.id());
     let result = task.execute(&context).await.unwrap();
     assert_eq!(result, TaskResult::Success);
+
+    // The command must have actually run — verify the side effect on disk.
+    let content =
+        std::fs::read_to_string(temp_dir.path().join("marker.txt")).expect("marker file missing");
+    assert_eq!(content, "hello world");
+}
+
+#[tokio::test]
+async fn test_shell_command_task_failure_propagates() {
+    // A command that exits non-zero must produce TaskResult::Failed.
+    let config = ShellCommandConfig::new("sh").args(vec!["-c".to_string(), "exit 42".to_string()]);
+    let task =
+        ShellCommandTask::with_config(TaskId::new("fail_task"), "Fail Task".to_string(), config);
+
+    let context = TaskContext::new("workflow_1", task.id());
+    let result = task.execute(&context).await.unwrap();
+    match result {
+        TaskResult::Failed(msg) => assert!(msg.contains("42"), "error should include exit code"),
+        other => panic!("expected Failed, got {other:?}"),
+    }
 }
 
 #[tokio::test]
