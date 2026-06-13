@@ -2,6 +2,27 @@ use crate::error::{ForgeError, Result};
 use crate::knowledge::types::{self, CfgBlockData, GraphNode};
 use crate::knowledge::KnowledgeGraph;
 
+/// Byte range of a symbol within its source file, used when inserting symbol
+/// nodes into the knowledge graph.
+#[derive(Clone, Debug)]
+pub struct SourceSpan {
+    pub file: String,
+    pub line: usize,
+    pub byte_start: u32,
+    pub byte_end: u32,
+}
+
+impl SourceSpan {
+    pub fn new(file: impl Into<String>, line: usize, byte_start: u32, byte_end: u32) -> Self {
+        Self {
+            file: file.into(),
+            line,
+            byte_start,
+            byte_end,
+        }
+    }
+}
+
 impl KnowledgeGraph {
     pub fn get_node(&self, node_id: i64) -> Result<GraphNode> {
         let entity = self
@@ -40,32 +61,28 @@ impl KnowledgeGraph {
         Ok(results)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn add_symbol(
         &self,
         name: &str,
         symbol_kind: &str,
         qualified_name: &str,
-        file: &str,
-        line: usize,
-        byte_start: u32,
-        byte_end: u32,
+        span: &SourceSpan,
         language: &str,
         parent_id: Option<i64>,
     ) -> Result<i64> {
         let mut data = serde_json::json!({
             "symbol_kind": symbol_kind,
             "qualified_name": qualified_name,
-            "file": file,
-            "line": line,
-            "byte_start": byte_start,
-            "byte_end": byte_end,
+            "file": span.file,
+            "line": span.line,
+            "byte_start": span.byte_start,
+            "byte_end": span.byte_end,
             "language": language,
         });
         if let Some(pid) = parent_id {
             data["parent_id"] = serde_json::json!(pid);
         }
-        self.insert_node(types::node::SYMBOL, name, Some(file), data)
+        self.insert_node(types::node::SYMBOL, name, Some(&span.file), data)
     }
 
     pub fn add_file(&self, path: &str, language: &str, hash: &str) -> Result<i64> {
@@ -171,7 +188,7 @@ impl KnowledgeGraph {
 
 #[cfg(test)]
 mod tests {
-    use crate::knowledge::{open_kg, CfgBlockData};
+    use crate::knowledge::{open_kg, CfgBlockData, SourceSpan};
 
     #[test]
     fn test_add_symbol_node() {
@@ -181,10 +198,7 @@ mod tests {
                 "my_func",
                 "Function",
                 "crate::module::my_func",
-                "src/lib.rs",
-                42,
-                100,
-                200,
+                &SourceSpan::new("src/lib.rs", 42, 100, 200),
                 "Rust",
                 None,
             )
@@ -319,10 +333,24 @@ mod tests {
     #[test]
     fn test_find_nodes_by_kind() {
         let (_temp, kg) = open_kg();
-        kg.add_symbol("func_a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
-            .expect("invariant: fresh graph accepts inserts");
-        kg.add_symbol("func_b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
-            .expect("invariant: fresh graph accepts inserts");
+        kg.add_symbol(
+            "func_a",
+            "Function",
+            "a",
+            &SourceSpan::new("f.rs", 1, 0, 10),
+            "Rust",
+            None,
+        )
+        .expect("invariant: fresh graph accepts inserts");
+        kg.add_symbol(
+            "func_b",
+            "Function",
+            "b",
+            &SourceSpan::new("f.rs", 2, 0, 10),
+            "Rust",
+            None,
+        )
+        .expect("invariant: fresh graph accepts inserts");
         kg.add_file("f.rs", "Rust", "hash")
             .expect("invariant: fresh graph accepts inserts");
 

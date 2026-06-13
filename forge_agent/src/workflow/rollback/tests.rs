@@ -208,8 +208,6 @@ struct MockTaskWithCompensation {
     id: TaskId,
     name: String,
     deps: Vec<TaskId>,
-    #[allow(dead_code)]
-    compensation: Option<CompensationAction>,
 }
 
 impl MockTaskWithCompensation {
@@ -218,20 +216,7 @@ impl MockTaskWithCompensation {
             id: id.into(),
             name: name.to_string(),
             deps: Vec::new(),
-            compensation: None,
         }
-    }
-
-    #[allow(dead_code)]
-    fn with_dep(mut self, dep: impl Into<TaskId>) -> Self {
-        self.deps.push(dep.into());
-        self
-    }
-
-    #[allow(dead_code)]
-    fn with_compensation(mut self, action: CompensationAction) -> Self {
-        self.compensation = Some(action);
-        self
     }
 }
 

@@ -169,16 +169,30 @@ impl KnowledgeGraph {
 
 #[cfg(test)]
 mod tests {
-    use crate::knowledge::{open_kg, Direction};
+    use crate::knowledge::{open_kg, Direction, SourceSpan};
 
     #[test]
     fn test_add_edge() {
         let (_temp, kg) = open_kg();
         let a = kg
-            .add_symbol("func_a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "func_a",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let b = kg
-            .add_symbol("func_b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .add_symbol(
+                "func_b",
+                "Function",
+                "b",
+                &SourceSpan::new("f.rs", 2, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
 
         let edge_id = kg
@@ -191,7 +205,14 @@ mod tests {
     fn test_add_correlation_bidirectional() {
         let (_temp, kg) = open_kg();
         let sym = kg
-            .add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "my_func",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let disc = kg
             .add_discovery("claude1", "Symbol", "my_func", serde_json::json!({}))
@@ -221,19 +242,30 @@ mod tests {
                 "target_func",
                 "Function",
                 "t",
-                "f.rs",
-                1,
-                0,
-                10,
+                &SourceSpan::new("f.rs", 1, 0, 10),
                 "Rust",
                 None,
             )
             .expect("invariant: fresh graph accepts inserts");
         let caller_a = kg
-            .add_symbol("caller_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None)
+            .add_symbol(
+                "caller_a",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 5, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let caller_b = kg
-            .add_symbol("caller_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None)
+            .add_symbol(
+                "caller_b",
+                "Function",
+                "b",
+                &SourceSpan::new("f.rs", 10, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
 
         kg.add_edge(caller_a, target, "calls", serde_json::json!({}))
@@ -251,13 +283,34 @@ mod tests {
     fn test_callees_of() {
         let (_temp, kg) = open_kg();
         let func = kg
-            .add_symbol("func", "Function", "f", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "func",
+                "Function",
+                "f",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let callee_a = kg
-            .add_symbol("callee_a", "Function", "a", "f.rs", 5, 0, 10, "Rust", None)
+            .add_symbol(
+                "callee_a",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 5, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let callee_b = kg
-            .add_symbol("callee_b", "Function", "b", "f.rs", 10, 0, 10, "Rust", None)
+            .add_symbol(
+                "callee_b",
+                "Function",
+                "b",
+                &SourceSpan::new("f.rs", 10, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
 
         kg.add_edge(func, callee_a, "calls", serde_json::json!({}))
@@ -275,7 +328,14 @@ mod tests {
     fn test_correlated_nodes() {
         let (_temp, kg) = open_kg();
         let sym = kg
-            .add_symbol("my_func", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "my_func",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let disc1 = kg
             .add_discovery("agent1", "Symbol", "my_func", serde_json::json!({}))
@@ -303,10 +363,7 @@ mod tests {
                 "process_payment",
                 "Function",
                 "a",
-                "f.rs",
-                1,
-                0,
-                10,
+                &SourceSpan::new("f.rs", 1, 0, 10),
                 "Rust",
                 None,
             )
@@ -328,13 +385,34 @@ mod tests {
     fn test_shortest_path() {
         let (_temp, kg) = open_kg();
         let a = kg
-            .add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "a",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let b = kg
-            .add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .add_symbol(
+                "b",
+                "Function",
+                "b",
+                &SourceSpan::new("f.rs", 2, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let c = kg
-            .add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None)
+            .add_symbol(
+                "c",
+                "Function",
+                "c",
+                &SourceSpan::new("f.rs", 3, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
 
         kg.add_edge(a, b, "calls", serde_json::json!({}))
@@ -355,13 +433,34 @@ mod tests {
     fn test_reachability() {
         let (_temp, kg) = open_kg();
         let a = kg
-            .add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "a",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let b = kg
-            .add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .add_symbol(
+                "b",
+                "Function",
+                "b",
+                &SourceSpan::new("f.rs", 2, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let c = kg
-            .add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None)
+            .add_symbol(
+                "c",
+                "Function",
+                "c",
+                &SourceSpan::new("f.rs", 3, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
 
         kg.add_edge(a, b, "calls", serde_json::json!({}))
@@ -380,13 +479,34 @@ mod tests {
     fn test_k_hop() {
         let (_temp, kg) = open_kg();
         let a = kg
-            .add_symbol("a", "Function", "a", "f.rs", 1, 0, 10, "Rust", None)
+            .add_symbol(
+                "a",
+                "Function",
+                "a",
+                &SourceSpan::new("f.rs", 1, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let b = kg
-            .add_symbol("b", "Function", "b", "f.rs", 2, 0, 10, "Rust", None)
+            .add_symbol(
+                "b",
+                "Function",
+                "b",
+                &SourceSpan::new("f.rs", 2, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
         let c = kg
-            .add_symbol("c", "Function", "c", "f.rs", 3, 0, 10, "Rust", None)
+            .add_symbol(
+                "c",
+                "Function",
+                "c",
+                &SourceSpan::new("f.rs", 3, 0, 10),
+                "Rust",
+                None,
+            )
             .expect("invariant: fresh graph accepts inserts");
 
         kg.add_edge(a, b, "calls", serde_json::json!({}))

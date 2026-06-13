@@ -1,6 +1,6 @@
 use crate::workflow::task::{
-    CompensationAction, CompensationType, ExecutableCompensation, TaskContext, TaskError,
-    TaskResult,
+    CompensateFn, CompensationAction, CompensationType, ExecutableCompensation, TaskContext,
+    TaskError, TaskResult,
 };
 use std::fs;
 use std::path::Path;
@@ -9,8 +9,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ToolCompensation {
     pub description: String,
-    #[allow(clippy::type_complexity)]
-    compensate: Arc<dyn Fn(&TaskContext) -> Result<TaskResult, TaskError> + Send + Sync>,
+    compensate: CompensateFn,
 }
 
 impl ToolCompensation {
