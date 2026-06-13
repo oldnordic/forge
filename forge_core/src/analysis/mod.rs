@@ -13,15 +13,17 @@ use std::time::Instant;
 
 pub mod complexity;
 pub mod dead_code;
+pub mod diff;
+pub mod impact;
 pub mod modules;
-pub mod operations;
 
 pub use complexity::{ComplexityMetrics, RiskLevel};
 pub use dead_code::{DeadCodeAnalyzer, DeadSymbol};
-pub use modules::{ModuleAnalyzer, ModuleDependencyGraph, ModuleInfo};
-pub use operations::{
+pub use diff::{
     DeleteOperation, Diff, EditOperation, ErrorResult, InsertOperation, RenameOperation,
 };
+pub use impact::{CallChain, CrossReferences, ImpactAnalysis, ImpactData, ReferenceChain};
+pub use modules::{ModuleAnalyzer, ModuleDependencyGraph, ModuleInfo};
 
 /// Analysis module for combined operations.
 pub struct AnalysisModule {
@@ -29,47 +31,6 @@ pub struct AnalysisModule {
     search: SearchModule,
     cfg: CfgModule,
     edit: EditModule,
-}
-
-/// Detailed impact analysis result for a symbol.
-#[derive(Debug, Clone)]
-pub struct ImpactData {
-    /// Symbol that was analyzed
-    pub symbol: String,
-    /// Number of references to this symbol
-    pub ref_count: usize,
-    /// Number of call sites (for functions)
-    pub call_count: usize,
-    /// All symbols that reference this one
-    pub referenced_by: Vec<Symbol>,
-    /// All symbols this one references
-    pub references: Vec<Symbol>,
-    /// Total estimated impact score
-    pub impact_score: usize,
-}
-
-/// Chain of references from one symbol to another.
-#[derive(Debug, Clone)]
-pub struct ReferenceChain {
-    /// Starting symbol
-    pub from: String,
-    /// Ending symbol
-    pub to: String,
-    /// Chain of symbols connecting from to to
-    pub chain: Vec<Symbol>,
-    /// Length of the chain
-    pub length: usize,
-}
-
-/// Call chain showing all callers to a function.
-#[derive(Debug, Clone)]
-pub struct CallChain {
-    /// Target function
-    pub target: String,
-    /// All callers (direct and indirect)
-    pub callers: Vec<Symbol>,
-    /// Maximum depth of call chain
-    pub depth: usize,
 }
 
 /// Performance benchmark results.
@@ -98,24 +59,6 @@ pub enum ApplyResult {
     Pending,
     /// Operation failed with reason
     Failed(String),
-}
-
-/// Impact analysis result.
-#[derive(Debug, Clone)]
-pub struct ImpactAnalysis {
-    /// Symbols that would be affected by a change
-    pub affected_symbols: Vec<Symbol>,
-    /// Total number of call sites
-    pub call_sites: usize,
-}
-
-/// Cross-reference information for a symbol.
-#[derive(Debug, Clone)]
-pub struct CrossReferences {
-    /// Symbols that call the target
-    pub callers: Vec<Symbol>,
-    /// Symbols called by the target
-    pub callees: Vec<Symbol>,
 }
 
 /// Module dependency.
