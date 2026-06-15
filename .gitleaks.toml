@@ -1,0 +1,31 @@
+title = "ForgeKit Gitleaks Config"
+
+[extend]
+# Use default gitleaks rules as base
+useDefault = true
+
+[allowlist]
+# Paths to ignore (not secrets, just noise)
+paths = [
+  '''\.forge\.toml$''',
+  '''\.forge\/''',
+  '''\.magellan\/''',
+  '''\.hermes\/''',
+  '''target\/''',
+  '''\.git\/''',
+  '''\.cargo\/''',
+  '''Cargo\.lock$''',
+  '''\.cargo_vcs_info\.json$''',
+]
+
+# Regexes for test/example values to ignore
+regexes = [
+  '''YOUR_''',
+  '''example''',
+  '''placeholder''',
+  '''dummy''',
+  '''test_key''',
+  '''fake_token''',
+  '''localhost''',
+  '''127\.0\.0\.1''',
+]

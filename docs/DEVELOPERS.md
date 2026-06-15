@@ -51,7 +51,7 @@ cargo build --workspace
 cargo build --workspace --all-features
 
 # Build specific crate
-cargo build -p forge_core
+cargo build -p forgekit_core
 ```
 
 ### Testing
@@ -116,7 +116,7 @@ forge/
 │   ├── DEVELOPMENT_WORKFLOW.md  # Workflow
 │   ├── PHILOSOPHY.md       # Design principles
 │   └── ROADMAP.md          # Future plans
-├── forge_core/
+├── forgekit_core/
 │   ├── Cargo.toml
 │   ├── src/
 │   │   ├── lib.rs          # Main SDK
@@ -129,9 +129,9 @@ forge/
 │   │   ├── edit/           # Edit module
 │   │   └── analysis/       # Analysis module
 │   └── tests/              # Integration tests
-├── forge_runtime/
+├── forgekit_runtime/
 │   └── src/lib.rs          # Runtime layer
-└── forge_agent/
+└── forgekit_agent/
     └── src/                # Agent layer
 ```
 
@@ -219,7 +219,7 @@ See [TESTING.md](TESTING.md) for comprehensive testing guide.
 
 ```bash
 RUST_LOG=debug cargo run
-RUST_LOG=forge_core=trace cargo test
+RUST_LOG=forgekit_core=trace cargo test
 ```
 
 ### GDB/LLDB

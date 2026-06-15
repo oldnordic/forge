@@ -8,24 +8,24 @@
 
 | Module | Key Types | File | Status |
 |--------|-----------|------|--------|
-| Workflow DAG | `Workflow`, `TaskNode`, `TaskId` | `forge_agent/src/workflow/dag.rs` | Implemented |
-| Task system | `TaskContext`, `TaskResult`, `Dependency` (Hard/Soft) | `forge_agent/src/workflow/task.rs` | Implemented |
-| Workflow builder | `WorkflowBuilder` (fluent API) | `forge_agent/src/workflow/builder.rs` | Implemented |
-| Executor | `WorkflowExecutor`, `WorkflowResult` | `forge_agent/src/workflow/executor.rs` | Implemented |
-| State machine | `WorkflowState` | `forge_agent/src/workflow/state.rs` | Implemented |
-| Checkpoints | `WorkflowCheckpoint`, `WorkflowCheckpointService` | `forge_agent/src/workflow/checkpoint.rs` | Implemented |
-| Cancellation | `CancellationToken`, `CancellationTokenSource` | `forge_agent/src/workflow/cancellation.rs` | Implemented |
-| Timeouts | `TaskTimeout`, `WorkflowTimeout`, `TimeoutConfig` | `forge_agent/src/workflow/timeout.rs` | Implemented |
-| YAML config | `YamlWorkflow`, `YamlTask`, `YamlTaskParams` | `forge_agent/src/workflow/yaml.rs` | Implemented |
-| Agent loop | `AgentLoop`, `AgentPhase` (6 phases) | `forge_agent/src/loop.rs` | Implemented |
-| Agent phases | Observe → Constrain → Plan → Mutate → Verify → Commit | `forge_agent/src/loop.rs:19-39` | Implemented |
-| Audit trail | `AuditEvent` (20 variants), `AuditLog` | `forge_agent/src/audit.rs` | Implemented |
-| Policy | `PolicyValidator` | `forge_agent/src/policy.rs` | Implemented |
-| Reasoning | `HypothesisBoard`, `Evidence`, `KnowledgeGapAnalyzer` | `forge-reasoning/src/` | Implemented |
-| Dead code | `DeadCodeAnalyzer` | `forge_core/src/analysis/dead_code.rs` | Implemented |
-| Complexity | `ComplexityMetrics`, `RiskLevel` | `forge_core/src/analysis/complexity.rs` | Implemented |
-| CFG | `CfgModule`, `FunctionCfg`, `PathBuilder` | `forge_core/src/cfg/mod.rs` | Implemented |
-| Metrics | `RuntimeMetrics`, `MetricKind`, `MetricsSummary` | `forge_runtime/src/metrics.rs` | Implemented |
+| Workflow DAG | `Workflow`, `TaskNode`, `TaskId` | `forgekit_agent/src/workflow/dag.rs` | Implemented |
+| Task system | `TaskContext`, `TaskResult`, `Dependency` (Hard/Soft) | `forgekit_agent/src/workflow/task.rs` | Implemented |
+| Workflow builder | `WorkflowBuilder` (fluent API) | `forgekit_agent/src/workflow/builder.rs` | Implemented |
+| Executor | `WorkflowExecutor`, `WorkflowResult` | `forgekit_agent/src/workflow/executor.rs` | Implemented |
+| State machine | `WorkflowState` | `forgekit_agent/src/workflow/state.rs` | Implemented |
+| Checkpoints | `WorkflowCheckpoint`, `WorkflowCheckpointService` | `forgekit_agent/src/workflow/checkpoint.rs` | Implemented |
+| Cancellation | `CancellationToken`, `CancellationTokenSource` | `forgekit_agent/src/workflow/cancellation.rs` | Implemented |
+| Timeouts | `TaskTimeout`, `WorkflowTimeout`, `TimeoutConfig` | `forgekit_agent/src/workflow/timeout.rs` | Implemented |
+| YAML config | `YamlWorkflow`, `YamlTask`, `YamlTaskParams` | `forgekit_agent/src/workflow/yaml.rs` | Implemented |
+| Agent loop | `AgentLoop`, `AgentPhase` (6 phases) | `forgekit_agent/src/loop.rs` | Implemented |
+| Agent phases | Observe → Constrain → Plan → Mutate → Verify → Commit | `forgekit_agent/src/loop.rs:19-39` | Implemented |
+| Audit trail | `AuditEvent` (20 variants), `AuditLog` | `forgekit_agent/src/audit.rs` | Implemented |
+| Policy | `PolicyValidator` | `forgekit_agent/src/policy.rs` | Implemented |
+| Reasoning | `HypothesisBoard`, `Evidence`, `KnowledgeGapAnalyzer` | `forgekit-reasoning/src/` | Implemented |
+| Dead code | `DeadCodeAnalyzer` | `forgekit_core/src/analysis/dead_code.rs` | Implemented |
+| Complexity | `ComplexityMetrics`, `RiskLevel` | `forgekit_core/src/analysis/complexity.rs` | Implemented |
+| CFG | `CfgModule`, `FunctionCfg`, `PathBuilder` | `forgekit_core/src/cfg/mod.rs` | Implemented |
+| Metrics | `RuntimeMetrics`, `MetricKind`, `MetricsSummary` | `forgekit_runtime/src/metrics.rs` | Implemented |
 
 **What does NOT exist yet:**
 - Quality gate definitions (no `Gate`, `GateResult`, `SemgrepRule`, `SemgrepFinding`)
@@ -49,7 +49,7 @@ Before any code is written, the plan exists as a subgraph that the user can insp
 modify, and approve. During execution, nodes and edges are added. After delivery,
 the full graph is the proof of what happened and why.
 
-**This schema extends the existing forge_agent types.** The `TaskId`, `Workflow`,
+**This schema extends the existing forgekit_agent types.** The `TaskId`, `Workflow`,
 `AuditEvent`, and `AgentPhase` types already exist — the plan graph adds the layer
 above (requirements, decisions, gates) and below (edits, tool calls, findings).
 

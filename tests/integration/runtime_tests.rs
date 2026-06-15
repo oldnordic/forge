@@ -1,6 +1,6 @@
 //! End-to-end integration tests for runtime layer.
 
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::test]
 async fn test_runtime_watch_and_index() {

@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "forge_core",
-    "forge_runtime",
-    "forge_agent",
-    "forge-reasoning",
+    "forgekit_core",
+    "forgekit_runtime",
+    "forgekit_agent",
+    "forgekit-reasoning",
 ]
 
 [workspace.dependencies]
