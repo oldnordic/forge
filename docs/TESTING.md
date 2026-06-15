@@ -17,7 +17,7 @@ Comprehensive testing documentation for ForgeKit developers.
 
 ```
 forge/
-├── forge_core/
+├── forgekit_core/
 │   ├── src/
 │   │   └── *.rs              # Unit tests in #[cfg(test)] modules
 │   └── tests/
@@ -25,10 +25,10 @@ forge/
 │       ├── builder_tests.rs       # Builder pattern tests
 │       ├── pubsub_integration_tests.rs  # Pub/Sub + backends
 │       └── tool_integration_tests.rs    # Tool integrations
-├── forge_runtime/
+├── forgekit_runtime/
 │   └── src/
 │       └── lib.rs            # Embedded tests
-├── forge_agent/
+├── forgekit_agent/
 │   └── src/
 │       └── *.rs              # Embedded tests
 └── tests/
@@ -44,9 +44,9 @@ forge/
 cargo test --workspace
 
 # Run tests for specific crate
-cargo test -p forge_core
-cargo test -p forge_runtime
-cargo test -p forge-agent
+cargo test -p forgekit_core
+cargo test -p forgekit_runtime
+cargo test -p forgekit-agent
 
 # Run with all features
 cargo test --workspace --all-features
@@ -65,16 +65,16 @@ cargo test -- --nocapture
 
 ```bash
 # Test SQLite backend only
-cargo test -p forge_core --features sqlite
+cargo test -p forgekit_core --features sqlite
 
 # Test Native V3 backend only
-cargo test -p forge_core --features native-v3
+cargo test -p forgekit_core --features native-v3
 
 # Test with all tools on SQLite
-cargo test -p forge_core --features tools-sqlite
+cargo test -p forgekit_core --features tools-sqlite
 
 # Test with all tools on V3
-cargo test -p forge_core --features tools-v3
+cargo test -p forgekit_core --features tools-v3
 
 # Test full stack with V3
 cargo test --features full-v3
@@ -105,7 +105,7 @@ mod tests {
 Located in `tests/` directories:
 
 ```rust
-// forge_core/tests/pubsub_integration_tests.rs
+// forgekit_core/tests/pubsub_integration_tests.rs
 #[tokio::test]
 async fn test_backend_connection_sqlite() {
     let temp = create_test_repo().await;
@@ -142,7 +142,7 @@ pub async fn open(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
 
 ```rust
 // 1. Imports
-use forge_core::{Forge, BackendKind};
+use forgekit_core::{Forge, BackendKind};
 
 // 2. Helper functions
 async fn create_test_repo() -> tempfile::TempDir {
@@ -211,23 +211,23 @@ async fn test_with_temp_dir() {
 
 ```bash
 # Test each tool individually
-cargo test -p forge_core --features magellan-sqlite
-cargo test -p forge_core --features llmgrep-sqlite
-cargo test -p forge_core --features mirage-sqlite
-cargo test -p forge_core --features splice-sqlite
+cargo test -p forgekit_core --features magellan-sqlite
+cargo test -p forgekit_core --features llmgrep-sqlite
+cargo test -p forgekit_core --features mirage-sqlite
+cargo test -p forgekit_core --features splice-sqlite
 
 # Test V3 variants
-cargo test -p forge_core --features magellan-v3
-cargo test -p forge_core --features llmgrep-v3
-cargo test -p forge_core --features mirage-v3
-cargo test -p forge_core --features splice-v3
+cargo test -p forgekit_core --features magellan-v3
+cargo test -p forgekit_core --features llmgrep-v3
+cargo test -p forgekit_core --features mirage-v3
+cargo test -p forgekit_core --features splice-v3
 ```
 
 ### Testing Feature Combinations
 
 ```bash
 # Test mixed backends
-cargo test -p forge_core --features "magellan-v3,llmgrep-sqlite"
+cargo test -p forgekit_core --features "magellan-v3,llmgrep-sqlite"
 
 # Test full stacks
 cargo test --features full-sqlite
@@ -349,16 +349,16 @@ strategy:
 include:
   - backend: sqlite
     features: minimal
-    test_cmd: "cargo test -p forge_core --features sqlite"
+    test_cmd: "cargo test -p forgekit_core --features sqlite"
   - backend: native-v3
     features: minimal
-    test_cmd: "cargo test -p forge_core --features native-v3"
+    test_cmd: "cargo test -p forgekit_core --features native-v3"
   - backend: sqlite
     features: tools
-    test_cmd: "cargo test -p forge_core --features tools-sqlite"
+    test_cmd: "cargo test -p forgekit_core --features tools-sqlite"
   - backend: native-v3
     features: tools
-    test_cmd: "cargo test -p forge_core --features tools-v3"
+    test_cmd: "cargo test -p forgekit_core --features tools-v3"
   - backend: native-v3
     features: full
     test_cmd: "cargo test --features full-v3"
@@ -429,7 +429,7 @@ RUST_LOG=debug cargo test
 rust-gdb --args cargo test test_name -- --exact
 
 # Set breakpoint
-(gdb) break forge_core::storage::UnifiedGraphStore::open
+(gdb) break forgekit_core::storage::UnifiedGraphStore::open
 (gdb) run
 ```
 

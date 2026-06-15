@@ -1,0 +1,52 @@
+[package]
+name = "forgekit-reasoning"
+version = "0.5.0"
+edition = "2021"
+authors = ["Forge Contributors"]
+description = "Reasoning tools for LLM debugging - checkpointing, hypotheses, contradictions"
+license = "GPL-3.0-only"
+repository = "https://github.com/oldnordic/forge"
+documentation = "https://docs.rs/forgekit-reasoning"
+
+[dependencies]
+# Core dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+tokio = { workspace = true }
+tracing = "0.1"
+thiserror = "2.0"
+async-trait = "0.1"
+
+# SQLiteGraph - storage backend
+sqlitegraph = { version = "3.2.5", features = ["sqlite-backend"] }
+
+# Cryptographic hashing for data integrity
+sha2 = "0.10"
+
+# Deterministic ordered collections
+indexmap = "2"
+
+# Random number generation for retry jitter
+rand = "0.8"
+
+# WebSocket support (optional)
+tokio-tungstenite = { version = "0.21", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3.9"
+criterion = { version = "0.5", features = ["async_tokio"] }
+rand = "0.8"
+
+[features]
+default = ["sqlite-backend", "websocket"]
+sqlite-backend = []
+websocket = ["tokio-tungstenite", "futures-util"]
+
+[[bench]]
+name = "checkpoint_bench"
+harness = false

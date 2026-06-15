@@ -83,10 +83,10 @@ sqlite3 .forge/graph.db "PRAGMA table_info(graph_entities);"
 
 ```bash
 # Use Read tool, NOT cat
-Read /home/feanor/Projects/forge/forge_core/src/graph/mod.rs
+Read /home/feanor/Projects/forge/forgekit_core/src/graph/mod.rs
 
 # Get specific line range
-Read /home/feanor/Projects/forge/forge_core/src/graph/mod.rs:100-200
+Read /home/feanor/Projects/forge/forgekit_core/src/graph/mod.rs:100-200
 ```
 
 ### Check Existing Tools
@@ -240,7 +240,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored
 
 ```bash
 $ cargo check
-    Checking forge_core v0.1.0
+    Checking forgekit_core v0.1.0
     Finished `dev` profile
 ```
 
@@ -259,9 +259,9 @@ ForgeKit follows strict file size limits:
 
 | Component | Limit | Rationale |
 |------------|--------|------------|
-| forge_core modules | 300 LOC | Maintainability |
-| forge_runtime modules | 300 LOC | Single responsibility |
-| forge_agent modules | 300 LOC | Focused behavior |
+| forgekit_core modules | 300 LOC | Maintainability |
+| forgekit_runtime modules | 300 LOC | Single responsibility |
+| forgekit_agent modules | 300 LOC | Focused behavior |
 | Tests | 500 LOC | Comprehensive coverage |
 
 **When to exceed:**
@@ -334,13 +334,13 @@ splice --db .forge/graph.db delete --file src/lib.rs --symbol symbol_name
 cargo build
 
 # Build specific member
-cargo build -p forge_core
+cargo build -p forgekit_core
 
 # Run tests
 cargo test
 
 # Run tests for specific member
-cargo test -p forge_core
+cargo test -p forgekit_core
 
 # Check compilation (faster than build)
 cargo check

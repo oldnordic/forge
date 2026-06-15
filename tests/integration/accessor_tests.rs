@@ -1,6 +1,6 @@
 //! Integration tests for module accessors.
 
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 mod common {
     pub use crate::common::*;
