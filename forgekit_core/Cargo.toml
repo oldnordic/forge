@@ -1,0 +1,64 @@
+[package]
+name = "forgekit-core"
+version = "0.5.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/oldnordic/forge"
+readme = "README.md"
+description = "Deterministic code intelligence SDK - Core library"
+
+[lib]
+name = "forgekit_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Core dependencies
+anyhow = "1.0"
+thiserror = "2.0"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tracing = "0.1"
+parking_lot = "0.12"
+blake3 = "1.5"
+regex = "1"
+async-trait = "0.1"
+chrono = "0.4"
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Runtime layer dependencies
+notify = "8"
+
+# Graph database
+sqlitegraph = { version = "3.2.5", features = ["sqlite-backend"], default-features = false, optional = true }
+
+# Tool integrations
+magellan = "4.7"
+llmgrep = "3.8"
+mirage-analyzer = "1.8"
+splice = "2.9"
+which = "6.0"
+
+# Diff engine
+similar = "2"
+
+# Tree-sitter for CFG extraction (always available)
+tree-sitter = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-java = "0.23"
+tree-sitter-rust = "0.24"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "macros"] }
+tempfile = "3"
+
+[features]
+default = ["sqlite"]
+
+# Storage backends
+sqlite = ["dep:sqlitegraph", "sqlitegraph/sqlite-backend"]
+native-v3 = ["dep:sqlitegraph", "sqlitegraph/native-v3"]
+
+# Convenience feature group
+full = ["sqlite"]

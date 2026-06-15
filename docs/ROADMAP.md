@@ -24,9 +24,9 @@ ForgeKit aims to be "LLVM for AI Code Agents" - a deterministic, graph-backed re
 | Workspace structure | ✅ Done | P0 |
 | Core documentation | ✅ Done | P0 |
 | API design | 🚧 In Progress | P0 |
-| forge_core stubs | 📋 Planned | P0 |
-| forge_runtime stubs | 📋 Planned | P1 |
-| forge_agent stubs | 📋 Planned | P2 |
+| forgekit_core stubs | 📋 Planned | P0 |
+| forgekit_runtime stubs | 📋 Planned | P1 |
+| forgekit_agent stubs | 📋 Planned | P2 |
 
 #### Deliverables
 
@@ -37,14 +37,14 @@ ForgeKit aims to be "LLVM for AI Code Agents" - a deterministic, graph-backed re
 - [x] DEVELOPMENT_WORKFLOW.md with process
 - [x] CONTRIBUTING.md with guidelines
 - [ ] Workspace Cargo.toml
-- [ ] Basic forge_core structure
+- [ ] Basic forgekit_core structure
 - [ ] Placeholder modules for graph/search/cfg/edit
 
 ---
 
 ### Milestone 0.2: Core SDK
 
-**Goal**: Working forge_core with Magellan integration
+**Goal**: Working forgekit_core with Magellan integration
 
 #### Status: 📋 Planned
 
@@ -71,7 +71,7 @@ ForgeKit aims to be "LLVM for AI Code Agents" - a deterministic, graph-backed re
 
 ### Milestone 0.3: Runtime Layer
 
-**Goal**: Indexing and caching with forge_runtime
+**Goal**: Indexing and caching with forgekit_runtime
 
 #### Status: 📋 Planned
 
@@ -95,7 +95,7 @@ ForgeKit aims to be "LLVM for AI Code Agents" - a deterministic, graph-backed re
 
 ### Milestone 0.4: Agent Layer
 
-**Goal**: Deterministic AI loop with forge_agent
+**Goal**: Deterministic AI loop with forgekit_agent
 
 #### Status: 📋 Planned
 
