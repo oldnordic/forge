@@ -2,6 +2,10 @@
 
 Complete guide to using ForgeKit for code intelligence operations.
 
+> **Alpha software — work in progress.** This manual documents the current
+> state of ForgeKit, which is functional but not yet stable. APIs may change
+> before v1.0.
+
 ## Table of Contents
 
 1. [Getting Started](#getting-started)
@@ -23,7 +27,7 @@ Add ForgeKit to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-forge-core = "0.4"
+forgekit-core = "0.3"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
@@ -31,7 +35,7 @@ anyhow = "1"
 ### Opening a Codebase
 
 ```rust
-use forge_core::{Forge, BackendKind};
+use forgekit_core::{Forge, BackendKind};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -68,7 +72,7 @@ my-project/
 Detect unused functions in your codebase:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -99,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
 Find what would break if you change a function:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -131,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
 Find all functions that call a specific function:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -157,7 +161,7 @@ async fn main() -> anyhow::Result<()> {
 Calculate cyclomatic complexity of source code:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -201,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
 Search for code patterns using regex:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -217,7 +221,7 @@ async fn main() -> anyhow::Result<()> {
     
     // Find all structs
     let structs = forge.search().symbols_by_kind(
-        forge_core::types::SymbolKind::Struct
+        forgekit_core::types::SymbolKind::Struct
     ).await?;
     println!("Found {} structs", structs.len());
     
@@ -230,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
 Analyze dependencies between modules:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -263,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
 Analyze control flow of functions:
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -299,8 +303,8 @@ async fn main() -> anyhow::Result<()> {
 Use the EditOperation trait for safe, validated code transformations:
 
 ```rust
-use forge_core::Forge;
-use forge_core::analysis::edit_operation::{InsertOperation, DeleteOperation, RenameOperation};
+use forgekit_core::Forge;
+use forgekit_core::analysis::edit_operation::{InsertOperation, DeleteOperation, RenameOperation};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -333,8 +337,8 @@ async fn main() -> anyhow::Result<()> {
 Rename symbol across the codebase:
 
 ```rust
-use forge_core::Forge;
-use forge_core::analysis::edit_operation::RenameOperation;
+use forgekit_core::Forge;
+use forgekit_core::analysis::edit_operation::RenameOperation;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -350,12 +354,12 @@ async fn main() -> anyhow::Result<()> {
     // Verify the rename is safe
     let result = rename.verify(&analysis).await?;
     match result {
-        forge_core::analysis::edit_operation::ApplyResult::Applied => {
+        forgekit_core::analysis::edit_operation::ApplyResult::Applied => {
             // Apply the rename
             rename.apply(&mut analysis).await?;
             println!("Rename successful!");
         }
-        forge_core::analysis::edit_operation::ApplyResult::AlwaysError => {
+        forgekit_core::analysis::edit_operation::ApplyResult::AlwaysError => {
             println!("Cannot rename this symbol");
         }
         _ => {}
@@ -499,8 +503,8 @@ let functions = forge.search()
 For unit testing, you can construct CFGs programmatically:
 
 ```rust
-use forge_core::cfg::TestCfg;
-use forge_core::types::BlockId;
+use forgekit_core::cfg::TestCfg;
+use forgekit_core::types::BlockId;
 
 // Create a simple chain
 let cfg = TestCfg::chain(0, 5);  // 0 -> 1 -> 2 -> 3 -> 4
@@ -519,12 +523,12 @@ let paths = cfg.enumerate_paths();
 
 ## Workflow Orchestration
 
-The `forge_agent::workflow` module provides DAG-based task orchestration with rollback, checkpointing, and audit logging.
+The `forgekit_agent::workflow` module provides DAG-based task orchestration with rollback, checkpointing, and audit logging.
 
 ### Example 9: Basic Workflow
 
 ```rust
-use forge_agent::workflow::{Workflow, WorkflowExecutor, WorkflowTask, TaskContext, TaskResult};
+use forgekit_agent::workflow::{Workflow, WorkflowExecutor, WorkflowTask, TaskContext, TaskResult};
 use async_trait::async_trait;
 
 // Define a task
@@ -557,7 +561,7 @@ println!("Completed {} tasks", result.completed_tasks.len());
 ### Example 10: Workflow with Rollback
 
 ```rust
-use forge_agent::workflow::rollback::RollbackStrategy;
+use forgekit_agent::workflow::rollback::RollbackStrategy;
 
 let executor = WorkflowExecutor::new(workflow)
     .with_rollback_strategy(RollbackStrategy::AllDependent);
@@ -574,7 +578,7 @@ if result.failed_task.is_some() {
 ### Example 11: Checkpointing and Resume
 
 ```rust
-use forge_agent::workflow::checkpoint::WorkflowCheckpointService;
+use forgekit_agent::workflow::checkpoint::WorkflowCheckpointService;
 
 let checkpoint_service = WorkflowCheckpointService::new_default();
 
@@ -595,7 +599,7 @@ if resume_executor.can_resume() {
 ### Example 12: Tool Registry
 
 ```rust
-use forge_agent::workflow::tools::{Tool, ToolRegistry, ToolInvocation};
+use forgekit_agent::workflow::tools::{Tool, ToolRegistry, ToolInvocation};
 
 let mut registry = ToolRegistry::new();
 registry.register(Tool::new("magellan", "/usr/bin/magellan")
@@ -613,7 +617,7 @@ if result.result.success {
 ### Example 13: Cancellation
 
 ```rust
-use forge_agent::workflow::cancellation::CancellationTokenSource;
+use forgekit_agent::workflow::cancellation::CancellationTokenSource;
 
 let cancel_source = CancellationTokenSource::new();
 let executor = WorkflowExecutor::new(workflow)

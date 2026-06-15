@@ -51,10 +51,10 @@ RUST_LOG=debug cargo run
 RUST_LOG=trace cargo run
 
 # Specific crate
-RUST_LOG=forge_core=debug cargo run
+RUST_LOG=forgekit_core=debug cargo run
 
 # Multiple crates
-RUST_LOG=forge_core=debug,forge_runtime=info cargo run
+RUST_LOG=forgekit_core=debug,forgekit_runtime=info cargo run
 ```
 
 ### Tracing Subscriber
@@ -107,7 +107,7 @@ rustup component add rust-gdb
 rust-gdb --args cargo test test_name -- --exact
 
 # In GDB:
-(gdb) break forge_core::Forge::open
+(gdb) break forgekit_core::Forge::open
 (gdb) run
 (gdb) next
 (gdb) print path
@@ -142,7 +142,7 @@ rust-lldb -- cargo test test_name -- --exact
             "cargo": {
                 "args": ["test", "--no-run", "--lib"],
                 "filter": {
-                    "name": "forge_core",
+                    "name": "forgekit_core",
                     "kind": "lib"
                 }
             },
@@ -189,7 +189,7 @@ SELECT COUNT(*) FROM nodes;
 #### Debug Connection Issues
 
 ```rust
-use forge_core::{Forge, BackendKind};
+use forgekit_core::{Forge, BackendKind};
 
 #[tokio::main]
 async fn main() {
@@ -226,7 +226,7 @@ cat .forge/graph.v3 | head -c 6
 #### Enable V3 Debug Logging
 
 ```rust
-use forge_core::{Forge, BackendKind};
+use forgekit_core::{Forge, BackendKind};
 
 let forge = Forge::open_with_backend("./project", BackendKind::NativeV3)
     .await
@@ -521,7 +521,7 @@ fn inspect_v3_file(path: &Path) -> std::io::Result<()> {
    ```
 4. Enable backend tracing:
    ```bash
-   RUST_LOG=forge_core=trace,sqlitegraph=debug cargo run
+   RUST_LOG=forgekit_core=trace,sqlitegraph=debug cargo run
    ```
 
 ### Scenario 5: Feature Flag Issues
@@ -531,15 +531,15 @@ fn inspect_v3_file(path: &Path) -> std::io::Result<()> {
 **Debug Steps:**
 1. Check available features:
    ```bash
-   cargo metadata --format-version 1 | jq '.packages[] | select(.name == "forge_core") | .features'
+   cargo metadata --format-version 1 | jq '.packages[] | select(.name == "forgekit_core") | .features'
    ```
 2. Test minimal features:
    ```bash
-   cargo check -p forge_core --no-default-features --features sqlite
+   cargo check -p forgekit_core --no-default-features --features sqlite
    ```
 3. Build with specific features:
    ```bash
-   cargo build -p forge_core --features "magellan-v3,llmgrep-sqlite"
+   cargo build -p forgekit_core --features "magellan-v3,llmgrep-sqlite"
    ```
 
 ## Debugging Tools

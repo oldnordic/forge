@@ -21,7 +21,7 @@ Common issues and solutions for ForgeKit.
 **Solution:**
 ```toml
 [dependencies]
-forge-core = { version = "0.2", features = ["native-v3"] }
+forgekit-core = { version = "0.2", features = ["native-v3"] }
 ```
 
 Or run tests with the feature:
@@ -81,7 +81,7 @@ xxd .forge/graph.v3 | head -1
 1. **Update sqlitegraph** (most common fix):
    ```toml
    [dependencies]
-   forge-core = "0.2"  # Uses sqlitegraph 2.0.5+
+   forgekit-core = "0.2"  # Uses sqlitegraph 2.0.5+
    ```
 
 2. **Force flush on drop**:
@@ -171,7 +171,7 @@ match Forge::open("./project").await {
 **Solution:**
 ```toml
 [dependencies]
-forge-core = { version = "0.2", features = ["magellan-sqlite"] }
+forgekit-core = { version = "0.2", features = ["magellan-sqlite"] }
 ```
 
 ### Mixed Backend Confusion
@@ -182,20 +182,20 @@ forge-core = { version = "0.2", features = ["magellan-sqlite"] }
 ```toml
 # This won't work as expected:
 [dependencies]
-forge-core = { version = "0.2", features = ["native-v3", "magellan-sqlite"] }
+forgekit-core = { version = "0.2", features = ["native-v3", "magellan-sqlite"] }
 # Magellan will use SQLite, but core uses V3
 ```
 
 **Solution:** Use consistent backends:
 ```toml
 # Option 1: All V3
-forge-core = { version = "0.2", features = ["full-v3"] }
+forgekit-core = { version = "0.2", features = ["full-v3"] }
 
 # Option 2: All SQLite
-forge-core = { version = "0.2", features = ["full-sqlite"] }
+forgekit-core = { version = "0.2", features = ["full-sqlite"] }
 
 # Option 3: Explicit mixed (if you really need it)
-forge-core = { version = "0.2", default-features = false, 
+forgekit-core = { version = "0.2", default-features = false, 
                features = ["sqlite", "magellan-v3", "llmgrep-sqlite"] }
 ```
 
@@ -207,11 +207,11 @@ forge-core = { version = "0.2", default-features = false,
 ```toml
 # Correct way to disable defaults
 [dependencies]
-forge-core = { version = "0.2", default-features = false, 
+forgekit-core = { version = "0.2", default-features = false, 
                features = ["sqlite", "magellan-sqlite"] }
 
 # Wrong - this disables ALL features
-forge-core = { version = "0.2", features = [] }
+forgekit-core = { version = "0.2", features = [] }
 ```
 
 ## Pub/Sub Issues
@@ -378,7 +378,7 @@ println!("Query took: {:?}", start.elapsed());
 **Solution:**
 ```toml
 [dependencies]
-forge-core = { version = "0.2", features = ["magellan-sqlite"] }
+forgekit-core = { version = "0.2", features = ["magellan-sqlite"] }
 ```
 
 Verify installation:
@@ -538,7 +538,7 @@ If none of these solutions work:
 
 3. **Check versions**:
    ```bash
-   cargo tree -p forge-core
+   cargo tree -p forgekit-core
    cargo tree -p sqlitegraph
    ```
 
@@ -580,10 +580,10 @@ rustc --version
 
 # Check features
 cargo metadata --format-version 1 | \
-  jq '.packages[] | select(.name == "forge_core") | .features'
+  jq '.packages[] | select(.name == "forgekit_core") | .features'
 
 # Test basic functionality
-cargo test -p forge_core --test pubsub_integration_tests
+cargo test -p forgekit_core --test pubsub_integration_tests
 ```
 
 ---

@@ -192,8 +192,8 @@ mod tests {
 ### Test Fixtures
 
 Place shared test utilities in:
-- `forge_core/tests/fixtures/` for test data
-- `forge_core/tests/common/mod.rs` for utilities
+- `forgekit_core/tests/fixtures/` for test data
+- `forgekit_core/tests/common/mod.rs` for utilities
 
 ### Running Tests
 
@@ -202,7 +202,7 @@ Place shared test utilities in:
 cargo test --workspace
 
 # Specific member
-cargo test -p forge_core
+cargo test -p forgekit_core
 
 # Specific test
 cargo test test_find_symbol

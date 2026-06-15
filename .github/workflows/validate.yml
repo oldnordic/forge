@@ -12,8 +12,56 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check license is GPL-3.0 only
+        run: |
+          echo "🔍 Checking license..."
+          if grep -rq "GPL-3.0-or-later" Cargo.toml */Cargo.toml 2>/dev/null; then
+            echo "❌ FAIL: License must be GPL-3.0 only, not GPL-3.0-or-later"
+            exit 1
+          fi
+          echo "✅ License is GPL-3.0-only"
+
+      - name: Check public docs for exaggerated claims
+        run: |
+          echo "🔍 Checking public docs for exaggerated claims..."
+          if grep -ri "production-ready" README.md docs/MANUAL.md CHANGELOG.md */README.md 2>/dev/null; then
+            echo "❌ FAIL: ForgeKit is alpha software — no 'production-ready' claims"
+            echo "   Use precise stability language (alpha, work in progress, experimental)"
+            exit 1
+          fi
+          echo "✅ No exaggerated claims in public docs"
+
+      - name: Check alpha status is documented
+        run: |
+          echo "🔍 Checking alpha status is documented..."
+          if ! grep -qi "alpha\|work in progress\|experimental" README.md; then
+            echo "❌ FAIL: README must state alpha/work-in-progress status"
+            exit 1
+          fi
+          echo "✅ Alpha status documented"
+
+      - name: Check for banned code patterns (todo!/unimplemented!/dead-code allow)
+        run: |
+          echo "🔍 Checking for banned code patterns..."
+          # todo!/unimplemented! in production paths (exclude test files where
+          # they may appear as fixture data inside string literals)
+          if rg 'todo!\(|unimplemented!\(' \
+              forgekit_core/src/ forgekit_agent/src/ forgekit_runtime/src/ forgekit-reasoning/src/ \
+              -g '!*test*' -g '!*tests*' 2>/dev/null; then
+            echo "❌ FAIL: todo!/unimplemented! found in source (implement or omit)"
+            exit 1
+          fi
+          # #[allow(dead_code)] — never acceptable
+          if rg '#\[allow\(dead_code\)\]' forgekit_core/src/ forgekit_agent/src/ forgekit_runtime/src/ forgekit-reasoning/src/ 2>/dev/null; then
+            echo "❌ FAIL: #[allow(dead_code)] found — delete the dead code instead"
+            exit 1
+          fi
+          echo "✅ No banned code patterns"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -23,6 +71,9 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
+      - name: cargo check
+        run: cargo check --all-targets --all-features
+
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -30,7 +81,38 @@ jobs:
         run: cargo test --workspace -- --skip "thread_safety" --skip "stress_test" --skip "concurrent_state"
         timeout-minutes: 10
 
-      - name: Semgrep
-        uses: semgrep/semgrep-action@v1
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+      - name: cargo deny
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check
+
+  gitleaks:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          config: .semgrep/rules
+          fetch-depth: 0
+
+      - name: Install and run Gitleaks
+        run: |
+          curl -sL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --verbose --config .gitleaks.toml
+
+  semgrep:
+    name: Semgrep Security Scan
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep OSS scan
+        # Using only custom rules — p/rust community rules produce too many
+        # false positives for CLI tools (args, temp_dir, unsafe in watchers).
+        run: semgrep ci --oss-only --config .semgrep/rules/

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use forge_core::{SymbolId, SymbolKind, Language, Location, Span};
+use forgekit_core::{SymbolId, SymbolKind, Language, Location, Span};
 
 /// Creates a test Forge instance with temporary storage.
 ///
@@ -17,9 +17,9 @@ use forge_core::{SymbolId, SymbolKind, Language, Location, Span};
 ///     // Use forge...
 /// }
 /// ```
-pub async fn test_forge() -> anyhow::Result<(TempDir, forge_core::Forge)> {
+pub async fn test_forge() -> anyhow::Result<(TempDir, forgekit_core::Forge)> {
     let temp = TempDir::new()?;
-    let forge = forge_core::Forge::open(temp.path()).await?;
+    let forge = forgekit_core::Forge::open(temp.path()).await?;
     Ok((temp, forge))
 }
 
@@ -85,8 +85,8 @@ edition = "2021"
 /// - location: from test_location()
 /// - parent_id: None
 /// - metadata: serde_json::Value::Null
-pub fn test_symbol() -> forge_core::Symbol {
-    forge_core::Symbol {
+pub fn test_symbol() -> forgekit_core::Symbol {
+    forgekit_core::Symbol {
         id: SymbolId(1),
         name: "test_function".to_string(),
         fully_qualified_name: "my_crate::test_function".to_string(),

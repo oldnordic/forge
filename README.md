@@ -2,20 +2,27 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
 
+> **Alpha software — work in progress.** All crates are functional but the
+> public APIs are still settling and may see breaking changes before v1.0.
+> The deterministic agent loop is proven end-to-end; the ReAct loop and
+> workflow engine are functional but less battle-tested. See
+> [Known Limitations](#known-limitations) for what is unsafe or unfinished.
+
 ForgeKit provides a unified SDK for code intelligence operations — graph queries, control flow analysis, safe code editing, and LLM-driven agent workflows — integrated through a single `Forge` instance backed by [magellan](https://github.com/oldnordic/magellan) code graphs.
 
 ## Workspace Structure
 
 | Crate | Purpose |
 |-------|---------|
-| `forge_core` | Core SDK: graph, search, CFG, edit, and analysis APIs |
-| `forge_runtime` | File watching, caching, and indexing coordination |
-| `forge_agent` | Agent loop, workflow DAG engine, chat providers, and ReAct agent |
+| `forgekit_core` | Core SDK: graph, search, CFG, edit, and analysis APIs |
+| `forgekit_runtime` | File watching, caching, indexing coordination, metrics |
+| `forgekit_agent` | Agent loop, workflow DAG engine, chat providers, and ReAct agent |
+| `forgekit-reasoning` | Temporal checkpointing for reasoning tools |
 
 ## Quick Start
 
 ```rust
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -44,29 +51,29 @@ async fn main() -> anyhow::Result<()> {
 
 ```toml
 [dependencies]
-forge-core = "0.3"
+forgekit-core = "0.3"
 ```
 
 For the agent layer with LLM support:
 
 ```toml
 [dependencies]
-forge-agent = { version = "0.4", features = ["llm-ollama"] }
+forgekit-agent = { version = "0.5", features = ["llm-ollama"] }
 ```
 
 ### Feature Flags
 
-**`forge_core`:**
+**`forgekit_core`:**
 - `sqlite` (default) — SQLite backend via sqlitegraph
 
-**`forge_agent`:**
+**`forgekit_agent`:**
 - `sqlite` (default) — SQLite backend
 - `llm-ollama` — Ollama chat provider (gates `reqwest`)
 - `llm-openai` — OpenAI chat provider (gates `reqwest`)
 - `llm-anthropic` — Anthropic chat provider (gates `reqwest`)
 - `envoy` — Multi-agent coordination via Envoy
 
-## Core SDK (`forge_core`)
+## Core SDK (`forgekit_core`)
 
 ### Graph Queries
 
@@ -116,14 +123,14 @@ edit.rename_symbol("old_name", "new_name").await?;
 edit.delete_symbol(std::path::Path::new("src/lib.rs"), "unused_fn").await?;
 ```
 
-## Agent Layer (`forge_agent`)
+## Agent Layer (`forgekit_agent`)
 
 ### Fixed Pipeline (6-Phase)
 
 The deterministic agent loop follows Observe → Constrain → Plan → Mutate → Verify → Commit:
 
 ```rust
-use forge_agent::Agent;
+use forgekit_agent::Agent;
 
 let agent = Agent::new("./project").await?;
 let result = agent.run("Add error handling to the parser").await?;
@@ -135,9 +142,9 @@ println!("Transaction: {}", result.transaction_id);
 An autonomous reasoning-and-acting loop where the LLM decides which tools to call:
 
 ```rust
-use forge_agent::Agent;
-use forge_agent::chat::{OllamaChatProvider, ChatProvider};
-use forge_agent::llm::LlmConfig;
+use forgekit_agent::Agent;
+use forgekit_agent::chat::{OllamaChatProvider, ChatProvider};
+use forgekit_agent::llm::LlmConfig;
 
 let provider = std::sync::Arc::new(
     OllamaChatProvider::new("http://localhost:11434".to_string())
@@ -182,7 +189,7 @@ The `graph_query` tool exposes the code graph to the LLM:
 DAG-based task execution with dependency resolution, parallel execution, checkpointing, compensation-based rollback, cancellation, and timeouts:
 
 ```rust
-use forge_agent::workflow::{Workflow, WorkflowExecutor};
+use forgekit_agent::workflow::{Workflow, WorkflowExecutor};
 
 let workflow = Workflow::new()
     .add_task(graph_query_task)
@@ -200,10 +207,10 @@ When the `envoy` feature is enabled, agents can register with an Envoy service f
 
 | Tool | Purpose | Used By |
 |------|---------|---------|
-| [magellan](https://github.com/oldnordic/magellan) | Code indexing, symbol extraction, call graph | `forge_core` graph/search modules |
-| [llmgrep](https://github.com/oldnordic/llmgrep) | Semantic and structural code search | `forge_core` search module |
-| [mirage-analyzer](https://crates.io/crates/mirage-analyzer) | CFG construction, dominance, loops, hotspots | `forge_core` CFG module |
-| [splice](https://github.com/oldnordic/splice) | Span-safe refactoring, rename, delete | `forge_core` edit module |
+| [magellan](https://github.com/oldnordic/magellan) | Code indexing, symbol extraction, call graph | `forgekit_core` graph/search modules |
+| [llmgrep](https://github.com/oldnordic/llmgrep) | Semantic and structural code search | `forgekit_core` search module |
+| [mirage-analyzer](https://crates.io/crates/mirage-analyzer) | CFG construction, dominance, loops, hotspots | `forgekit_core` CFG module |
+| [splice](https://github.com/oldnordic/splice) | Span-safe refactoring, rename, delete | `forgekit_core` edit module |
 | [sqlitegraph](https://crates.io/crates/sqlitegraph) | Typed graph storage over SQLite | Storage backend |
 
 ## Known Limitations
@@ -211,6 +218,20 @@ When the `envoy` feature is enabled, agents can register with an Envoy service f
 - **ShellExecTool is unsandboxed** — Executes arbitrary `sh -c` with full process privileges. No allowlist, no capability restriction.
 - **LlmProviderAdapter cannot support tool calling** — The legacy `LlmProvider` trait accepts only a flat prompt string. Use a native `ChatProvider` for agent workflows.
 - **Graph queries require a populated database** — If no magellan database exists or the codebase hasn't been indexed, graph methods return empty results. `Forge::open()` auto-indexes on first use when the graph is empty.
+
+### What works
+
+- **Deterministic 6-phase agent loop** — observe → constrain → plan → mutate → verify → commit, proven end-to-end on real crates (symbol rename, dead-code removal). Verify gates on `cargo check` + `cargo test`.
+- **Core SDK** — graph queries, search, CFG analysis, safe editing, impact analysis.
+- **Chat providers** — Ollama, OpenAI, Anthropic with tool-calling and streaming.
+- **forgekit-reasoning** — temporal checkpointing with SHA-256 integrity.
+
+### What is experimental / unfinished
+
+- **ReAct agent** — functional but less battle-tested than the deterministic loop.
+- **Workflow engine** — DAG execution and rollback work, but edge cases in compensation/cancellation are still being exercised.
+- **Envoy/Atheneum integration** — optional feature, not enabled by default.
+- **Native V3 backend** — present but less stable than the SQLite backend.
 
 ## Documentation
 
