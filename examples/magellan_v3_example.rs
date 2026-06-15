@@ -2,7 +2,7 @@
 //!
 //! This demonstrates the native V3 backend integration for code intelligence.
 
-use forge_core::Forge;
+use forgekit_core::Forge;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use forge_core::{Forge, types::*};
+    use forgekit_core::{Forge, types::*};
     
     #[tokio::test]
     async fn test_v3_backend_large_symbol() {

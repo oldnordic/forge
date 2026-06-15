@@ -623,9 +623,9 @@ pub fn backend_kind(&self) -> BackendKind
 pub fn is_connected(&self) -> bool
 ```
 
-## Workflow Module (forge_agent)
+## Workflow Module (forgekit_agent)
 
-The workflow module provides DAG-based task orchestration with rollback, checkpointing, and audit logging. Available via `forge_agent::workflow`.
+The workflow module provides DAG-based task orchestration with rollback, checkpointing, and audit logging. Available via `forgekit_agent::workflow`.
 
 ### Core Types
 
@@ -859,7 +859,7 @@ pub enum ForgeError {
 ### Example Error Handling
 
 ```rust
-use forge_core::{Forge, ForgeError};
+use forgekit_core::{Forge, ForgeError};
 
 match forge.graph().find_symbol("main").await {
     Ok(symbols) => println!("Found {} symbols", symbols.len()),

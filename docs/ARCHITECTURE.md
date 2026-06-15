@@ -30,7 +30,7 @@ ForgeKit is a code intelligence SDK that unifies multiple tools (magellan, llmgr
 ┌─────────────────────────────────────────────────────────────┐
 │                         ForgeKit                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   forge_core │  │forge_runtime│  │    forge_agent      │  │
+│  │   forgekit_core │  │forgekit_runtime│  │    forgekit_agent      │  │
 │  │  (Core SDK)  │  │(Indexing)   │  │   (AI Agent Loop)   │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
 └─────────┼────────────────┼────────────────────┼─────────────┘
@@ -64,12 +64,12 @@ ForgeKit is a code intelligence SDK that unifies multiple tools (magellan, llmgr
 
 ## Crate Organization
 
-### forge_core
+### forgekit_core
 
 Core SDK providing the main API.
 
 ```
-forge_core/src/
+forgekit_core/src/
 ├── lib.rs           # Main Forge type, re-exports
 ├── types.rs         # Core types (Symbol, Location, etc.)
 ├── error.rs         # Error types
@@ -87,21 +87,21 @@ forge_core/src/
     └── mod.rs       # AnalysisModule
 ```
 
-### forge_runtime
+### forgekit_runtime
 
 Runtime layer for indexing and caching.
 
 ```
-forge_runtime/src/
+forgekit_runtime/src/
 └── lib.rs           # ForgeRuntime, indexing, caching
 ```
 
-### forge_agent
+### forgekit_agent
 
 AI agent layer for deterministic code operations.
 
 ```
-forge_agent/src/
+forgekit_agent/src/
 ├── lib.rs           # Agent types
 ├── planner.rs       # Plan generation
 ├── mutate.rs        # Mutation operations
@@ -349,7 +349,7 @@ Dependencies are resolved as:
 ### Test Organization
 
 ```
-forge_core/tests/
+forgekit_core/tests/
 ├── accessor_tests.rs          # Module accessors
 ├── builder_tests.rs           # Builder pattern
 ├── pubsub_integration_tests.rs # Pub/Sub + backends

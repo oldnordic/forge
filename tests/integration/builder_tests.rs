@@ -1,6 +1,6 @@
 //! Integration tests for ForgeBuilder pattern.
 
-use forge_core::Forge;
+use forgekit_core::Forge;
 use std::path::PathBuf;
 
 #[tokio::test]
